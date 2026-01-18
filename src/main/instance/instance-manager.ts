@@ -26,6 +26,8 @@ import type {
 } from '../../shared/types/ipc.types';
 import { generateId } from '../../shared/utils/id-generator';
 import { LIMITS } from '../../shared/constants/limits';
+import { getAgentById, getDefaultAgent } from '../../shared/types/agent.types';
+import { getDisallowedTools } from '../../shared/utils/permission-mapper';
 
 export class InstanceManager extends EventEmitter {
   private instances: Map<string, Instance> = new Map();
@@ -288,6 +290,10 @@ export class InstanceManager extends EventEmitter {
   async createInstance(config: InstanceCreateConfig): Promise<Instance> {
     console.log('InstanceManager: Creating instance with config:', config);
 
+    // Resolve agent profile
+    const agent = config.agentId ? getAgentById(config.agentId) : getDefaultAgent();
+    const resolvedAgent = agent || getDefaultAgent();
+
     // Create instance object
     const instance: Instance = {
       id: generateId(),
@@ -297,6 +303,9 @@ export class InstanceManager extends EventEmitter {
       parentId: config.parentId || null,
       childrenIds: [],
       supervisorNodeId: '',
+
+      agentId: resolvedAgent.id,
+      agentMode: resolvedAgent.mode,
 
       status: 'initializing',
       contextUsage: { used: 0, total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS, percentage: 0 },
@@ -330,12 +339,17 @@ export class InstanceManager extends EventEmitter {
       }
     }
 
-    // Create CLI adapter
+    // Get disallowed tools based on agent permissions
+    const disallowedTools = getDisallowedTools(resolvedAgent.permissions);
+
+    // Create CLI adapter with agent's system prompt and tool restrictions
     const adapter = new ClaudeCliAdapter({
       workingDirectory: config.workingDirectory,
       sessionId: instance.sessionId,
       resume: config.resume,  // Resume previous session if restoring from history
       yoloMode: instance.yoloMode,
+      systemPrompt: resolvedAgent.systemPrompt,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
     });
 
     // Set up adapter events

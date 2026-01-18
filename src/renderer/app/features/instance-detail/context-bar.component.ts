@@ -27,6 +27,9 @@ import { ContextUsage } from '../../core/state/instance.store';
           <span class="separator">/</span>
           <span class="total">{{ usage().total | number:'1.0-0' }}</span>
           <span class="percentage">({{ percentage() | number:'1.0-0' }}%)</span>
+          @if (costEstimate()) {
+            <span class="cost">~\${{ costEstimate() | number:'1.2-2' }}</span>
+          }
         </div>
       } @else {
         <span class="compact-label">{{ percentage() | number:'1.0-0' }}%</span>
@@ -96,6 +99,12 @@ import { ContextUsage } from '../../core/state/instance.store';
       margin-left: var(--spacing-xs);
     }
 
+    .cost {
+      color: var(--warning-color);
+      margin-left: var(--spacing-sm);
+      font-weight: 500;
+    }
+
     .compact-label {
       font-size: 11px;
       color: var(--text-muted);
@@ -114,5 +123,10 @@ export class ContextBarComponent {
   percentage = computed(() => {
     const u = this.usage();
     return u.total > 0 ? (u.used / u.total) * 100 : 0;
+  });
+
+  costEstimate = computed(() => {
+    const cost = this.usage().costEstimate;
+    return cost !== undefined && cost > 0 ? cost : null;
   });
 }

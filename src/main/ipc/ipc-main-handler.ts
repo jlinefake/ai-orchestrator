@@ -21,10 +21,14 @@ import type {
   HistoryLoadPayload,
   HistoryDeletePayload,
   HistoryRestorePayload,
+  ProviderStatusPayload,
+  ProviderUpdateConfigPayload,
   IpcResponse,
 } from '../../shared/types/ipc.types';
 import type { AppSettings } from '../../shared/types/settings.types';
+import type { ProviderType } from '../../shared/types/provider.types';
 import { getHistoryManager } from '../history';
+import { getProviderRegistry } from '../providers';
 
 export class IpcMainHandler {
   private instanceManager: InstanceManager;
@@ -54,6 +58,9 @@ export class IpcMainHandler {
     // History handlers
     this.registerHistoryHandlers();
 
+    // Provider handlers
+    this.registerProviderHandlers();
+
     // Set up memory event forwarding to renderer
     this.setupMemoryEventForwarding();
 
@@ -77,6 +84,7 @@ export class IpcMainHandler {
             initialPrompt: payload.initialPrompt,
             attachments: payload.attachments,
             yoloMode: payload.yoloMode,
+            agentId: payload.agentId,
           });
 
           return {
@@ -722,6 +730,110 @@ export class IpcMainHandler {
             success: false,
             error: {
               code: 'HISTORY_CLEAR_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+  }
+
+  /**
+   * Register provider-related handlers
+   */
+  private registerProviderHandlers(): void {
+    const registry = getProviderRegistry();
+
+    // List all provider configurations
+    ipcMain.handle(
+      IPC_CHANNELS.PROVIDER_LIST,
+      async (): Promise<IpcResponse> => {
+        try {
+          const configs = registry.getAllConfigs();
+          return {
+            success: true,
+            data: configs,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'PROVIDER_LIST_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+
+    // Get status of a specific provider
+    ipcMain.handle(
+      IPC_CHANNELS.PROVIDER_STATUS,
+      async (event: IpcMainInvokeEvent, payload: ProviderStatusPayload): Promise<IpcResponse> => {
+        try {
+          const status = await registry.checkProviderStatus(
+            payload.providerType as ProviderType,
+            payload.forceRefresh
+          );
+          return {
+            success: true,
+            data: status,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'PROVIDER_STATUS_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+
+    // Get status of all providers
+    ipcMain.handle(
+      IPC_CHANNELS.PROVIDER_STATUS_ALL,
+      async (): Promise<IpcResponse> => {
+        try {
+          const statuses = await registry.checkAllProviderStatus();
+          // Convert Map to object for IPC
+          const statusObj: Record<string, unknown> = {};
+          for (const [type, status] of statuses) {
+            statusObj[type] = status;
+          }
+          return {
+            success: true,
+            data: statusObj,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'PROVIDER_STATUS_ALL_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+
+    // Update provider configuration
+    ipcMain.handle(
+      IPC_CHANNELS.PROVIDER_UPDATE_CONFIG,
+      async (event: IpcMainInvokeEvent, payload: ProviderUpdateConfigPayload): Promise<IpcResponse> => {
+        try {
+          registry.updateConfig(payload.providerType as ProviderType, payload.config);
+          return { success: true };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'PROVIDER_UPDATE_CONFIG_FAILED',
               message: (error as Error).message,
               timestamp: Date.now(),
             },

@@ -8,6 +8,7 @@ import { UpdateBatcherService, StateUpdate } from '../services/update-batcher.se
 import { ActivityDebouncerService } from '../services/activity-debouncer.service';
 import { generateActivityStatus } from '../utils/tool-activity-map';
 import { LIMITS } from '../../../../shared/constants/limits';
+import type { AgentMode } from '../../../../shared/types/agent.types';
 
 // Types
 export type InstanceStatus =
@@ -22,6 +23,7 @@ export interface ContextUsage {
   used: number;
   total: number;
   percentage: number;
+  costEstimate?: number;  // Estimated cost in dollars
 }
 
 export interface OutputMessage {
@@ -38,6 +40,8 @@ export interface Instance {
   createdAt: number;
   parentId: string | null;
   childrenIds: string[];
+  agentId: string;           // Agent profile ID ('build', 'plan', 'review', etc.)
+  agentMode: AgentMode;      // Agent mode type
   status: InstanceStatus;
   contextUsage: ContextUsage;
   lastActivity: number;
@@ -122,14 +126,17 @@ export class InstanceStore implements OnDestroy {
   readonly totalContextUsage = computed(() => {
     let used = 0;
     let total = 0;
+    let costEstimate = 0;
     for (const instance of this.instances()) {
       used += instance.contextUsage.used;
       total += instance.contextUsage.total;
+      costEstimate += instance.contextUsage.costEstimate || 0;
     }
     return {
       used,
       total,
       percentage: total > 0 ? (used / total) * 100 : 0,
+      costEstimate: costEstimate > 0 ? costEstimate : undefined,
     };
   });
 
@@ -445,6 +452,7 @@ export class InstanceStore implements OnDestroy {
     displayName?: string;
     parentId?: string;
     yoloMode?: boolean;
+    agentId?: string;
   }): Promise<void> {
     console.log('InstanceStore: createInstance called with:', config);
     this.state.update((s) => ({ ...s, loading: true }));
@@ -455,6 +463,7 @@ export class InstanceStore implements OnDestroy {
         displayName: config.displayName,
         parentInstanceId: config.parentId,
         yoloMode: config.yoloMode,
+        agentId: config.agentId,
       });
       console.log('InstanceStore: createInstance result:', result);
     } catch (error) {
@@ -604,6 +613,8 @@ export class InstanceStore implements OnDestroy {
       createdAt: data.createdAt,
       parentId: data.parentId,
       childrenIds: data.childrenIds || [],
+      agentId: data.agentId || 'build',
+      agentMode: data.agentMode || 'build',
       status: data.status,
       contextUsage: data.contextUsage || { used: 0, total: 200000, percentage: 0 },
       lastActivity: data.lastActivity,

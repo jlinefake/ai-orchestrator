@@ -20,6 +20,7 @@ import type {
 } from '../../shared/types/cli.types';
 import type { OutputMessage, ContextUsage, InstanceStatus } from '../../shared/types/instance.types';
 import { generateId } from '../../shared/utils/id-generator';
+import { MODEL_PRICING } from '../../shared/types/provider.types';
 
 export interface CliAdapterEvents {
   'output': (message: OutputMessage) => void;
@@ -332,10 +333,25 @@ export class ClaudeCliAdapter extends EventEmitter {
 
       case 'system':
         if (message.subtype === 'context_usage' && message.usage) {
+          // Calculate cost estimate based on model pricing
+          // Claude defaults to sonnet if model not specified
+          const modelId = this.options.model || 'claude-sonnet-4-20250514';
+          const pricing = MODEL_PRICING[modelId] || { input: 3.0, output: 15.0 };
+
+          // Estimate input/output split (70/30 is typical for conversation)
+          const totalTokens = message.usage.total_tokens;
+          const estimatedInputTokens = Math.floor(totalTokens * 0.7);
+          const estimatedOutputTokens = totalTokens - estimatedInputTokens;
+
+          const inputCost = (estimatedInputTokens / 1_000_000) * pricing.input;
+          const outputCost = (estimatedOutputTokens / 1_000_000) * pricing.output;
+          const costEstimate = inputCost + outputCost;
+
           this.emit('context', {
             used: message.usage.total_tokens,
             total: message.usage.max_tokens,
             percentage: message.usage.percentage,
+            costEstimate,
           });
         }
         if (message.session_id) {

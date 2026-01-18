@@ -12,6 +12,7 @@ import {
 import { Instance, InstanceStatus } from '../../core/state/instance.store';
 import { StatusIndicatorComponent } from './status-indicator.component';
 import { ContextBarComponent } from '../instance-detail/context-bar.component';
+import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.types';
 
 @Component({
   selector: 'app-instance-row',
@@ -28,7 +29,12 @@ import { ContextBarComponent } from '../instance-detail/context-bar.component';
       <app-status-indicator [status]="instance().status" />
 
       <div class="instance-info">
-        <div class="instance-name">{{ instance().displayName }}</div>
+        <div class="instance-name-row">
+          <span class="agent-badge" [style.background-color]="agent().color" [title]="agent().description">
+            {{ agent().name.charAt(0) }}
+          </span>
+          <span class="instance-name">{{ instance().displayName }}</span>
+        </div>
         <div class="instance-meta">
           <span class="session-id mono">{{ instance().sessionId.slice(0, 8) }}...</span>
           @if (instance().parentId) {
@@ -105,6 +111,25 @@ import { ContextBarComponent } from '../instance-detail/context-bar.component';
     .instance-info {
       flex: 1;
       min-width: 0;
+    }
+
+    .instance-name-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .agent-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      color: white;
+      flex-shrink: 0;
     }
 
     .instance-name {
@@ -189,6 +214,12 @@ export class InstanceRowComponent {
   select = output<string>();
   terminate = output<string>();
   restart = output<string>();
+
+  // Computed agent profile from instance's agentId
+  agent = computed(() => {
+    const agentId = this.instance().agentId;
+    return agentId ? getAgentById(agentId) || getDefaultAgent() : getDefaultAgent();
+  });
 
   onTerminate(event: Event): void {
     event.stopPropagation();

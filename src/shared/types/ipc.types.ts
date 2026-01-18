@@ -70,6 +70,12 @@ export const IPC_CHANNELS = {
   HISTORY_DELETE: 'history:delete',
   HISTORY_RESTORE: 'history:restore',
   HISTORY_CLEAR: 'history:clear',
+
+  // Provider operations
+  PROVIDER_LIST: 'provider:list',
+  PROVIDER_STATUS: 'provider:status',
+  PROVIDER_STATUS_ALL: 'provider:status-all',
+  PROVIDER_UPDATE_CONFIG: 'provider:update-config',
 } as const;
 
 export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
@@ -97,6 +103,7 @@ export interface InstanceCreatePayload {
   initialPrompt?: string;
   attachments?: FileAttachment[];
   yoloMode?: boolean;
+  agentId?: string;  // Agent profile ID (defaults to 'build')
 }
 
 export interface InstanceStateUpdatePayload {
@@ -295,4 +302,18 @@ export interface IpcResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: ErrorInfo;
+}
+
+// ============================================
+// Provider Payloads
+// ============================================
+
+export interface ProviderStatusPayload {
+  providerType: string;
+  forceRefresh?: boolean;
+}
+
+export interface ProviderUpdateConfigPayload {
+  providerType: string;
+  config: Record<string, unknown>;
 }

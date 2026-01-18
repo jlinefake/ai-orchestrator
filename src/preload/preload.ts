@@ -59,6 +59,12 @@ const IPC_CHANNELS = {
   HISTORY_DELETE: 'history:delete',
   HISTORY_RESTORE: 'history:restore',
   HISTORY_CLEAR: 'history:clear',
+
+  // Provider operations
+  PROVIDER_LIST: 'provider:list',
+  PROVIDER_STATUS: 'provider:status',
+  PROVIDER_STATUS_ALL: 'provider:status-all',
+  PROVIDER_UPDATE_CONFIG: 'provider:update-config',
 } as const;
 
 // Response type
@@ -91,6 +97,7 @@ const electronAPI = {
     initialPrompt?: string;
     attachments?: unknown[];
     yoloMode?: boolean;
+    agentId?: string;
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_CREATE, payload);
   },
@@ -387,6 +394,38 @@ const electronAPI = {
    */
   clearHistory: (): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_CLEAR);
+  },
+
+  // ============================================
+  // Providers
+  // ============================================
+
+  /**
+   * List all provider configurations
+   */
+  listProviders: (): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_LIST);
+  },
+
+  /**
+   * Get status of a specific provider
+   */
+  getProviderStatus: (providerType: string, forceRefresh?: boolean): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_STATUS, { providerType, forceRefresh });
+  },
+
+  /**
+   * Get status of all providers
+   */
+  getAllProviderStatus: (): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_STATUS_ALL);
+  },
+
+  /**
+   * Update provider configuration
+   */
+  updateProviderConfig: (providerType: string, config: Record<string, unknown>): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_UPDATE_CONFIG, { providerType, config });
   },
 
   // ============================================

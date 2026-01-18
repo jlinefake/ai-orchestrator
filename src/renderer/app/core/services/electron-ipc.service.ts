@@ -53,6 +53,7 @@ export class ElectronIpcService {
     parentInstanceId?: string;
     initialPrompt?: string;
     yoloMode?: boolean;
+    agentId?: string;
   }) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.createInstance(config);
@@ -266,5 +267,41 @@ export class ElectronIpcService {
   async clearHistory() {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.clearHistory();
+  }
+
+  // ============================================
+  // Providers
+  // ============================================
+
+  /**
+   * List all provider configurations
+   */
+  async listProviders() {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.listProviders();
+  }
+
+  /**
+   * Get status of a specific provider
+   */
+  async getProviderStatus(providerType: string, forceRefresh?: boolean) {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.getProviderStatus(providerType, forceRefresh);
+  }
+
+  /**
+   * Get status of all providers
+   */
+  async getAllProviderStatus() {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.getAllProviderStatus();
+  }
+
+  /**
+   * Update provider configuration
+   */
+  async updateProviderConfig(providerType: string, config: Record<string, unknown>) {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.updateProviderConfig(providerType, config);
   }
 }

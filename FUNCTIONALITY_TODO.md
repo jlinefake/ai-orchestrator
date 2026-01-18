@@ -535,11 +535,11 @@ This document identifies features from OpenCode that should be adapted for Claud
 5. ✅ Parallel Task Visualization (9.5) - `child-instances-panel.component.ts`
 6. ✅ Conversation History Sidebar - `history-sidebar.component.ts`, `history-manager.ts` (bonus feature)
 
-### Phase 1 (Foundation)
-6. Multi-Provider Support (5.1) - P0
-7. Agent Profiles/Modes (2.1) - P0
-8. Granular File Permissions (3.1) - P0
-9. Usage Tracking & Cost Display (1.5) - P1
+### Phase 1 (Foundation) ✅ COMPLETE
+6. ✅ Multi-Provider Support (5.1) - P0 - `provider.types.ts` with model pricing
+7. ✅ Agent Profiles/Modes (2.1) - P0 - `agent.types.ts`, `agent.store.ts`, `agent-selector.component.ts`
+8. ✅ Granular File Permissions (3.1) - P0 - `permission-mapper.ts` with tool categories and file rules
+9. ✅ Usage Tracking & Cost Display (1.5) - P1 - Cost calculation in `claude-cli-adapter.ts`, display in `context-bar.component.ts`
 
 ### Phase 2 (Core Features)
 10. Session Forking (1.1) - P1

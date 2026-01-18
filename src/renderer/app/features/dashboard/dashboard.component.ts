@@ -7,16 +7,18 @@ import { DecimalPipe } from '@angular/common';
 import { InstanceStore } from '../../core/state/instance.store';
 import { CliStore } from '../../core/state/cli.store';
 import { SettingsStore } from '../../core/state/settings.store';
+import { AgentStore } from '../../core/state/agent.store';
 import { InstanceListComponent } from '../instance-list/instance-list.component';
 import { InstanceDetailComponent } from '../instance-detail/instance-detail.component';
 import { CliErrorComponent } from '../cli-error/cli-error.component';
 import { SettingsComponent } from '../settings/settings.component';
 import { HistorySidebarComponent } from '../history/history-sidebar.component';
+import { AgentSelectorComponent } from '../agents/agent-selector.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DecimalPipe, InstanceListComponent, InstanceDetailComponent, CliErrorComponent, SettingsComponent, HistorySidebarComponent],
+  imports: [DecimalPipe, InstanceListComponent, InstanceDetailComponent, CliErrorComponent, SettingsComponent, HistorySidebarComponent, AgentSelectorComponent],
   template: `
     @if (cliStore.loading()) {
       <div class="loading-container">
@@ -47,10 +49,13 @@ import { HistorySidebarComponent } from '../history/history-sidebar.component';
               </button>
             </div>
           </div>
-          <button class="btn-create" (click)="createInstance()">
-            <span class="btn-icon">+</span>
-            New Instance
-          </button>
+          <div class="create-section">
+            <app-agent-selector />
+            <button class="btn-create" (click)="createInstance()">
+              <span class="btn-icon">+</span>
+              New Instance
+            </button>
+          </div>
         </div>
 
         <app-instance-list />
@@ -63,6 +68,11 @@ import { HistorySidebarComponent } from '../history/history-sidebar.component';
             @if (store.totalContextUsage().total > 0) {
               <span class="stat">
                 {{ (store.totalContextUsage().percentage | number:'1.0-0') }}% context
+              </span>
+            }
+            @if (store.totalContextUsage().costEstimate) {
+              <span class="stat cost-stat">
+                ~\${{ store.totalContextUsage().costEstimate | number:'1.2-2' }}
               </span>
             }
           </div>
@@ -188,8 +198,14 @@ import { HistorySidebarComponent } from '../history/history-sidebar.component';
       }
     }
 
+    .create-section {
+      display: flex;
+      gap: var(--spacing-sm);
+      align-items: stretch;
+    }
+
     .btn-create {
-      width: 100%;
+      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -228,6 +244,11 @@ import { HistorySidebarComponent } from '../history/history-sidebar.component';
       color: var(--text-secondary);
     }
 
+    .cost-stat {
+      color: var(--warning-color);
+      font-weight: 500;
+    }
+
     .btn-close-all {
       width: 100%;
       padding: var(--spacing-xs) var(--spacing-sm);
@@ -259,6 +280,7 @@ export class DashboardComponent implements OnInit {
   store = inject(InstanceStore);
   cliStore = inject(CliStore);
   settingsStore = inject(SettingsStore);
+  agentStore = inject(AgentStore);
 
   showSettings = signal(false);
   showHistory = signal(false);
@@ -272,10 +294,12 @@ export class DashboardComponent implements OnInit {
 
   createInstance(): void {
     const settings = this.settingsStore.settings();
+    const selectedAgent = this.agentStore.selectedAgent();
     this.store.createInstance({
-      displayName: `Instance ${Date.now()}`,
+      displayName: `${selectedAgent.name} Instance`,
       workingDirectory: settings.defaultWorkingDirectory || undefined,
       yoloMode: settings.defaultYoloMode,
+      agentId: selectedAgent.id,
     });
   }
 

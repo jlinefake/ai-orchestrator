@@ -2,6 +2,8 @@
  * Instance Types - Core data models for Claude Code instances
  */
 
+import type { AgentMode } from './agent.types';
+
 export type InstanceStatus =
   | 'initializing'
   | 'idle'
@@ -51,6 +53,10 @@ export interface Instance {
   childrenIds: string[];
   supervisorNodeId: string;
 
+  // Agent mode
+  agentId: string;  // References AgentProfile.id ('build', 'plan', 'review', or custom)
+  agentMode: AgentMode;
+
   // State
   status: InstanceStatus;
   contextUsage: ContextUsage;
@@ -89,6 +95,7 @@ export interface InstanceCreateConfig {
   attachments?: FileAttachment[];
   yoloMode?: boolean;
   initialOutputBuffer?: OutputMessage[];  // Pre-populate output buffer (for history restore)
+  agentId?: string;  // Agent profile ID (defaults to 'build')
 }
 
 export interface InstanceSummary {
@@ -98,6 +105,8 @@ export interface InstanceSummary {
   contextUsage: ContextUsage;
   childrenCount: number;
   lastActivity: number;
+  agentId: string;
+  agentMode: AgentMode;
 }
 
 /**
@@ -105,6 +114,11 @@ export interface InstanceSummary {
  */
 export function createInstance(config: InstanceCreateConfig): Instance {
   const now = Date.now();
+  // Import agent profile to get mode
+  const { getAgentById, getDefaultAgent } = require('./agent.types');
+  const agent = config.agentId ? getAgentById(config.agentId) : getDefaultAgent();
+  const resolvedAgent = agent || getDefaultAgent();
+
   return {
     id: crypto.randomUUID(),
     displayName: config.displayName || `Instance ${now}`,
@@ -113,6 +127,9 @@ export function createInstance(config: InstanceCreateConfig): Instance {
     parentId: config.parentId || null,
     childrenIds: [],
     supervisorNodeId: '',
+
+    agentId: resolvedAgent.id,
+    agentMode: resolvedAgent.mode,
 
     status: 'initializing',
     contextUsage: { used: 0, total: 200000, percentage: 0 },
