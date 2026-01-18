@@ -1,0 +1,129 @@
+/**
+ * CLI Store - Manages available CLI tools state
+ */
+
+import { Injectable, inject, signal, computed } from '@angular/core';
+import { ElectronIpcService } from '../services/electron-ipc.service';
+
+export interface CliInfo {
+  name: string;
+  command: string;
+  displayName: string;
+  available: boolean;
+  version?: string;
+  error?: string;
+}
+
+export type CliType = 'claude' | 'gemini' | 'openai';
+
+interface CliState {
+  clis: CliInfo[];
+  selectedCli: CliType | null;
+  loading: boolean;
+  initialized: boolean;
+}
+
+@Injectable({ providedIn: 'root' })
+export class CliStore {
+  private ipc = inject(ElectronIpcService);
+
+  private state = signal<CliState>({
+    clis: [],
+    selectedCli: null,
+    loading: false,
+    initialized: false,
+  });
+
+  // Selectors
+  readonly clis = computed(() => this.state().clis);
+  readonly selectedCli = computed(() => this.state().selectedCli);
+  readonly loading = computed(() => this.state().loading);
+  readonly initialized = computed(() => this.state().initialized);
+
+  readonly availableClis = computed(() =>
+    this.state().clis.filter((cli) => cli.available)
+  );
+
+  readonly hasAnyCli = computed(() =>
+    this.state().clis.some((cli) => cli.available)
+  );
+
+  readonly selectedCliInfo = computed(() => {
+    const selected = this.state().selectedCli;
+    return this.state().clis.find((cli) => cli.name === selected) || null;
+  });
+
+  readonly noClisError = computed(() => {
+    const { initialized, clis } = this.state();
+    if (!initialized) return null;
+
+    const hasAny = clis.some((cli) => cli.available);
+    if (hasAny) return null;
+
+    return {
+      title: 'No AI CLI Found',
+      message: 'Please install one of the following CLI tools to use this application:',
+      clis: [
+        { name: 'Claude Code', installUrl: 'https://claude.ai/code', command: 'npm install -g @anthropic-ai/claude-code' },
+        { name: 'Gemini CLI', installUrl: 'https://ai.google.dev/gemini-api/docs/cli', command: 'npm install -g @google/gemini-cli' },
+        { name: 'OpenAI CLI', installUrl: 'https://platform.openai.com/docs/cli', command: 'pip install openai' },
+      ],
+    };
+  });
+
+  /**
+   * Initialize - detect available CLIs
+   */
+  async initialize(): Promise<void> {
+    this.state.update((s) => ({ ...s, loading: true }));
+
+    try {
+      const response = await this.ipc.detectClis() as { success: boolean; data?: unknown };
+
+      if (response.success && response.data && Array.isArray(response.data)) {
+        const clis = response.data as CliInfo[];
+
+        // Auto-select first available CLI
+        const firstAvailable = clis.find((cli) => cli.available);
+
+        this.state.update((s) => ({
+          ...s,
+          clis,
+          selectedCli: (firstAvailable?.name as CliType) || null,
+          loading: false,
+          initialized: true,
+        }));
+      } else {
+        this.state.update((s) => ({
+          ...s,
+          loading: false,
+          initialized: true,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to detect CLIs:', error);
+      this.state.update((s) => ({
+        ...s,
+        loading: false,
+        initialized: true,
+      }));
+    }
+  }
+
+  /**
+   * Select a specific CLI
+   */
+  selectCli(cliType: CliType): void {
+    const cli = this.state().clis.find((c) => c.name === cliType);
+    if (cli?.available) {
+      this.state.update((s) => ({ ...s, selectedCli: cliType }));
+    }
+  }
+
+  /**
+   * Refresh CLI detection
+   */
+  async refresh(): Promise<void> {
+    await this.initialize();
+  }
+}

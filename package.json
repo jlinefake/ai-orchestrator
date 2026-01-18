@@ -1,0 +1,58 @@
+{
+  "name": "claude-orchestrator",
+  "version": "0.1.0",
+  "description": "Desktop application for managing multiple Claude Code CLI instances",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "ng": "ng",
+    "start": "npm run build:main && concurrently -k \"npm run watch:main\" \"npm run start:renderer -- --port 4567\" \"wait-on http://localhost:4567 && npm run electron:dev\"",
+    "start:renderer": "ng serve",
+    "dev": "npm run build:main && npm run electron:dev",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "ng build --configuration production",
+    "build:main": "tsc -p tsconfig.electron.json",
+    "watch:main": "tsc -p tsconfig.electron.json --watch",
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder",
+    "test": "ng test",
+    "lint": "ng lint"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "orchestrator",
+    "electron",
+    "angular"
+  ],
+  "author": "James",
+  "license": "MIT",
+  "dependencies": {
+    "@angular/animations": "^19.0.0",
+    "@angular/cdk": "^19.0.0",
+    "@angular/common": "^19.0.0",
+    "@angular/compiler": "^19.0.0",
+    "@angular/core": "^19.0.0",
+    "@angular/forms": "^19.0.0",
+    "@angular/platform-browser": "^19.0.0",
+    "@angular/platform-browser-dynamic": "^19.0.0",
+    "@angular/router": "^19.0.0",
+    "electron-store": "^11.0.2",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.6.0",
+    "zone.js": "~0.15.0"
+  },
+  "overrides": {
+    "tar": "^7.5.3"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "^19.0.0",
+    "@angular/cli": "^19.0.0",
+    "@angular/compiler-cli": "^19.0.0",
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.0.0",
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "~5.6.0",
+    "wait-on": "^8.0.0"
+  }
+}

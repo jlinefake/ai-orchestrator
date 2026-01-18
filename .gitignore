@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+
+# Angular
+.angular/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Claude attachments (temporary files for file uploads)
+.claude-attachments/
+
+# Claude Code settings
+.claude/
+
+# Environment
+.env
+.env.local
