@@ -157,9 +157,15 @@ body {
   outline-offset: 2px;
 }
 
-// Selection
+// Text selection - use high contrast colors visible on any background
 ::selection {
-  background: rgba(var(--primary-rgb), 0.3);
+  background: #fbbf24;  // Amber/yellow - visible on both dark and purple
+  color: #000;
+}
+
+::-moz-selection {
+  background: #fbbf24;
+  color: #000;
 }
 
 // Typography

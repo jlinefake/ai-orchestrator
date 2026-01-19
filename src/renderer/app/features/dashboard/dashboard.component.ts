@@ -2,7 +2,7 @@
  * Dashboard Component - Main application layout
  */
 
-import { Component, inject, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, signal, HostListener } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { InstanceStore } from '../../core/state/instance.store';
 import { CliStore } from '../../core/state/cli.store';
@@ -30,10 +30,10 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
     } @else if (cliStore.noClisError()) {
       <app-cli-error [error]="cliStore.noClisError()!" (retry)="onRetryCliDetection()" />
     } @else {
-    <div class="dashboard" [class.sidebar-hidden]="!showSidebar()">
+    <div class="dashboard" [class.sidebar-hidden]="!showSidebar()" [class.resizing]="isResizing()">
       <!-- Sidebar with instance list -->
       @if (showSidebar()) {
-      <aside class="sidebar">
+      <aside class="sidebar" [style.width.px]="sidebarWidth()">
         <div class="sidebar-header">
           <div class="header-row">
             <h1 class="app-title">Claude Orchestrator</h1>
@@ -90,6 +90,13 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
           }
         </div>
       </aside>
+
+      <!-- Resize handle -->
+      <div
+        class="resize-handle"
+        (mousedown)="onResizeStart($event)"
+        [class.dragging]="isResizing()"
+      ></div>
       }
 
       <!-- Main content area -->
@@ -155,15 +162,45 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       background: var(--bg-primary);
     }
 
+    .dashboard.resizing {
+      user-select: none;
+      cursor: col-resize;
+    }
+
     .sidebar {
-      width: 320px;
-      min-width: 280px;
-      max-width: 400px;
+      min-width: 285px;
+      max-width: 600px;
       height: 100%;
       display: flex;
       flex-direction: column;
       background: var(--bg-secondary);
       border-right: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+
+    .resize-handle {
+      width: 4px;
+      height: 100%;
+      background: transparent;
+      cursor: col-resize;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+      transition: background var(--transition-fast);
+
+      &:hover,
+      &.dragging {
+        background: var(--primary-color);
+      }
+    }
+
+    .resize-handle::before {
+      content: '';
+      position: absolute;
+      left: -4px;
+      right: -4px;
+      top: 0;
+      bottom: 0;
     }
 
     .sidebar-header {
@@ -300,7 +337,47 @@ export class DashboardComponent implements OnInit, OnDestroy {
   showCommandPalette = signal(false);
   showSidebar = signal(true);
 
+  // Sidebar resize state
+  sidebarWidth = signal(this.loadSidebarWidth());
+  isResizing = signal(false);
+  private resizeStartX = 0;
+  private resizeStartWidth = 0;
+
   private keybindingCleanup: (() => void)[] = [];
+
+  private loadSidebarWidth(): number {
+    const saved = localStorage.getItem('sidebarWidth');
+    const width = saved ? parseInt(saved, 10) : 320;
+    return Math.max(285, Math.min(600, width)); // Clamp to valid range
+  }
+
+  private saveSidebarWidth(width: number): void {
+    localStorage.setItem('sidebarWidth', width.toString());
+  }
+
+  onResizeStart(event: MouseEvent): void {
+    event.preventDefault();
+    this.isResizing.set(true);
+    this.resizeStartX = event.clientX;
+    this.resizeStartWidth = this.sidebarWidth();
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onMouseMove(event: MouseEvent): void {
+    if (!this.isResizing()) return;
+
+    const delta = event.clientX - this.resizeStartX;
+    const newWidth = Math.max(285, Math.min(600, this.resizeStartWidth + delta));
+    this.sidebarWidth.set(newWidth);
+  }
+
+  @HostListener('document:mouseup')
+  onMouseUp(): void {
+    if (this.isResizing()) {
+      this.isResizing.set(false);
+      this.saveSidebarWidth(this.sidebarWidth());
+    }
+  }
 
   ngOnInit(): void {
     // Initialize settings first, then CLI detection

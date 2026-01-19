@@ -1,5 +1,5 @@
 /**
- * Instance List Component - Virtual scrolling list of all instances
+ * Instance List Component - Hierarchical tree view with collapsible children
  */
 
 import {
@@ -12,6 +12,16 @@ import {
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { InstanceStore, Instance } from '../../core/state/instance.store';
 import { InstanceRowComponent } from './instance-row.component';
+
+/** Instance with hierarchy metadata for display */
+export interface HierarchicalInstance {
+  instance: Instance;
+  depth: number;
+  hasChildren: boolean;
+  isExpanded: boolean;
+  isLastChild: boolean;
+  parentChain: boolean[]; // Track which ancestor levels need connecting lines
+}
 
 @Component({
   selector: 'app-instance-list',
@@ -46,13 +56,19 @@ import { InstanceRowComponent } from './instance-row.component';
         itemSize="72"
         class="instance-viewport"
       >
-        @for (instance of filteredInstances(); track instance.id) {
+        @for (item of hierarchicalInstances(); track item.instance.id) {
           <app-instance-row
-            [instance]="instance"
-            [isSelected]="selectedId() === instance.id"
+            [instance]="item.instance"
+            [depth]="item.depth"
+            [hasChildren]="item.hasChildren"
+            [isExpanded]="item.isExpanded"
+            [isLastChild]="item.isLastChild"
+            [parentChain]="item.parentChain"
+            [isSelected]="selectedId() === item.instance.id"
             (select)="onSelectInstance($event)"
             (terminate)="onTerminateInstance($event)"
             (restart)="onRestartInstance($event)"
+            (toggleExpand)="onToggleExpand($event)"
           />
         } @empty {
           <div class="empty-state">
@@ -139,16 +155,44 @@ export class InstanceListComponent {
   filterText = signal('');
   statusFilter = signal<string>('all');
 
+  // Track which parent instances are COLLAPSED (default: all expanded)
+  // Using collapsed set means new parents are automatically expanded
+  collapsedIds = signal<Set<string>>(new Set());
+
   // Selected instance ID from store
   selectedId = this.store.selectedInstanceId;
 
-  // Filtered instances
-  filteredInstances = computed(() => {
+  // Build hierarchical view of instances
+  hierarchicalInstances = computed(() => {
     const instances = this.store.instances();
     const filter = this.filterText().toLowerCase();
     const status = this.statusFilter();
+    const collapsed = this.collapsedIds();
 
-    return instances.filter((instance) => {
+    // Build instance map for quick lookup
+    const instanceMap = new Map<string, Instance>();
+    for (const instance of instances) {
+      instanceMap.set(instance.id, instance);
+    }
+
+    // Build children map dynamically from parentId relationships
+    // This is more reliable than using childrenIds which may be stale in the renderer
+    const childrenByParent = new Map<string, string[]>();
+    for (const instance of instances) {
+      if (instance.parentId) {
+        const siblings = childrenByParent.get(instance.parentId) || [];
+        siblings.push(instance.id);
+        childrenByParent.set(instance.parentId, siblings);
+      }
+    }
+
+    // Helper to get children for an instance
+    const getChildrenIds = (instanceId: string): string[] => {
+      return childrenByParent.get(instanceId) || [];
+    };
+
+    // Filter instances
+    const matchesFilter = (instance: Instance): boolean => {
       const matchesText =
         !filter ||
         instance.displayName.toLowerCase().includes(filter) ||
@@ -158,7 +202,73 @@ export class InstanceListComponent {
         status === 'all' || instance.status === status;
 
       return matchesText && matchesStatus;
-    });
+    };
+
+    // Get root instances (no parent)
+    const rootInstances = instances.filter(i => !i.parentId);
+
+    // Recursively build flat list with hierarchy info
+    const result: HierarchicalInstance[] = [];
+
+    const addInstance = (
+      instance: Instance,
+      depth: number,
+      parentChain: boolean[],
+      isLastChild: boolean
+    ) => {
+      const childrenIds = getChildrenIds(instance.id);
+
+      // Check if this instance or any of its descendants match the filter
+      const selfMatches = matchesFilter(instance);
+      const childrenMatch = childrenIds.some(childId => {
+        const child = instanceMap.get(childId);
+        return child && matchesFilter(child);
+      });
+
+      if (!selfMatches && !childrenMatch) return;
+
+      const hasChildren = childrenIds.length > 0;
+      const isExpanded = !collapsed.has(instance.id); // Not in collapsed set = expanded
+
+      result.push({
+        instance: {
+          ...instance,
+          childrenIds, // Use the dynamically computed childrenIds
+        },
+        depth,
+        hasChildren,
+        isExpanded,
+        isLastChild,
+        parentChain: [...parentChain],
+      });
+
+      // Add children if expanded
+      if (hasChildren && isExpanded) {
+        const children = childrenIds
+          .map(id => instanceMap.get(id))
+          .filter((c): c is Instance => c !== undefined)
+          .sort((a, b) => a.createdAt - b.createdAt);
+
+        children.forEach((child, index) => {
+          const isLast = index === children.length - 1;
+          addInstance(
+            child,
+            depth + 1,
+            [...parentChain, !isLastChild],
+            isLast
+          );
+        });
+      }
+    };
+
+    // Sort root instances by creation time
+    rootInstances
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .forEach((instance, index) => {
+        addInstance(instance, 0, [], index === rootInstances.length - 1);
+      });
+
+    return result;
   });
 
   onFilterChange(event: Event): void {
@@ -183,7 +293,21 @@ export class InstanceListComponent {
     this.store.restartInstance(instanceId);
   }
 
-  trackInstance(index: number, instance: Instance): string {
-    return instance.id;
+  onToggleExpand(instanceId: string): void {
+    this.collapsedIds.update(current => {
+      const newSet = new Set(current);
+      if (newSet.has(instanceId)) {
+        // Was collapsed, now expand (remove from collapsed set)
+        newSet.delete(instanceId);
+      } else {
+        // Was expanded, now collapse (add to collapsed set)
+        newSet.add(instanceId);
+      }
+      return newSet;
+    });
+  }
+
+  trackInstance(index: number, item: HierarchicalInstance): string {
+    return item.instance.id;
   }
 }

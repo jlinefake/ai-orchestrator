@@ -335,7 +335,7 @@ const getApi = () => (window as any).electronAPI;
     }
 
     .settings-modal {
-      width: 600px;
+      width: 620px;
       max-width: 90vw;
       max-height: 80vh;
       background: var(--bg-primary);

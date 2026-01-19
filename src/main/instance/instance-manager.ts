@@ -279,8 +279,87 @@ export class InstanceManager extends EventEmitter {
     // Handle response injection
     this.orchestration.on('inject-response', async (instanceId: string, response: string) => {
       const adapter = this.adapters.get(instanceId);
-      if (adapter) {
-        // Send the orchestrator response as a system message
+      const instance = this.instances.get(instanceId);
+
+      if (adapter && instance) {
+        // Parse the orchestration response to create a user-friendly message
+        // The response format is: [Orchestrator Response]\nAction: xxx\nStatus: xxx\n{json}\n[/Orchestrator Response]
+        const actionMatch = response.match(/Action:\s*(\w+)/);
+        const statusMatch = response.match(/Status:\s*(\w+)/);
+        const action = actionMatch ? actionMatch[1] : 'unknown';
+        const status = statusMatch ? statusMatch[1] : 'unknown';
+
+        // Extract the JSON data
+        let data: any = {};
+        try {
+          const jsonMatch = response.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            data = JSON.parse(jsonMatch[0]);
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+
+        // Create a user-friendly message based on the action
+        let friendlyContent = '';
+        switch (action) {
+          case 'spawn_child':
+            if (status === 'SUCCESS') {
+              friendlyContent = `**Child Spawned:** ${data.name || 'Child instance'}\n\nID: \`${data.childId}\``;
+            } else {
+              friendlyContent = `**Failed to spawn child:** ${data.error || 'Unknown error'}`;
+            }
+            break;
+          case 'message_child':
+            friendlyContent = status === 'SUCCESS'
+              ? `**Message sent** to child \`${data.childId}\``
+              : `**Failed to send message:** ${data.error || 'Unknown error'}`;
+            break;
+          case 'terminate_child':
+            friendlyContent = status === 'SUCCESS'
+              ? `**Child terminated:** \`${data.childId}\``
+              : `**Failed to terminate child:** ${data.error || 'Unknown error'}`;
+            break;
+          case 'task_complete':
+            friendlyContent = `**Task completed** by child \`${data.childId}\`\n\n${data.result?.summary || data.message || 'No summary'}`;
+            break;
+          case 'task_progress':
+            friendlyContent = `**Progress update** from child \`${data.childId}\`: ${data.progress?.percentage || 0}% - ${data.progress?.currentStep || 'Working...'}`;
+            break;
+          case 'task_error':
+            friendlyContent = `**Error** from child \`${data.childId}\`:\n\n${data.error?.message || data.message || 'Unknown error'}`;
+            break;
+          case 'get_children':
+            if (data.children && data.children.length > 0) {
+              const childList = data.children.map((c: any) => `- **${c.name}** (\`${c.id}\`) - ${c.status}`).join('\n');
+              friendlyContent = `**Active children:**\n\n${childList}`;
+            } else {
+              friendlyContent = `**No active children**`;
+            }
+            break;
+          case 'get_child_output':
+            if (data.output && data.output.length > 0) {
+              friendlyContent = `**Output from child \`${data.childId}\`:**\n\n\`\`\`\n${data.output.join('\n')}\n\`\`\``;
+            } else {
+              friendlyContent = `**No output from child** \`${data.childId}\``;
+            }
+            break;
+          default:
+            friendlyContent = `**Orchestration:** ${action} - ${status}`;
+        }
+
+        // Add the user-friendly orchestration message to the output buffer
+        const orchestrationMessage = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'system' as const,
+          content: friendlyContent,
+          metadata: { source: 'orchestration', action, status, rawData: data },
+        };
+        this.addToOutputBuffer(instance, orchestrationMessage);
+        this.emit('instance:output', { instanceId, message: orchestrationMessage });
+
+        // Send the original orchestrator response to the Claude CLI (it expects the structured format)
         await adapter.sendMessage(response);
       }
     });

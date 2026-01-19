@@ -1,5 +1,5 @@
 /**
- * Instance Row Component - Single instance in the list
+ * Instance Row Component - Single instance in the hierarchical tree list
  */
 
 import {
@@ -24,8 +24,24 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       [class.selected]="isSelected()"
       [class.error]="instance().status === 'error'"
       [class.yolo]="instance().yoloMode"
+      [class.is-child]="depth() > 0"
+      [style.padding-left.px]="12 + depth() * 20"
       (click)="select.emit(instance().id)"
     >
+      <!-- Expand/collapse button for parents, or child indicator -->
+      @if (hasChildren()) {
+        <button
+          class="expand-btn"
+          [class.expanded]="isExpanded()"
+          (click)="onToggleExpand($event)"
+          title="{{ isExpanded() ? 'Collapse' : 'Expand' }} children"
+        >
+          <span class="chevron">›</span>
+        </button>
+      } @else if (depth() > 0) {
+        <span class="child-connector">└</span>
+      }
+
       <app-status-indicator [status]="instance().status" />
 
       <div class="instance-info">
@@ -34,17 +50,12 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
             {{ agent().name.charAt(0) }}
           </span>
           <span class="instance-name">{{ instance().displayName }}</span>
+          @if (hasChildren() && !isExpanded()) {
+            <span class="collapsed-badge">+{{ instance().childrenIds.length }}</span>
+          }
         </div>
         <div class="instance-meta">
           <span class="session-id mono">{{ instance().sessionId.slice(0, 8) }}...</span>
-          @if (instance().parentId) {
-            <span class="child-indicator" title="Child instance">↳</span>
-          }
-          @if (instance().childrenIds.length > 0) {
-            <span class="children-count">
-              {{ instance().childrenIds.length }} children
-            </span>
-          }
         </div>
       </div>
 
@@ -77,7 +88,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       display: flex;
       align-items: center;
       padding: 12px 16px;
-      gap: 12px;
+      gap: 10px;
       cursor: pointer;
       border-bottom: 1px solid var(--border-color);
       transition: background-color var(--transition-fast);
@@ -91,7 +102,6 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     .instance-row.selected {
       background-color: var(--bg-selected);
       border-left: 3px solid var(--primary-color);
-      padding-left: 13px;
     }
 
     .instance-row.error {
@@ -100,7 +110,6 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
 
     .instance-row.yolo {
       border-left: 3px solid #f59e0b;
-      padding-left: 13px;
 
       &.selected {
         border-left: 3px solid #f59e0b;
@@ -108,9 +117,65 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       }
     }
 
+    /* Child instance styling */
+    .instance-row.is-child {
+      background-color: rgba(99, 102, 241, 0.05);
+    }
+
+    .instance-row.is-child:hover {
+      background-color: var(--bg-hover);
+    }
+
+    .instance-row.is-child.selected {
+      background-color: var(--bg-selected);
+    }
+
+    /* Child connector character */
+    .child-connector {
+      color: var(--border-color);
+      font-size: 14px;
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* Expand/collapse button */
+    .expand-btn {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+      color: var(--text-secondary);
+    }
+
+    .expand-btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+
+    .expand-btn .chevron {
+      font-size: 12px;
+      font-weight: bold;
+      line-height: 1;
+      transition: transform var(--transition-fast);
+    }
+
+    .expand-btn.expanded .chevron {
+      transform: rotate(90deg);
+    }
+
     .instance-info {
       flex: 1;
       min-width: 0;
+      overflow: hidden;
     }
 
     .instance-name-row {
@@ -138,6 +203,18 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       overflow: hidden;
       text-overflow: ellipsis;
       color: var(--text-primary);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .collapsed-badge {
+      background: var(--primary-color);
+      color: white;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 5px;
+      border-radius: 8px;
+      flex-shrink: 0;
     }
 
     .instance-meta {
@@ -152,19 +229,12 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       color: var(--text-muted);
     }
 
-    .child-indicator {
-      color: var(--primary-color);
-    }
-
-    .children-count {
-      color: var(--text-muted);
-    }
-
     .instance-actions {
       display: flex;
       gap: 4px;
       opacity: 0;
       transition: opacity var(--transition-fast);
+      flex-shrink: 0;
     }
 
     .instance-row:hover .instance-actions {
@@ -208,12 +278,24 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class InstanceRowComponent {
+  // Required inputs
   instance = input.required<Instance>();
+
+  // Hierarchy inputs
+  depth = input<number>(0);
+  hasChildren = input<boolean>(false);
+  isExpanded = input<boolean>(false);
+  isLastChild = input<boolean>(false);
+  parentChain = input<boolean[]>([]);
+
+  // Selection state
   isSelected = input<boolean>(false);
 
+  // Outputs
   select = output<string>();
   terminate = output<string>();
   restart = output<string>();
+  toggleExpand = output<string>();
 
   // Computed agent profile from instance's agentId
   agent = computed(() => {
@@ -229,5 +311,10 @@ export class InstanceRowComponent {
   onRestart(event: Event): void {
     event.stopPropagation();
     this.restart.emit(this.instance().id);
+  }
+
+  onToggleExpand(event: Event): void {
+    event.stopPropagation();
+    this.toggleExpand.emit(this.instance().id);
   }
 }

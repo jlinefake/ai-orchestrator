@@ -209,7 +209,7 @@ export class OrchestrationHandler extends EventEmitter {
     }
 
     this.emit('get-child-output', parentId, command, (output: string[]) => {
-      this.injectResponse(parentId, 'get_child_output', true, { output });
+      this.injectResponse(parentId, 'get_child_output', true, { childId: command.childId, output });
     });
   }
 
