@@ -305,6 +305,178 @@ export const IPC_CHANNELS = {
   PLUGINS_INSTALL: 'plugins:install',
   PLUGINS_UNINSTALL: 'plugins:uninstall',
   PLUGINS_CREATE_TEMPLATE: 'plugins:create-template',
+
+  // Workflow operations (6.1)
+  WORKFLOW_LIST_TEMPLATES: 'workflow:list-templates',
+  WORKFLOW_GET_TEMPLATE: 'workflow:get-template',
+  WORKFLOW_START: 'workflow:start',
+  WORKFLOW_GET_EXECUTION: 'workflow:get-execution',
+  WORKFLOW_GET_BY_INSTANCE: 'workflow:get-by-instance',
+  WORKFLOW_COMPLETE_PHASE: 'workflow:complete-phase',
+  WORKFLOW_SATISFY_GATE: 'workflow:satisfy-gate',
+  WORKFLOW_SKIP_PHASE: 'workflow:skip-phase',
+  WORKFLOW_CANCEL: 'workflow:cancel',
+  WORKFLOW_GET_PROMPT_ADDITION: 'workflow:get-prompt-addition',
+  WORKFLOW_STARTED: 'workflow:started',
+  WORKFLOW_COMPLETED: 'workflow:completed',
+  WORKFLOW_PHASE_CHANGED: 'workflow:phase-changed',
+  WORKFLOW_GATE_PENDING: 'workflow:gate-pending',
+
+  // Review agent operations (6.2)
+  REVIEW_LIST_AGENTS: 'review:list-agents',
+  REVIEW_GET_AGENT: 'review:get-agent',
+  REVIEW_START_SESSION: 'review:start-session',
+  REVIEW_GET_SESSION: 'review:get-session',
+  REVIEW_GET_ISSUES: 'review:get-issues',
+  REVIEW_ACKNOWLEDGE_ISSUE: 'review:acknowledge-issue',
+  REVIEW_SESSION_STARTED: 'review:session-started',
+  REVIEW_SESSION_COMPLETED: 'review:session-completed',
+
+  // Hook operations (6.3)
+  HOOKS_LIST: 'hooks:list',
+  HOOKS_GET: 'hooks:get',
+  HOOKS_CREATE: 'hooks:create',
+  HOOKS_UPDATE: 'hooks:update',
+  HOOKS_DELETE: 'hooks:delete',
+  HOOKS_EVALUATE: 'hooks:evaluate',
+  HOOKS_IMPORT: 'hooks:import',
+  HOOKS_EXPORT: 'hooks:export',
+  HOOKS_TRIGGERED: 'hooks:triggered',
+
+  // Skill operations (6.4)
+  SKILLS_DISCOVER: 'skills:discover',
+  SKILLS_LIST: 'skills:list',
+  SKILLS_GET: 'skills:get',
+  SKILLS_LOAD: 'skills:load',
+  SKILLS_UNLOAD: 'skills:unload',
+  SKILLS_LOAD_REFERENCE: 'skills:load-reference',
+  SKILLS_LOAD_EXAMPLE: 'skills:load-example',
+  SKILLS_MATCH: 'skills:match',
+  SKILLS_GET_MEMORY: 'skills:get-memory',
+
+  // Git Worktree operations (7.1)
+  WORKTREE_CREATE: 'worktree:create',
+  WORKTREE_COMPLETE: 'worktree:complete',
+  WORKTREE_PREVIEW_MERGE: 'worktree:preview-merge',
+  WORKTREE_MERGE: 'worktree:merge',
+  WORKTREE_CLEANUP: 'worktree:cleanup',
+  WORKTREE_ABANDON: 'worktree:abandon',
+  WORKTREE_GET_SESSION: 'worktree:get-session',
+  WORKTREE_LIST_SESSIONS: 'worktree:list-sessions',
+  WORKTREE_DETECT_CONFLICTS: 'worktree:detect-conflicts',
+  WORKTREE_SYNC: 'worktree:sync',
+  WORKTREE_SESSION_CREATED: 'worktree:session-created',
+  WORKTREE_SESSION_COMPLETED: 'worktree:session-completed',
+  WORKTREE_CONFLICT_DETECTED: 'worktree:conflict-detected',
+
+  // Multi-Agent Verification operations (7.2)
+  VERIFY_START: 'verify:start',
+  VERIFY_GET_RESULT: 'verify:get-result',
+  VERIFY_GET_ACTIVE: 'verify:get-active',
+  VERIFY_CANCEL: 'verify:cancel',
+  VERIFY_GET_PERSONALITIES: 'verify:get-personalities',
+  VERIFY_CONFIGURE: 'verify:configure',
+  VERIFY_STARTED: 'verify:started',
+  VERIFY_AGENT_RESPONDED: 'verify:agent-responded',
+  VERIFY_COMPLETED: 'verify:completed',
+
+  // Cascade Supervision operations (7.3)
+  SUPERVISION_CREATE_TREE: 'supervision:create-tree',
+  SUPERVISION_ADD_WORKER: 'supervision:add-worker',
+  SUPERVISION_START_WORKER: 'supervision:start-worker',
+  SUPERVISION_STOP_WORKER: 'supervision:stop-worker',
+  SUPERVISION_HANDLE_FAILURE: 'supervision:handle-failure',
+  SUPERVISION_GET_TREE: 'supervision:get-tree',
+  SUPERVISION_GET_HEALTH: 'supervision:get-health',
+  SUPERVISION_TREE_UPDATED: 'supervision:tree-updated',
+  SUPERVISION_WORKER_FAILED: 'supervision:worker-failed',
+  SUPERVISION_WORKER_RESTARTED: 'supervision:worker-restarted',
+  SUPERVISION_CIRCUIT_BREAKER_CHANGED: 'supervision:circuit-breaker-changed',
+
+  // RLM Context Management operations (8.1)
+  RLM_CREATE_STORE: 'rlm:create-store',
+  RLM_ADD_SECTION: 'rlm:add-section',
+  RLM_REMOVE_SECTION: 'rlm:remove-section',
+  RLM_GET_STORE: 'rlm:get-store',
+  RLM_LIST_STORES: 'rlm:list-stores',
+  RLM_LIST_SECTIONS: 'rlm:list-sections',
+  RLM_DELETE_STORE: 'rlm:delete-store',
+  RLM_START_SESSION: 'rlm:start-session',
+  RLM_END_SESSION: 'rlm:end-session',
+  RLM_EXECUTE_QUERY: 'rlm:execute-query',
+  RLM_GET_STORE_STATS: 'rlm:get-store-stats',
+  RLM_GET_SESSION_STATS: 'rlm:get-session-stats',
+  RLM_CONFIGURE: 'rlm:configure',
+
+  // Self-Improvement operations (8.2)
+  LEARNING_RECORD_OUTCOME: 'learning:record-outcome',
+  LEARNING_GET_OUTCOME: 'learning:get-outcome',
+  LEARNING_GET_RECENT_OUTCOMES: 'learning:get-recent-outcomes',
+  LEARNING_GET_EXPERIENCE: 'learning:get-experience',
+  LEARNING_GET_ALL_EXPERIENCES: 'learning:get-all-experiences',
+  LEARNING_GET_INSIGHTS: 'learning:get-insights',
+  LEARNING_GET_RECOMMENDATION: 'learning:get-recommendation',
+  LEARNING_ENHANCE_PROMPT: 'learning:enhance-prompt',
+  LEARNING_GET_STATS: 'learning:get-stats',
+  LEARNING_GET_TASK_STATS: 'learning:get-task-stats',
+  LEARNING_RATE_OUTCOME: 'learning:rate-outcome',
+  LEARNING_CONFIGURE: 'learning:configure',
+
+  // Model Discovery operations (8.3)
+  MODEL_DISCOVER: 'model:discover',
+  MODEL_GET_ALL: 'model:get-all',
+  MODEL_GET: 'model:get',
+  MODEL_SELECT: 'model:select',
+  MODEL_CONFIGURE_PROVIDER: 'model:configure-provider',
+  MODEL_GET_PROVIDER_STATUS: 'model:get-provider-status',
+  MODEL_GET_STATS: 'model:get-stats',
+  MODEL_VERIFY: 'model:verify',
+  MODEL_SET_OVERRIDE: 'model:set-override',
+  MODEL_REMOVE_OVERRIDE: 'model:remove-override',
+
+  // Memory-R1 operations
+  MEMORY_R1_DECIDE_OPERATION: 'memory-r1:decide-operation',
+  MEMORY_R1_EXECUTE_OPERATION: 'memory-r1:execute-operation',
+  MEMORY_R1_ADD_ENTRY: 'memory-r1:add-entry',
+  MEMORY_R1_DELETE_ENTRY: 'memory-r1:delete-entry',
+  MEMORY_R1_GET_ENTRY: 'memory-r1:get-entry',
+  MEMORY_R1_RETRIEVE: 'memory-r1:retrieve',
+  MEMORY_R1_RECORD_OUTCOME: 'memory-r1:record-outcome',
+  MEMORY_R1_GET_STATS: 'memory-r1:get-stats',
+  MEMORY_R1_SAVE: 'memory-r1:save',
+  MEMORY_R1_LOAD: 'memory-r1:load',
+  MEMORY_R1_CONFIGURE: 'memory-r1:configure',
+
+  // Unified Memory operations
+  UNIFIED_MEMORY_PROCESS_INPUT: 'unified-memory:process-input',
+  UNIFIED_MEMORY_RETRIEVE: 'unified-memory:retrieve',
+  UNIFIED_MEMORY_RECORD_SESSION_END: 'unified-memory:record-session-end',
+  UNIFIED_MEMORY_RECORD_WORKFLOW: 'unified-memory:record-workflow',
+  UNIFIED_MEMORY_RECORD_STRATEGY: 'unified-memory:record-strategy',
+  UNIFIED_MEMORY_RECORD_OUTCOME: 'unified-memory:record-outcome',
+  UNIFIED_MEMORY_GET_STATS: 'unified-memory:get-stats',
+  UNIFIED_MEMORY_GET_SESSIONS: 'unified-memory:get-sessions',
+  UNIFIED_MEMORY_GET_PATTERNS: 'unified-memory:get-patterns',
+  UNIFIED_MEMORY_GET_WORKFLOWS: 'unified-memory:get-workflows',
+  UNIFIED_MEMORY_SAVE: 'unified-memory:save',
+  UNIFIED_MEMORY_LOAD: 'unified-memory:load',
+  UNIFIED_MEMORY_CONFIGURE: 'unified-memory:configure',
+
+  // Debate operations
+  DEBATE_START: 'debate:start',
+  DEBATE_GET_RESULT: 'debate:get-result',
+  DEBATE_GET_ACTIVE: 'debate:get-active',
+  DEBATE_CANCEL: 'debate:cancel',
+  DEBATE_GET_STATS: 'debate:get-stats',
+
+  // Training operations (GRPO)
+  TRAINING_RECORD_OUTCOME: 'training:record-outcome',
+  TRAINING_GET_STATS: 'training:get-stats',
+  TRAINING_EXPORT_DATA: 'training:export-data',
+  TRAINING_IMPORT_DATA: 'training:import-data',
+  TRAINING_GET_TREND: 'training:get-trend',
+  TRAINING_GET_TOP_STRATEGIES: 'training:get-top-strategies',
+  TRAINING_CONFIGURE: 'training:configure',
 } as const;
 
 export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
@@ -1270,4 +1442,359 @@ export interface PluginsUninstallPayload {
 
 export interface PluginsCreateTemplatePayload {
   name: string;
+}
+
+// ============================================
+// Workflow Payloads (6.1)
+// ============================================
+
+export interface WorkflowGetTemplatePayload {
+  templateId: string;
+}
+
+export interface WorkflowStartPayload {
+  instanceId: string;
+  templateId: string;
+}
+
+export interface WorkflowGetExecutionPayload {
+  executionId: string;
+}
+
+export interface WorkflowGetByInstancePayload {
+  instanceId: string;
+}
+
+export interface WorkflowCompletePhasePayload {
+  executionId: string;
+  phaseData?: Record<string, unknown>;
+}
+
+export interface WorkflowSatisfyGatePayload {
+  executionId: string;
+  response: {
+    approved?: boolean;
+    selection?: string;
+    answer?: string;
+  };
+}
+
+export interface WorkflowSkipPhasePayload {
+  executionId: string;
+}
+
+export interface WorkflowCancelPayload {
+  executionId: string;
+}
+
+export interface WorkflowGetPromptAdditionPayload {
+  executionId: string;
+}
+
+// ============================================
+// Review Agent Payloads (6.2)
+// ============================================
+
+export interface ReviewGetAgentPayload {
+  agentId: string;
+}
+
+export interface ReviewStartSessionPayload {
+  instanceId: string;
+  agentIds: string[];
+  files: string[];
+  diffOnly?: boolean;
+}
+
+export interface ReviewGetSessionPayload {
+  sessionId: string;
+}
+
+export interface ReviewGetIssuesPayload {
+  sessionId: string;
+  severity?: string;
+  agentId?: string;
+}
+
+export interface ReviewAcknowledgeIssuePayload {
+  sessionId: string;
+  issueId: string;
+  acknowledged: boolean;
+}
+
+// ============================================
+// Hook Payloads (6.3)
+// ============================================
+
+export interface HooksListPayload {
+  event?: string;
+  source?: 'built-in' | 'project' | 'user';
+}
+
+export interface HooksGetPayload {
+  ruleId: string;
+}
+
+export interface HooksCreatePayload {
+  rule: {
+    name: string;
+    enabled: boolean;
+    event: string;
+    toolMatcher?: string;
+    conditions: Array<{
+      field: string;
+      operator: string;
+      pattern: string;
+    }>;
+    action: 'warn' | 'block';
+    message: string;
+  };
+}
+
+export interface HooksUpdatePayload {
+  ruleId: string;
+  updates: {
+    name?: string;
+    enabled?: boolean;
+    conditions?: Array<{
+      field: string;
+      operator: string;
+      pattern: string;
+    }>;
+    action?: 'warn' | 'block';
+    message?: string;
+  };
+}
+
+export interface HooksDeletePayload {
+  ruleId: string;
+}
+
+export interface HooksEvaluatePayload {
+  context: {
+    event: string;
+    sessionId: string;
+    instanceId: string;
+    toolName?: string;
+    toolInput?: Record<string, unknown>;
+    filePath?: string;
+    newContent?: string;
+    command?: string;
+    userPrompt?: string;
+  };
+}
+
+export interface HooksImportPayload {
+  rules: Array<{
+    id: string;
+    name: string;
+    enabled: boolean;
+    event: string;
+    toolMatcher?: string;
+    conditions: Array<{
+      field: string;
+      operator: string;
+      pattern: string;
+    }>;
+    action: 'warn' | 'block';
+    message: string;
+    source: 'built-in' | 'project' | 'user';
+    createdAt: number;
+  }>;
+  overwrite?: boolean;
+}
+
+export interface HooksExportPayload {
+  source?: 'built-in' | 'project' | 'user';
+}
+
+// ============================================
+// Skill Payloads (6.4)
+// ============================================
+
+export interface SkillsDiscoverPayload {
+  searchPaths: string[];
+}
+
+export interface SkillsGetPayload {
+  skillId: string;
+}
+
+export interface SkillsLoadPayload {
+  skillId: string;
+}
+
+export interface SkillsUnloadPayload {
+  skillId: string;
+}
+
+export interface SkillsLoadReferencePayload {
+  skillId: string;
+  referencePath: string;
+}
+
+export interface SkillsLoadExamplePayload {
+  skillId: string;
+  examplePath: string;
+}
+
+export interface SkillsMatchPayload {
+  text: string;
+}
+
+// ============================================
+// Git Worktree Payloads (7.1)
+// ============================================
+
+export interface WorktreeCreatePayload {
+  instanceId: string;
+  basePath: string;
+  taskDescription: string;
+  baseBranch?: string;
+  config?: {
+    prefix?: string;
+    cleanupOnComplete?: boolean;
+    syncIntervalMs?: number;
+    conflictStrategy?: 'merge' | 'rebase' | 'manual';
+    trackRemote?: boolean;
+  };
+}
+
+export interface WorktreeCompletePayload {
+  sessionId: string;
+}
+
+export interface WorktreePreviewMergePayload {
+  sessionId: string;
+}
+
+export interface WorktreeMergePayload {
+  sessionId: string;
+  strategy?: 'merge' | 'squash' | 'rebase';
+  commitMessage?: string;
+}
+
+export interface WorktreeCleanupPayload {
+  sessionId: string;
+}
+
+export interface WorktreeAbandonPayload {
+  sessionId: string;
+  reason?: string;
+}
+
+export interface WorktreeGetSessionPayload {
+  sessionId: string;
+}
+
+export interface WorktreeDetectConflictsPayload {
+  sessionIds: string[];
+}
+
+export interface WorktreeSyncPayload {
+  sessionId: string;
+}
+
+// ============================================
+// Multi-Agent Verification Payloads (7.2)
+// ============================================
+
+export interface VerifyStartPayload {
+  instanceId: string;
+  prompt: string;
+  context?: string;
+  taskType?: string;
+  config?: {
+    minAgents?: number;
+    synthesisStrategy?: 'consensus' | 'best-of' | 'merge' | 'majority-vote' | 'debate' | 'hierarchical';
+    personalities?: string[];
+    confidenceThreshold?: number;
+    timeoutMs?: number;
+    maxDebateRounds?: number;
+  };
+}
+
+export interface VerifyGetResultPayload {
+  verificationId: string;
+}
+
+export interface VerifyGetActivePayload {
+  instanceId?: string;
+}
+
+export interface VerifyCancelPayload {
+  verificationId: string;
+}
+
+export interface VerifyConfigurePayload {
+  config: {
+    minAgents?: number;
+    synthesisStrategy?: 'consensus' | 'best-of' | 'merge' | 'majority-vote' | 'debate' | 'hierarchical';
+    confidenceThreshold?: number;
+    timeoutMs?: number;
+    enableByDefault?: boolean;
+  };
+}
+
+// ============================================
+// Cascade Supervision Payloads (7.3)
+// ============================================
+
+export interface SupervisionCreateTreePayload {
+  instanceId: string;
+  config?: {
+    strategy?: 'one-for-one' | 'one-for-all' | 'rest-for-one' | 'simple-one';
+    maxRestarts?: number;
+    maxTime?: number;
+    onExhausted?: 'restart' | 'escalate' | 'ignore' | 'stop';
+    backoff?: {
+      minDelayMs?: number;
+      maxDelayMs?: number;
+      factor?: number;
+      jitter?: boolean;
+    };
+    healthCheck?: {
+      intervalMs?: number;
+      timeoutMs?: number;
+      unhealthyThreshold?: number;
+    };
+  };
+}
+
+export interface SupervisionAddWorkerPayload {
+  instanceId: string;
+  spec: {
+    id: string;
+    name: string;
+    restartType: 'permanent' | 'transient' | 'temporary';
+    startFuncId: string;
+    stopFuncId?: string;
+    dependencies?: string[];
+    order?: number;
+  };
+  parentId?: string;
+}
+
+export interface SupervisionStartWorkerPayload {
+  instanceId: string;
+  workerId: string;
+}
+
+export interface SupervisionStopWorkerPayload {
+  instanceId: string;
+  workerId: string;
+}
+
+export interface SupervisionHandleFailurePayload {
+  instanceId: string;
+  childInstanceId: string;
+  error: string;
+}
+
+export interface SupervisionGetTreePayload {
+  instanceId: string;
+}
+
+export interface SupervisionGetHealthPayload {
+  instanceId: string;
 }

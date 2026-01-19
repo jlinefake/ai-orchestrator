@@ -116,6 +116,10 @@ import { getLspManager } from '../lsp/lsp-manager';
 import { getMultiEditManager } from '../multiedit/multiedit-manager';
 import { getBashValidator } from '../security/bash-validator';
 import { getTaskManager } from '../orchestration/task-manager';
+import { registerOrchestrationHandlers } from './orchestration-ipc-handler';
+import { registerVerificationHandlers } from './verification-ipc-handler';
+import { registerLearningHandlers } from './learning-ipc-handler';
+import { registerMemoryHandlers } from './memory-ipc-handler';
 import {
   detectSecretsInContent,
   detectSecretsInEnvContent,
@@ -218,8 +222,8 @@ export class IpcMainHandler {
     // Settings handlers
     this.registerSettingsHandlers();
 
-    // Memory handlers
-    this.registerMemoryHandlers();
+    // Memory stats handlers (basic memory tracking)
+    this.registerMemoryStatsHandlers();
 
     // History handlers
     this.registerHistoryHandlers();
@@ -295,6 +299,18 @@ export class IpcMainHandler {
 
     // Provider plugin handlers (12.2)
     this.registerPluginHandlers();
+
+    // Orchestration handlers (Phase 6: Workflows, Hooks, Skills)
+    registerOrchestrationHandlers();
+
+    // Verification handlers (Worktree, Verification, Supervision)
+    registerVerificationHandlers();
+
+    // Learning handlers (RLM Context, Self-Improvement, Model Discovery)
+    registerLearningHandlers();
+
+    // Memory handlers (Memory-R1, Unified Memory, Debate, Training)
+    registerMemoryHandlers();
 
     // Set up memory event forwarding to renderer
     this.setupMemoryEventForwarding();
@@ -732,9 +748,9 @@ export class IpcMainHandler {
   }
 
   /**
-   * Register memory-related handlers
+   * Register basic memory stats handlers
    */
-  private registerMemoryHandlers(): void {
+  private registerMemoryStatsHandlers(): void {
     // Get memory stats
     ipcMain.handle(IPC_CHANNELS.MEMORY_GET_STATS, async (): Promise<IpcResponse> => {
       try {
