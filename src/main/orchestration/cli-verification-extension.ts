@@ -98,7 +98,7 @@ export class CliVerificationCoordinator extends EventEmitter {
    * Start verification with CLI agents
    */
   async startVerificationWithCli(
-    request: { prompt: string; context?: string; id?: string },
+    request: { prompt: string; context?: string; id?: string; attachments?: { name: string; mimeType: string; data: string }[] },
     config: CliVerificationConfig
   ): Promise<VerificationResult> {
     const startTime = Date.now();
@@ -129,6 +129,7 @@ export class CliVerificationCoordinator extends EventEmitter {
         agentCount: agents.length,
       },
       context: request.context,
+      attachments: request.attachments,
     };
 
     this.activeVerifications.set(verificationId, verificationRequest);
@@ -393,14 +394,16 @@ export class CliVerificationCoordinator extends EventEmitter {
 
       // Set up event listeners before sending message
       agent.provider.on('output', (message: any) => {
-        if (message.content) {
-          responseContent += message.content;
+        // Handle both string content (Gemini/Codex) and object with content property (Claude)
+        const content = typeof message === 'string' ? message : message?.content;
+        if (content) {
+          responseContent += content;
           // Emit streaming event for real-time UI updates
           this.emit('verification:agent-stream', {
             requestId: request.id,
             agentId,
             agentName: agent.name,
-            content: message.content,
+            content,
             totalContent: responseContent,
           });
         }
@@ -417,8 +420,16 @@ export class CliVerificationCoordinator extends EventEmitter {
         }
       });
 
-      // Send message
-      await agent.provider.sendMessage(fullPrompt);
+      // Convert attachments to provider format
+      const providerAttachments = request.attachments?.map(att => ({
+        type: att.mimeType.startsWith('image/') ? 'image' as const : 'file' as const,
+        name: att.name,
+        mimeType: att.mimeType,
+        data: att.data,
+      }));
+
+      // Send message with attachments
+      await agent.provider.sendMessage(fullPrompt, providerAttachments);
 
       // Wait for response to complete (with timeout)
       const maxWaitTime = request.config.timeout || 120000;
@@ -436,6 +447,14 @@ export class CliVerificationCoordinator extends EventEmitter {
       // Terminate provider and remove from session tracking
       await agent.provider.terminate();
       session.providers.delete(agentId);
+
+      // If no token count from context event, estimate from content length
+      // Rough estimate: ~4 characters per token for English text
+      if (tokens === 0 && responseContent.length > 0) {
+        const promptTokens = Math.ceil(fullPrompt.length / 4);
+        const responseTokens = Math.ceil(responseContent.length / 4);
+        tokens = promptTokens + responseTokens;
+      }
 
       // Emit agent complete event
       this.emit('verification:agent-complete', {

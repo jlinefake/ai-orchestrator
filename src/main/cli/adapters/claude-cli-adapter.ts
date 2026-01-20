@@ -512,6 +512,25 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             content: assistantContent,
           });
         }
+
+        // Extract context usage from assistant message (for real-time updates)
+        if (assistantMsg.message?.usage) {
+          const usage = assistantMsg.message.usage;
+          const totalUsedTokens = (usage.input_tokens || 0) +
+                                 (usage.output_tokens || 0) +
+                                 (usage.cache_read_input_tokens || 0);
+
+          // Default context window - will be updated by result message
+          const contextWindow = 200000;
+          const percentage = (totalUsedTokens / contextWindow) * 100;
+
+          this.emit('context', {
+            used: totalUsedTokens,
+            total: contextWindow,
+            percentage: Math.min(percentage, 100),
+          });
+        }
+
         this.emit('status', 'busy' as InstanceStatus);
         break;
 
@@ -587,6 +606,42 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         break;
 
       case 'result':
+        const resultMsg = message as any;
+
+        // Extract context usage from result message
+        if (resultMsg.modelUsage || resultMsg.usage) {
+          // Get the model's context window from modelUsage if available
+          let contextWindow = 200000; // Default
+          let totalUsedTokens = 0;
+
+          if (resultMsg.modelUsage) {
+            // modelUsage is keyed by model name, get the first one
+            const modelKeys = Object.keys(resultMsg.modelUsage);
+            if (modelKeys.length > 0) {
+              const modelData = resultMsg.modelUsage[modelKeys[0]];
+              contextWindow = modelData.contextWindow || 200000;
+              // Total used = input + output + cache reads (cache reads count toward context)
+              totalUsedTokens = (modelData.inputTokens || 0) +
+                               (modelData.outputTokens || 0) +
+                               (modelData.cacheReadInputTokens || 0);
+            }
+          } else if (resultMsg.usage) {
+            totalUsedTokens = (resultMsg.usage.input_tokens || 0) +
+                             (resultMsg.usage.output_tokens || 0) +
+                             (resultMsg.usage.cache_read_input_tokens || 0);
+          }
+
+          const percentage = (totalUsedTokens / contextWindow) * 100;
+          const costEstimate = resultMsg.total_cost_usd || 0;
+
+          this.emit('context', {
+            used: totalUsedTokens,
+            total: contextWindow,
+            percentage: Math.min(percentage, 100),
+            costEstimate,
+          });
+        }
+
         this.emit('status', 'idle' as InstanceStatus);
         break;
 

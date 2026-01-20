@@ -42,6 +42,7 @@ import { TodoListComponent } from './todo-list.component';
         class="full-drop-zone"
         (filesDropped)="onFilesDropped($event)"
         (imagesPasted)="onImagesPasted($event)"
+        (filePathDropped)="onFilePathDropped($event)"
       >
         <div class="instance-detail">
           <!-- Header -->
@@ -73,6 +74,17 @@ import { TodoListComponent } from './todo-list.component';
               </div>
               <div class="instance-meta">
                 <button
+                  class="mode-badge"
+                  [class.plan]="inst.agentId === 'plan'"
+                  [class.review]="inst.agentId === 'review'"
+                  [disabled]="isChangingMode()"
+                  [title]="'Click to change mode (will restart instance)'"
+                  (click)="onCycleAgentMode()"
+                >
+                  {{ getAgentModeIcon(inst.agentId) }} {{ getAgentModeName(inst.agentId) }}
+                </button>
+                <span class="separator">•</span>
+                <button
                   class="working-dir-btn mono truncate"
                   [title]="inst.workingDirectory || 'Click to select a working folder'"
                   (click)="onSelectFolder()"
@@ -83,6 +95,7 @@ import { TodoListComponent } from './todo-list.component';
                 <button
                   class="yolo-badge"
                   [class.active]="inst.yoloMode"
+                  [disabled]="isTogglingYolo()"
                   [title]="inst.yoloMode ? 'YOLO Mode ON - Click to disable (will restart)' : 'YOLO Mode OFF - Click to enable (will restart)'"
                   (click)="onToggleYolo()"
                 >
@@ -155,6 +168,8 @@ import { TodoListComponent } from './todo-list.component';
             [disabled]="inst.status === 'terminated'"
             [placeholder]="inputPlaceholder()"
             [pendingFiles]="pendingFiles()"
+            [queuedCount]="queuedMessageCount()"
+            [isBusy]="inst.status === 'busy'"
             (sendMessage)="onSendMessage($event)"
             (removeFile)="onRemoveFile($event)"
             (addFiles)="onAddFiles()"
@@ -227,21 +242,27 @@ import { TodoListComponent } from './todo-list.component';
         min-height: 0;
       }
 
+      /* Instance Detail - Main conversation area */
       .instance-detail {
         display: flex;
         flex-direction: column;
         flex: 1;
         min-height: 0;
         overflow: hidden;
-        padding: var(--spacing-md);
+        padding: var(--spacing-lg);
         gap: var(--spacing-md);
+        position: relative;
+        z-index: 1;
       }
 
+      /* Header - Refined command bar aesthetic */
       .detail-header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        gap: var(--spacing-md);
+        gap: var(--spacing-lg);
+        padding-bottom: var(--spacing-md);
+        border-bottom: 1px solid var(--border-subtle);
       }
 
       .instance-identity {
@@ -252,21 +273,26 @@ import { TodoListComponent } from './todo-list.component';
       .name-row {
         display: flex;
         align-items: center;
-        gap: var(--spacing-sm);
+        gap: var(--spacing-md);
       }
 
       .session-id {
         margin-left: auto;
-        font-size: 11px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.05em;
         color: var(--text-muted);
         background: var(--bg-tertiary);
-        padding: 2px 8px;
+        padding: 4px 10px;
         border-radius: var(--radius-sm);
+        border: 1px solid var(--border-subtle);
       }
 
       .instance-name {
-        font-size: 18px;
-        font-weight: 600;
+        font-family: var(--font-display);
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
         margin: 0;
         color: var(--text-primary);
 
@@ -275,6 +301,13 @@ import { TodoListComponent } from './todo-list.component';
           display: flex;
           align-items: center;
           gap: var(--spacing-xs);
+          padding: 2px 4px;
+          border-radius: var(--radius-sm);
+          transition: background var(--transition-fast);
+
+          &:hover {
+            background: var(--bg-hover);
+          }
 
           .edit-icon {
             opacity: 0;
@@ -289,15 +322,18 @@ import { TodoListComponent } from './todo-list.component';
       }
 
       .name-input {
-        font-size: 18px;
-        font-weight: 600;
-        padding: 2px 8px;
+        font-family: var(--font-display);
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        padding: 4px 10px;
         border: 2px solid var(--primary-color);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         background: var(--bg-secondary);
         color: var(--text-primary);
         outline: none;
         min-width: 200px;
+        box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
       }
 
       .instance-meta {
@@ -306,38 +342,89 @@ import { TodoListComponent } from './todo-list.component';
         gap: var(--spacing-sm);
         font-size: 12px;
         color: var(--text-secondary);
-        margin-top: var(--spacing-xs);
+        margin-top: var(--spacing-sm);
+        flex-wrap: wrap;
       }
 
       .separator {
-        color: var(--text-muted);
+        color: var(--border-color);
+        font-size: 8px;
       }
 
       .working-dir-btn {
         max-width: 300px;
-        background: transparent;
-        border: 1px dashed var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-subtle);
         border-radius: var(--radius-sm);
-        padding: 2px 8px;
-        color: var(--text-secondary);
+        padding: 4px 10px;
+        color: var(--text-muted);
         cursor: pointer;
         transition: all var(--transition-fast);
 
         &:hover {
           border-color: var(--primary-color);
           color: var(--text-primary);
-          background: var(--bg-tertiary);
+          background: rgba(var(--primary-rgb), 0.1);
         }
       }
 
-      .yolo-badge {
-        padding: 2px 8px;
+      /* Mode Badge - Pill style with glow */
+      .mode-badge {
+        padding: 4px 10px;
         border: none;
-        border-radius: var(--radius-sm);
-        font-size: 11px;
-        font-weight: 600;
+        border-radius: 12px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+
+        &:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        }
+
+        &.plan {
+          background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+          box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+          &:hover {
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+          }
+        }
+
+        &.review {
+          background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+          box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
+          &:hover {
+            box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
+          }
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none;
+        }
+      }
+
+      /* YOLO Badge - Danger aesthetic */
+      .yolo-badge {
+        padding: 4px 10px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
         background: var(--bg-tertiary);
         color: var(--text-muted);
         cursor: pointer;
@@ -345,92 +432,119 @@ import { TodoListComponent } from './todo-list.component';
 
         &:hover {
           background: var(--bg-hover);
+          border-color: var(--border-color);
         }
 
         &.active {
-          background: linear-gradient(135deg, #f59e0b, #ef4444);
-          color: white;
+          background: linear-gradient(135deg, var(--primary-color), #ef4444);
+          border: none;
+          color: var(--bg-primary);
+          box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.4);
+          animation: glow 2s ease-in-out infinite;
 
           &:hover {
-            background: linear-gradient(135deg, #d97706, #dc2626);
+            box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.5);
           }
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
       }
 
+      /* Header Actions - Refined button group */
       .header-actions {
         display: flex;
-        gap: var(--spacing-sm);
+        gap: var(--spacing-xs);
       }
 
       .btn-action {
         padding: var(--spacing-sm) var(--spacing-md);
         border-radius: var(--radius-md);
-        font-size: 13px;
-        font-weight: 500;
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
         background: var(--bg-tertiary);
-        color: var(--text-primary);
-        transition: background var(--transition-fast);
+        border: 1px solid var(--border-subtle);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all var(--transition-fast);
 
         &:hover:not(:disabled) {
           background: var(--bg-hover);
+          border-color: var(--border-color);
+          color: var(--text-primary);
         }
 
         &:disabled {
-          opacity: 0.5;
+          opacity: 0.4;
+          cursor: not-allowed;
         }
       }
 
       .btn-danger {
         color: var(--error-color);
+        border-color: rgba(var(--error-rgb), 0.3);
 
         &:hover:not(:disabled) {
-          background: var(--error-bg);
+          background: rgba(var(--error-rgb), 0.1);
+          border-color: var(--error-color);
+          box-shadow: 0 0 12px rgba(var(--error-rgb), 0.2);
         }
       }
 
       .btn-interrupt {
-        background: var(--warning-bg, #fef3c7);
-        color: var(--warning-color, #d97706);
-        border: 1px solid var(--warning-color, #d97706);
-        animation: pulse 2s ease-in-out infinite;
+        background: rgba(var(--primary-rgb), 0.15);
+        color: var(--primary-color);
+        border: 1px solid rgba(var(--primary-rgb), 0.4);
+        animation: pulse 1.5s ease-in-out infinite;
 
         &:hover:not(:disabled) {
-          background: var(--warning-color, #d97706);
-          color: white;
+          background: var(--primary-color);
+          border-color: var(--primary-color);
+          color: var(--bg-primary);
+          box-shadow: 0 0 16px rgba(var(--primary-rgb), 0.5);
         }
-      }
-
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
       }
 
       .btn-primary {
-        background: var(--primary-color);
-        color: white;
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+        border: none;
+        color: var(--bg-primary);
+        box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
 
         &:hover:not(:disabled) {
-          background: var(--primary-hover);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
         }
       }
 
+      /* Context Section */
       .context-section {
         padding: var(--spacing-sm) var(--spacing-md);
         background: var(--bg-secondary);
         border-radius: var(--radius-md);
+        border: 1px solid var(--border-subtle);
       }
 
+      /* Output Section - Chat area */
       .output-section {
         flex: 1;
-        min-height: 0; /* Important for flex children to scroll */
+        min-height: 0;
         display: flex;
         flex-direction: column;
         gap: var(--spacing-sm);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        overflow: hidden;
       }
 
       .output-section app-output-stream {
         flex: 1;
-        min-height: 0; /* Allow scrolling within flex container */
+        min-height: 0;
       }
 
       .output-section app-activity-status {
@@ -439,7 +553,7 @@ import { TodoListComponent } from './todo-list.component';
         padding-bottom: var(--spacing-sm);
       }
 
-      /* Welcome view (no selection) */
+      /* Creating View - Startup animation */
       .creating-view {
         display: flex;
         flex: 1;
@@ -447,32 +561,46 @@ import { TodoListComponent } from './todo-list.component';
         align-items: center;
         justify-content: center;
         padding: var(--spacing-xl);
+        background: var(--bg-primary);
+        position: relative;
+      }
+
+      .creating-view::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse 60% 40% at 50% 40%, rgba(var(--primary-rgb), 0.1), transparent);
+        pointer-events: none;
       }
 
       .creating-content {
         text-align: center;
+        position: relative;
+        z-index: 1;
       }
 
       .creating-spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid var(--bg-tertiary);
+        width: 48px;
+        height: 48px;
+        border: 2px solid var(--border-subtle);
         border-top-color: var(--primary-color);
         border-radius: 50%;
-        margin: 0 auto var(--spacing-md);
-        animation: spin 1s linear infinite;
-      }
-
-      @keyframes spin {
-        to { transform: rotate(360deg); }
+        margin: 0 auto var(--spacing-lg);
+        animation: spin 0.8s linear infinite;
+        box-shadow: 0 0 24px rgba(var(--primary-rgb), 0.3);
       }
 
       .creating-text {
-        font-size: 16px;
-        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        font-size: 13px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-muted);
         margin: 0;
+        animation: pulse 2s ease-in-out infinite;
       }
 
+      /* Welcome View - Premium onboarding experience */
       .welcome-view {
         display: flex;
         flex: 1;
@@ -481,47 +609,75 @@ import { TodoListComponent } from './todo-list.component';
         justify-content: center;
         padding: var(--spacing-xl);
         gap: var(--spacing-xl);
+        background: var(--bg-primary);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .welcome-view::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 80% 50% at 50% -10%, rgba(var(--primary-rgb), 0.12), transparent),
+          radial-gradient(circle at 80% 80%, rgba(var(--secondary-rgb), 0.08), transparent);
+        pointer-events: none;
       }
 
       .welcome-content {
         text-align: center;
-        max-width: 400px;
+        max-width: 480px;
+        position: relative;
+        z-index: 1;
+        animation: fadeInUp 0.6s ease-out;
       }
 
       .welcome-icon {
-        font-size: 64px;
-        margin-bottom: var(--spacing-md);
+        font-size: 72px;
+        margin-bottom: var(--spacing-lg);
+        filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.3));
       }
 
       .welcome-title {
-        font-size: 28px;
-        font-weight: 600;
+        font-family: var(--font-display);
+        font-size: 32px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
         color: var(--text-primary);
         margin: 0 0 var(--spacing-sm) 0;
+        background: linear-gradient(135deg, var(--text-primary) 0%, var(--primary-color) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
 
       .welcome-hint {
-        font-size: 16px;
-        color: var(--text-secondary);
+        font-size: 15px;
+        color: var(--text-muted);
         margin: 0;
+        line-height: 1.5;
       }
 
       .welcome-input {
         width: 100%;
-        max-width: 600px;
+        max-width: 640px;
+        position: relative;
+        z-index: 1;
+        animation: fadeInUp 0.6s ease-out 0.15s both;
       }
 
       .welcome-folder-btn {
         display: inline-flex;
         align-items: center;
         gap: var(--spacing-sm);
-        margin-top: var(--spacing-md);
-        padding: var(--spacing-sm) var(--spacing-md);
+        margin-top: var(--spacing-lg);
+        padding: var(--spacing-sm) var(--spacing-lg);
         background: var(--bg-secondary);
-        border: 1px dashed var(--border-color);
-        border-radius: var(--radius-md);
-        color: var(--text-secondary);
-        font-size: 14px;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+        font-size: 13px;
         cursor: pointer;
         max-width: 100%;
         overflow: hidden;
@@ -532,7 +688,8 @@ import { TodoListComponent } from './todo-list.component';
         &:hover {
           border-color: var(--primary-color);
           color: var(--text-primary);
-          background: var(--bg-tertiary);
+          background: rgba(var(--primary-rgb), 0.1);
+          box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.15);
         }
       }
     `
@@ -551,6 +708,15 @@ export class InstanceDetailComponent {
   welcomeWorkingDirectory = signal<string | null>(null);
   isEditingName = signal(false);
   isCreatingInstance = signal(false);
+  isChangingMode = signal(false);
+  isTogglingYolo = signal(false);
+
+  // Queue count - computed from store (re-evaluated when instance changes)
+  queuedMessageCount = computed(() => {
+    const inst = this.instance();
+    if (!inst) return 0;
+    return this.store.getQueuedMessageCount(inst.id);
+  });
 
   constructor() {
     // Initialize welcomeWorkingDirectory from settings
@@ -616,6 +782,35 @@ export class InstanceDetailComponent {
     this.pendingFiles.update((current) => [...current, ...images]);
   }
 
+  async onFilePathDropped(filePath: string): Promise<void> {
+    // File path dropped from file explorer - fetch file content via IPC
+    const ipc = (window as any).electronAPI;
+    if (!ipc) return;
+
+    try {
+      const stats = await ipc.getFileStats(filePath);
+      if (!stats.success || !stats.data) return;
+
+      // For directories, we can't add them as attachments yet
+      if (stats.data.isDirectory) {
+        console.log('Directory dropped - not supported yet:', filePath);
+        return;
+      }
+
+      // Read file content via fetch (works for local files in Electron)
+      const response = await fetch(`file://${filePath}`);
+      const blob = await response.blob();
+
+      // Create a File object from the blob
+      const fileName = filePath.split('/').pop() || 'file';
+      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
+
+      this.pendingFiles.update((current) => [...current, file]);
+    } catch (error) {
+      console.error('Failed to load file from path:', error);
+    }
+  }
+
   onRemoveFile(file: File): void {
     this.pendingFiles.update((files) => files.filter((f) => f !== file));
   }
@@ -661,10 +856,54 @@ export class InstanceDetailComponent {
     this.isEditingName.set(false);
   }
 
-  onToggleYolo(): void {
+  async onToggleYolo(): Promise<void> {
     const inst = this.instance();
-    if (inst) {
-      this.store.toggleYoloMode(inst.id);
+    if (!inst) return;
+
+    // Prevent rapid clicks from spawning multiple instances
+    if (this.isTogglingYolo()) return;
+
+    this.isTogglingYolo.set(true);
+    try {
+      await this.store.toggleYoloMode(inst.id);
+    } finally {
+      this.isTogglingYolo.set(false);
+    }
+  }
+
+  async onCycleAgentMode(): Promise<void> {
+    const inst = this.instance();
+    if (!inst) return;
+
+    // Prevent rapid clicks from spawning multiple instances
+    if (this.isChangingMode()) return;
+
+    // Cycle through modes: build -> plan -> review -> build
+    const modes = ['build', 'plan', 'review'];
+    const currentIndex = modes.indexOf(inst.agentId || 'build');
+    const nextIndex = (currentIndex + 1) % modes.length;
+
+    this.isChangingMode.set(true);
+    try {
+      await this.store.changeAgentMode(inst.id, modes[nextIndex]);
+    } finally {
+      this.isChangingMode.set(false);
+    }
+  }
+
+  getAgentModeIcon(agentId?: string): string {
+    switch (agentId) {
+      case 'plan': return '🗺️';
+      case 'review': return '👁️';
+      default: return '🔨';
+    }
+  }
+
+  getAgentModeName(agentId?: string): string {
+    switch (agentId) {
+      case 'plan': return 'Plan';
+      case 'review': return 'Review';
+      default: return 'Build';
     }
   }
 

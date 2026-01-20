@@ -38,6 +38,8 @@ export const IPC_CHANNELS = {
   // File operations
   FILE_DROP: 'file:drop',
   IMAGE_PASTE: 'image:paste',
+  FILE_READ_DIR: 'file:read-dir',
+  FILE_GET_STATS: 'file:get-stats',
 
   // App operations
   APP_READY: 'app:ready',
@@ -501,6 +503,35 @@ export const IPC_CHANNELS = {
   SPECIALIST_INSTANCE_CREATED: 'specialist:instance-created',
   SPECIALIST_INSTANCE_STATUS_CHANGED: 'specialist:instance-status-changed',
   SPECIALIST_FINDING_ADDED: 'specialist:finding-added',
+
+  // LLM Service operations (streaming)
+  LLM_SUMMARIZE: 'llm:summarize',
+  LLM_SUMMARIZE_STREAM: 'llm:summarize-stream',
+  LLM_SUBQUERY: 'llm:subquery',
+  LLM_SUBQUERY_STREAM: 'llm:subquery-stream',
+  LLM_CANCEL_STREAM: 'llm:cancel-stream',
+  LLM_STREAM_CHUNK: 'llm:stream-chunk',
+  LLM_COUNT_TOKENS: 'llm:count-tokens',
+  LLM_TRUNCATE_TOKENS: 'llm:truncate-tokens',
+  LLM_GET_CONFIG: 'llm:get-config',
+  LLM_SET_CONFIG: 'llm:set-config',
+  LLM_GET_STATUS: 'llm:get-status',
+
+  // A/B Testing operations (Phase 6)
+  AB_CREATE_EXPERIMENT: 'ab:create-experiment',
+  AB_UPDATE_EXPERIMENT: 'ab:update-experiment',
+  AB_DELETE_EXPERIMENT: 'ab:delete-experiment',
+  AB_START_EXPERIMENT: 'ab:start-experiment',
+  AB_PAUSE_EXPERIMENT: 'ab:pause-experiment',
+  AB_COMPLETE_EXPERIMENT: 'ab:complete-experiment',
+  AB_GET_EXPERIMENT: 'ab:get-experiment',
+  AB_LIST_EXPERIMENTS: 'ab:list-experiments',
+  AB_GET_VARIANT: 'ab:get-variant',
+  AB_RECORD_OUTCOME: 'ab:record-outcome',
+  AB_GET_RESULTS: 'ab:get-results',
+  AB_GET_WINNER: 'ab:get-winner',
+  AB_GET_STATS: 'ab:get-stats',
+  AB_CONFIGURE: 'ab:configure',
 } as const;
 
 export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
@@ -1327,6 +1358,29 @@ export interface WatcherClearBufferPayload {
 }
 
 // ============================================
+// File Explorer Payloads
+// ============================================
+
+export interface FileReadDirPayload {
+  path: string;
+  includeHidden?: boolean;
+}
+
+export interface FileReadDirResult {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  size: number;
+  modifiedAt: number;
+  extension?: string;
+}
+
+export interface FileGetStatsPayload {
+  path: string;
+}
+
+// ============================================
 // Structured Logging Payloads (13.1)
 // ============================================
 
@@ -1940,4 +1994,55 @@ export interface SpecialistUpdateMetricsPayload {
 
 export interface SpecialistGetPromptAdditionPayload {
   profileId: string;
+}
+
+// ============================================
+// LLM Service Payloads
+// ============================================
+
+export interface LLMSummarizePayload {
+  requestId: string;
+  content: string;
+  targetTokens: number;
+  preserveKeyPoints?: boolean;
+}
+
+export interface LLMSubQueryPayload {
+  requestId: string;
+  prompt: string;
+  context: string;
+  depth: number;
+}
+
+export interface LLMCancelStreamPayload {
+  requestId: string;
+}
+
+export interface LLMCountTokensPayload {
+  text: string;
+  model?: string;
+}
+
+export interface LLMTruncateTokensPayload {
+  text: string;
+  maxTokens: number;
+  model?: string;
+}
+
+export interface LLMSetConfigPayload {
+  provider?: 'anthropic' | 'ollama' | 'openai' | 'local';
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  timeout?: number;
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
+  ollamaHost?: string;
+}
+
+export interface LLMStreamChunkPayload {
+  requestId: string;
+  chunk: string;
+  done: boolean;
+  error?: string;
 }

@@ -13,6 +13,7 @@ import {
   inject,
   signal,
   computed,
+  effect,
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
@@ -21,10 +22,12 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { VerificationStore } from '../../core/state/verification.store';
 import { CliStore } from '../../core/state/cli.store';
+import { DraftService, VERIFICATION_DRAFT_KEY } from '../../core/services/draft.service';
 import { AgentCardComponent } from './agent-card.component';
 import { AgentConfigPanelComponent } from './agent-config-panel.component';
 import { VerificationMonitorComponent } from './verification-monitor.component';
 import { VerificationResultsComponent } from './verification-results.component';
+import { DropZoneComponent } from '../file-drop/drop-zone.component';
 import type { CliType } from '../../../../shared/types/unified-cli-response';
 import type { SynthesisStrategy } from '../../../../shared/types/verification.types';
 
@@ -37,6 +40,7 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
     AgentConfigPanelComponent,
     VerificationMonitorComponent,
     VerificationResultsComponent,
+    DropZoneComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -94,6 +98,11 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
       </div>
 
       <!-- Tab Content -->
+      <app-drop-zone
+        class="tab-content-drop-zone"
+        (filesDropped)="onFilesDropped($event)"
+        (imagesPasted)="onImagesPasted($event)"
+      >
       <div class="tab-content">
         @switch (store.selectedTab()) {
           @case ('dashboard') {
@@ -104,12 +113,39 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
               </div>
 
               <div class="quick-start-form">
+                <!-- Pending files preview -->
+                @if (pendingFilePreviews().length > 0) {
+                  <div class="pending-files">
+                    @for (preview of pendingFilePreviews(); track preview.file.name) {
+                      @if (preview.isImage) {
+                        <div class="file-preview-card">
+                          <div class="preview-thumbnail" [style.background-image]="'url(' + preview.previewUrl + ')'">
+                          </div>
+                          <div class="preview-info">
+                            <span class="file-name">{{ preview.file.name }}</span>
+                            <span class="file-size">{{ preview.size }}</span>
+                          </div>
+                          <button class="file-remove" (click)="removeFile(preview.file)" title="Remove file">×</button>
+                        </div>
+                      } @else {
+                        <div class="file-chip">
+                          <span class="file-icon">{{ preview.icon }}</span>
+                          <span class="file-name">{{ preview.file.name }}</span>
+                          <button class="file-remove" (click)="removeFile(preview.file)">×</button>
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+
                 <div class="form-group">
                   <label class="form-label">Prompt</label>
                   <textarea
                     class="form-textarea"
-                    [(ngModel)]="promptInput"
-                    placeholder="Enter your verification prompt..."
+                    [ngModel]="promptInput"
+                    (ngModelChange)="onPromptChange($event)"
+                    (keydown.enter)="onEnterKey($event)"
+                    placeholder="Enter your verification prompt... (paste images or drop files here)"
                     rows="3"
                   ></textarea>
                 </div>
@@ -260,6 +296,13 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
                           {{ session.status }}
                         </span>
                       </div>
+                      <button
+                        class="session-delete"
+                        title="Delete session"
+                        (click)="deleteSession(session.id, $event)"
+                      >
+                        ×
+                      </button>
                       <button class="session-arrow">→</button>
                     </div>
                   }
@@ -281,6 +324,7 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
           }
         }
       </div>
+      </app-drop-zone>
 
       <!-- Config Panel Overlay -->
       @if (store.configPanelOpen()) {
@@ -586,6 +630,96 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
       gap: 16px;
     }
 
+    .tab-content-drop-zone {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .pending-files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .file-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .file-icon {
+      font-size: 14px;
+    }
+
+    .file-name {
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-remove {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0 2px;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .file-remove:hover {
+      color: var(--error-color, #ef4444);
+    }
+
+    .file-preview-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      background: var(--bg-tertiary, var(--bg-secondary));
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .preview-thumbnail {
+      width: 48px;
+      height: 48px;
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+      background-color: var(--bg-secondary);
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+    .preview-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .preview-info .file-name {
+      max-width: 200px;
+    }
+
+    .file-size {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
     .form-group {
       display: flex;
       flex-direction: column;
@@ -791,6 +925,22 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
       color: #ef4444;
     }
 
+    .session-delete {
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .session-delete:hover {
+      color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+    }
+
     .session-arrow {
       background: none;
       border: none;
@@ -807,15 +957,44 @@ import type { SynthesisStrategy } from '../../../../shared/types/verification.ty
 })
 export class VerificationDashboardComponent implements OnInit, OnDestroy {
   private router = inject(Router);
+  private draftService = inject(DraftService);
   store = inject(VerificationStore);
   cliStore = inject(CliStore);
 
   // Form state
   promptInput = '';
   selectedStrategy: SynthesisStrategy = 'debate';
+  pendingFiles = signal<File[]>([]);
+  private filePreviewUrls = new Map<File, string>();
 
   // UI state
-  agentsCollapsed = signal(false);
+  agentsCollapsed = signal(true);
+
+  // Computed preview data for pending files
+  pendingFilePreviews = computed(() => {
+    const files = this.pendingFiles();
+    return files.map(file => ({
+      file,
+      isImage: file.type.startsWith('image/'),
+      previewUrl: this.getOrCreatePreviewUrl(file),
+      size: this.formatFileSize(file.size),
+      icon: this.getFileIcon(file),
+    }));
+  });
+
+  private getOrCreatePreviewUrl(file: File): string {
+    if (!this.filePreviewUrls.has(file)) {
+      const url = URL.createObjectURL(file);
+      this.filePreviewUrls.set(file, url);
+    }
+    return this.filePreviewUrls.get(file)!;
+  }
+
+  private formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   // Strategy options with descriptions
   strategies: { value: SynthesisStrategy; label: string; description: string }[] = [
@@ -843,6 +1022,11 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
     return selected.filter(agent => availableNames.includes(agent));
   });
 
+  constructor() {
+    // Load draft on init
+    this.promptInput = this.draftService.getDraft(VERIFICATION_DRAFT_KEY);
+  }
+
   ngOnInit(): void {
     // Initialize CLI detection if not already done
     if (!this.cliStore.initialized()) {
@@ -857,7 +1041,14 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    // Cleanup if needed
+    // Save draft when leaving the view
+    this.draftService.setDraft(VERIFICATION_DRAFT_KEY, this.promptInput);
+
+    // Clean up all preview URLs
+    for (const url of this.filePreviewUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+    this.filePreviewUrls.clear();
   }
 
   // ============================================
@@ -944,11 +1135,16 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
       synthesisStrategy: this.selectedStrategy,
     });
 
-    // Start verification
-    await this.store.startVerification(this.promptInput.trim());
+    // Get pending files before clearing
+    const files = this.pendingFiles();
 
-    // Clear input
+    // Start verification with files
+    await this.store.startVerification(this.promptInput.trim(), undefined, files.length > 0 ? files : undefined);
+
+    // Clear input and draft
     this.promptInput = '';
+    this.draftService.clearDraft(VERIFICATION_DRAFT_KEY);
+    this.pendingFiles.set([]);
   }
 
   // ============================================
@@ -957,6 +1153,11 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
 
   viewSession(sessionId: string): void {
     this.store.viewSessionResults(sessionId);
+  }
+
+  deleteSession(sessionId: string, event: Event): void {
+    event.stopPropagation(); // Don't trigger viewSession
+    this.store.deleteSession(sessionId);
   }
 
   truncatePrompt(prompt: string): string {
@@ -996,5 +1197,49 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
   showHelp(): void {
     // Show help modal or navigate to docs
     console.log('Show help');
+  }
+
+  // ============================================
+  // Draft & File Handling
+  // ============================================
+
+  onPromptChange(value: string): void {
+    this.promptInput = value;
+    this.draftService.setDraft(VERIFICATION_DRAFT_KEY, value);
+  }
+
+  onEnterKey(event: Event): void {
+    const keyEvent = event as KeyboardEvent;
+    // Enter without Shift sends, Shift+Enter adds newline
+    if (!keyEvent.shiftKey && this.canStartVerification()) {
+      event.preventDefault();
+      this.startVerification();
+    }
+  }
+
+  onFilesDropped(files: File[]): void {
+    this.pendingFiles.update(current => [...current, ...files]);
+  }
+
+  onImagesPasted(images: File[]): void {
+    this.pendingFiles.update(current => [...current, ...images]);
+  }
+
+  removeFile(file: File): void {
+    // Revoke the preview URL
+    const url = this.filePreviewUrls.get(file);
+    if (url) {
+      URL.revokeObjectURL(url);
+      this.filePreviewUrls.delete(file);
+    }
+    this.pendingFiles.update(current => current.filter(f => f !== file));
+  }
+
+  getFileIcon(file: File): string {
+    if (file.type.startsWith('image/')) return '🖼️';
+    if (file.type.includes('pdf')) return '📄';
+    if (file.type.includes('text')) return '📝';
+    if (file.type.includes('json') || file.type.includes('javascript')) return '📋';
+    return '📎';
   }
 }

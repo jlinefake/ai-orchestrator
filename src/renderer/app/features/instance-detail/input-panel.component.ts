@@ -14,6 +14,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommandStore } from '../../core/state/command.store';
+import { DraftService } from '../../core/services/draft.service';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
 
 @Component({
@@ -109,28 +110,41 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
 
       <div class="input-hints">
         <span class="hint">Press Enter to send, Shift+Enter for new line</span>
-        @if (disabled()) {
-          <span class="hint hint-interrupt">Press Ctrl+C to interrupt</span>
+        @if (isBusy()) {
+          <span class="hint hint-interrupt">Press Esc to interrupt</span>
         } @else {
           <span class="hint">Type / for commands, Cmd+K for palette</span>
         }
       </div>
+
+      @if (queuedCount() > 0) {
+        <div class="queue-indicator">
+          <span class="queue-badge">{{ queuedCount() }}</span>
+          <span class="queue-text">message{{ queuedCount() > 1 ? 's' : '' }} queued</span>
+        </div>
+      }
     </div>
   `,
   styles: [`
+    /* Input Panel - Refined message composer */
     .input-panel {
+      position: relative;
       background: var(--bg-secondary);
-      border-radius: var(--radius-md);
+      border-radius: var(--radius-lg);
       padding: var(--spacing-md);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
     }
 
+    /* Pending Files - Attachment preview area */
     .pending-files {
       display: flex;
       flex-wrap: wrap;
       gap: var(--spacing-sm);
       margin-bottom: var(--spacing-sm);
       padding-bottom: var(--spacing-sm);
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid var(--border-subtle);
+      animation: fadeIn 0.2s ease-out;
     }
 
     .file-chip {
@@ -139,50 +153,69 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       gap: var(--spacing-xs);
       padding: var(--spacing-xs) var(--spacing-sm);
       background: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-      font-size: 12px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      color: var(--text-secondary);
+      transition: all var(--transition-fast);
+    }
+
+    .file-chip:hover {
+      border-color: var(--border-color);
     }
 
     .file-preview-card {
       display: flex;
       align-items: center;
       gap: var(--spacing-sm);
-      padding: 6px 8px;
+      padding: 8px 10px;
       background: var(--bg-tertiary);
       border-radius: var(--radius-md);
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--border-subtle);
+      transition: all var(--transition-fast);
+    }
+
+    .file-preview-card:hover {
+      border-color: var(--border-color);
     }
 
     .preview-thumbnail {
-      width: 48px;
-      height: 48px;
-      border-radius: var(--radius-sm);
+      width: 52px;
+      height: 52px;
+      border-radius: var(--radius-md);
       overflow: hidden;
       flex-shrink: 0;
       background-color: var(--bg-secondary);
       background-size: cover;
       background-position: center;
       background-repeat: no-repeat;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
 
     .preview-info {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
       min-width: 0;
     }
 
     .preview-info .file-name {
+      font-family: var(--font-display);
       font-size: 12px;
-      font-weight: 500;
+      font-weight: 600;
       max-width: 120px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      color: var(--text-primary);
     }
 
     .file-size {
+      font-family: var(--font-mono);
       font-size: 10px;
+      letter-spacing: 0.03em;
       color: var(--text-muted);
     }
 
@@ -198,24 +231,27 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
     }
 
     .file-remove {
-      width: 20px;
-      height: 20px;
+      width: 22px;
+      height: 22px;
       display: flex;
       align-items: center;
       justify-content: center;
       border-radius: 50%;
+      border: none;
       font-size: 14px;
       color: var(--text-muted);
       background: transparent;
       transition: all var(--transition-fast);
       flex-shrink: 0;
+      cursor: pointer;
 
       &:hover {
-        background: var(--error-bg);
+        background: rgba(var(--error-rgb), 0.15);
         color: var(--error-color);
       }
     }
 
+    /* Input Row - Message input area */
     .input-row {
       display: flex;
       gap: var(--spacing-sm);
@@ -224,34 +260,54 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
 
     .message-input {
       flex: 1;
-      min-height: 44px;
+      min-height: 46px;
       max-height: 200px;
       padding: var(--spacing-sm) var(--spacing-md);
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
       resize: none;
       line-height: 1.5;
+      font-family: var(--font-display);
       font-size: 14px;
+      color: var(--text-primary);
+      transition: all var(--transition-fast);
+
+      &::placeholder {
+        color: var(--text-muted);
+      }
+
+      &:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
+      }
 
       &:disabled {
-        opacity: 0.5;
+        opacity: 0.4;
         cursor: not-allowed;
       }
     }
 
+    /* Action Buttons - Attach and Send */
     .btn-attach {
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       border-radius: var(--radius-md);
       background: var(--bg-tertiary);
-      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all var(--transition-fast);
       flex-shrink: 0;
+      cursor: pointer;
 
       &:hover:not(:disabled) {
-        background: var(--bg-primary);
-        color: var(--text-primary);
+        background: var(--bg-hover);
+        border-color: var(--border-color);
+        color: var(--secondary-color);
       }
 
       &:disabled {
@@ -261,68 +317,125 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
     }
 
     .attach-icon {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 300;
       line-height: 1;
     }
 
     .btn-send {
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       border-radius: var(--radius-md);
-      background: var(--primary-color);
-      color: white;
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      border: none;
+      color: var(--bg-primary);
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all var(--transition-fast);
       flex-shrink: 0;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
 
       &:hover:not(:disabled) {
-        background: var(--primary-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
       }
 
       &:disabled {
         opacity: 0.3;
         cursor: not-allowed;
+        transform: none;
       }
     }
 
     .send-icon {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: bold;
     }
 
+    /* Input Hints - Keyboard shortcuts */
     .input-hints {
       display: flex;
       justify-content: space-between;
-      margin-top: var(--spacing-xs);
+      margin-top: var(--spacing-sm);
       padding: 0 var(--spacing-xs);
     }
 
     .hint {
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.03em;
       color: var(--text-muted);
     }
 
     .hint-interrupt {
-      color: var(--warning-color, #d97706);
-      font-weight: 500;
+      color: var(--primary-color);
+      font-weight: 600;
+      animation: pulse 2s ease-in-out infinite;
     }
 
+    /* Queue Indicator - Message queue status */
+    .queue-indicator {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-top: var(--spacing-sm);
+      padding: var(--spacing-sm);
+      background: rgba(var(--primary-rgb), 0.1);
+      border: 1px solid rgba(var(--primary-rgb), 0.3);
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .queue-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 8px;
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      color: var(--bg-primary);
+      border-radius: 11px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+    }
+
+    .queue-text {
+      color: var(--primary-color);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    /* Command Suggestions - Autocomplete dropdown */
     .command-suggestions {
       position: absolute;
       bottom: 100%;
       left: 0;
       right: 0;
-      background: var(--bg-primary);
+      background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-md);
-      margin-bottom: var(--spacing-xs);
-      max-height: 240px;
+      margin-bottom: var(--spacing-sm);
+      max-height: 260px;
       overflow-y: auto;
-      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.2);
       z-index: 100;
+      animation: fadeInUp 0.15s ease-out;
+    }
+
+    .command-suggestions::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .command-suggestions::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 2px;
     }
 
     .suggestion-item {
@@ -336,46 +449,51 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       text-align: left;
       cursor: pointer;
       transition: background var(--transition-fast);
+      border-bottom: 1px solid var(--border-subtle);
 
-      &:hover,
-      &.selected {
-        background: var(--bg-secondary);
+      &:last-child {
+        border-bottom: none;
+      }
+
+      &:hover {
+        background: var(--bg-hover);
       }
 
       &.selected {
-        background: var(--bg-tertiary);
+        background: rgba(var(--primary-rgb), 0.1);
       }
     }
 
     .cmd-name {
-      font-weight: 600;
-      color: var(--primary-color);
       font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      color: var(--primary-color);
       white-space: nowrap;
     }
 
     .cmd-desc {
-      font-size: 13px;
-      color: var(--text-secondary);
+      font-size: 12px;
+      color: var(--text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-
-    .input-panel {
-      position: relative;
     }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class InputPanelComponent implements OnDestroy {
   private commandStore = inject(CommandStore);
+  private draftService = inject(DraftService);
   private filePreviewUrls = new Map<File, string>();
 
   instanceId = input.required<string>();
   disabled = input<boolean>(false);
   placeholder = input<string>('Send a message...');
   pendingFiles = input<File[]>([]);
+  queuedCount = input<number>(0);
+  isBusy = input<boolean>(false);
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
@@ -405,6 +523,7 @@ export class InputPanelComponent implements OnDestroy {
   message = signal('');
   showCommandSuggestions = signal(false);
   selectedCommandIndex = signal(0);
+  private previousInstanceId: string | null = null;
 
   // Computed: filter commands based on input
   filteredCommands = computed(() => {
@@ -424,6 +543,22 @@ export class InputPanelComponent implements OnDestroy {
   constructor() {
     // Load commands on init
     this.commandStore.loadCommands();
+
+    // Persist message drafts per instance - load draft when instance changes
+    effect(() => {
+      const currentId = this.instanceId();
+
+      // Save draft for previous instance before switching
+      if (this.previousInstanceId && this.previousInstanceId !== currentId) {
+        const currentMessage = this.message();
+        this.draftService.setDraft(this.previousInstanceId, currentMessage);
+      }
+
+      // Load draft for new instance
+      const savedDraft = this.draftService.getDraft(currentId);
+      this.message.set(savedDraft);
+      this.previousInstanceId = currentId;
+    });
 
     // Clean up preview URLs when files change
     effect(() => {
@@ -456,6 +591,9 @@ export class InputPanelComponent implements OnDestroy {
     const textarea = event.target as HTMLTextAreaElement;
     const value = textarea.value;
     this.message.set(value);
+
+    // Save draft as user types
+    this.draftService.setDraft(this.instanceId(), value);
 
     // Show command suggestions when typing "/"
     if (value.startsWith('/') && !value.includes('\n')) {
@@ -523,9 +661,10 @@ export class InputPanelComponent implements OnDestroy {
     this.commandStore.executeCommand(command.id, this.instanceId(), args);
     this.executeCommand.emit({ commandId: command.id, args });
 
-    // Clear input
+    // Clear input and draft
     this.message.set('');
     this.showCommandSuggestions.set(false);
+    this.draftService.clearDraft(this.instanceId());
 
     // Reset textarea height
     const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
@@ -556,6 +695,9 @@ export class InputPanelComponent implements OnDestroy {
     this.sendMessage.emit(text);
     this.message.set('');
     this.showCommandSuggestions.set(false);
+
+    // Clear draft for this instance
+    this.draftService.clearDraft(this.instanceId());
 
     // Reset textarea height
     const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;

@@ -2,7 +2,7 @@
  * Dashboard Component - Main application layout
  */
 
-import { Component, inject, OnInit, OnDestroy, signal, HostListener } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, signal, computed, HostListener } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { InstanceStore } from '../../core/state/instance.store';
@@ -10,6 +10,7 @@ import { CliStore } from '../../core/state/cli.store';
 import { SettingsStore } from '../../core/state/settings.store';
 import { AgentStore } from '../../core/state/agent.store';
 import { KeybindingService } from '../../core/services/keybinding.service';
+import { ViewLayoutService } from '../../core/services/view-layout.service';
 import { InstanceListComponent } from '../instance-list/instance-list.component';
 import { InstanceDetailComponent } from '../instance-detail/instance-detail.component';
 import { CliErrorComponent } from '../cli-error/cli-error.component';
@@ -17,11 +18,12 @@ import { SettingsComponent } from '../settings/settings.component';
 import { HistorySidebarComponent } from '../history/history-sidebar.component';
 import { AgentSelectorComponent } from '../agents/agent-selector.component';
 import { CommandPaletteComponent } from '../commands/command-palette.component';
+import { FileExplorerComponent } from '../file-explorer/file-explorer.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DecimalPipe, InstanceListComponent, InstanceDetailComponent, CliErrorComponent, SettingsComponent, HistorySidebarComponent, AgentSelectorComponent, CommandPaletteComponent],
+  imports: [DecimalPipe, InstanceListComponent, InstanceDetailComponent, CliErrorComponent, SettingsComponent, HistorySidebarComponent, AgentSelectorComponent, CommandPaletteComponent, FileExplorerComponent],
   template: `
     @if (cliStore.loading()) {
       <div class="loading-container">
@@ -112,6 +114,14 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       <main class="main-content">
         <app-instance-detail />
       </main>
+
+      <!-- File Explorer Sidebar (right side) - only show when an instance is selected -->
+      @if (store.selectedInstance()) {
+        <app-file-explorer
+          [initialPath]="selectedInstanceWorkingDir()"
+          (fileDragged)="onFileDragged($event)"
+        />
+      }
     </div>
 
     <!-- Settings Modal -->
@@ -140,35 +150,56 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       width: 100%;
     }
 
+    /* Loading State - Mission Control aesthetic */
     .loading-container {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100%;
-      gap: var(--spacing-md);
+      gap: var(--spacing-lg);
       color: var(--text-secondary);
+      background: var(--bg-primary);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .loading-container::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(var(--primary-rgb), 0.15), transparent),
+        radial-gradient(circle at 20% 80%, rgba(var(--secondary-rgb), 0.08), transparent);
+      pointer-events: none;
+    }
+
+    .loading-container p {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      animation: pulse 2s ease-in-out infinite;
     }
 
     .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid var(--border-color);
+      width: 48px;
+      height: 48px;
+      border: 2px solid var(--border-subtle);
       border-top-color: var(--primary-color);
       border-radius: 50%;
-      animation: spin 1s linear infinite;
+      animation: spin 0.8s linear infinite;
+      box-shadow: 0 0 20px rgba(var(--primary-rgb), 0.3);
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
+    /* Main Dashboard Layout */
     .dashboard {
       display: flex;
       min-height: 100%;
-      height: calc(100vh - 52px); /* Account for macOS title bar */
+      height: calc(100vh - 52px);
       width: 100%;
       background: var(--bg-primary);
+      position: relative;
     }
 
     .dashboard.resizing {
@@ -176,6 +207,7 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       cursor: col-resize;
     }
 
+    /* Sidebar - Command Center feel */
     .sidebar {
       min-width: 285px;
       max-width: 600px;
@@ -185,6 +217,8 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       background: var(--bg-secondary);
       border-right: 1px solid var(--border-color);
       flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
     }
 
     .resize-handle {
@@ -200,21 +234,15 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       &:hover,
       &.dragging {
         background: var(--primary-color);
+        box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.5);
       }
     }
 
-    .resize-handle::before {
-      content: '';
-      position: absolute;
-      left: -4px;
-      right: -4px;
-      top: 0;
-      bottom: 0;
-    }
-
+    /* Sidebar Header - Refined hierarchy */
     .sidebar-header {
-      padding: var(--spacing-md);
+      padding: var(--spacing-lg) var(--spacing-md) var(--spacing-md);
       border-bottom: 1px solid var(--border-color);
+      background: linear-gradient(180deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
     }
 
     .header-row {
@@ -225,67 +253,128 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
     }
 
     .app-title {
-      font-size: 16px;
-      font-weight: 600;
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
       margin: 0;
       color: var(--text-primary);
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--text-primary) 0%, var(--primary-color) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
     .header-actions {
       display: flex;
       align-items: center;
-      gap: var(--spacing-xs);
+      gap: 2px;
     }
 
     .btn-header-icon {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 32px;
-      height: 32px;
+      width: 34px;
+      height: 34px;
       background: transparent;
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
+      border: none;
+      border-radius: var(--radius-md);
+      color: var(--text-muted);
       cursor: pointer;
       transition: all var(--transition-fast);
       -webkit-app-region: no-drag;
+      position: relative;
+
+      &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: var(--bg-hover);
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+      }
 
       &:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
+        color: var(--primary-color);
+
+        &::before {
+          opacity: 1;
+        }
+      }
+
+      svg {
+        position: relative;
+        z-index: 1;
       }
     }
 
+    /* Create Section - Primary action styling */
     .create-section {
       display: flex;
       gap: var(--spacing-sm);
-      align-items: stretch;
+      align-items: center;
     }
 
     .btn-create {
       flex: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: var(--spacing-sm);
-      padding: var(--spacing-sm) var(--spacing-md);
-      background: var(--primary-color);
-      color: white;
+      gap: 6px;
+      padding: 8px 14px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      color: #000;
+      border: none;
       border-radius: var(--radius-md);
-      font-weight: 500;
-      transition: background var(--transition-fast);
-      -webkit-app-region: no-drag; /* Ensure button is clickable in drag zone */
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      -webkit-app-region: no-drag;
+      position: relative;
+      overflow: hidden;
+      box-shadow:
+        0 2px 8px rgba(var(--primary-rgb), 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+
+      &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 50%);
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+      }
 
       &:hover {
-        background: var(--primary-hover);
+        transform: translateY(-1px);
+        box-shadow:
+          0 4px 16px rgba(var(--primary-rgb), 0.4),
+          inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+        &::before {
+          opacity: 1;
+        }
+      }
+
+      &:active {
+        transform: translateY(0);
       }
     }
 
     .btn-icon {
-      font-size: 18px;
+      font-size: 20px;
+      font-weight: 700;
       line-height: 1;
+      color: #000;
     }
 
+    /* Sidebar Footer - Status bar aesthetic */
     .sidebar-footer {
       padding: var(--spacing-md);
       border-top: 1px solid var(--border-color);
@@ -293,38 +382,71 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       display: flex;
       flex-direction: column;
       gap: var(--spacing-sm);
+      position: relative;
+    }
+
+    .sidebar-footer::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: var(--spacing-md);
+      right: var(--spacing-md);
+      height: 1px;
+      background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--primary-rgb), 0.3) 50%,
+        transparent 100%
+      );
     }
 
     .stats {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-secondary);
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+    }
+
+    .stat {
+      color: var(--text-muted);
+      padding: 4px 8px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
     }
 
     .cost-stat {
-      color: var(--warning-color);
+      color: var(--primary-color);
       font-weight: 500;
+      border-color: rgba(var(--primary-rgb), 0.3);
+      background: rgba(var(--primary-rgb), 0.1);
     }
 
     .btn-close-all {
       width: 100%;
       padding: var(--spacing-xs) var(--spacing-sm);
       background: transparent;
-      border: 1px solid var(--error-color);
+      border: 1px solid rgba(var(--error-rgb), 0.5);
       color: var(--error-color);
       border-radius: var(--radius-sm);
-      font-size: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
       font-weight: 500;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
       cursor: pointer;
       transition: all var(--transition-fast);
 
       &:hover {
         background: var(--error-color);
+        border-color: var(--error-color);
         color: white;
+        box-shadow: 0 0 16px rgba(var(--error-rgb), 0.4);
       }
     }
 
+    /* Main Content Area */
     .main-content {
       flex: 1;
       min-width: 0;
@@ -333,6 +455,29 @@ import { CommandPaletteComponent } from '../commands/command-palette.component';
       display: flex;
       overflow: hidden;
       background: var(--bg-primary);
+      position: relative;
+    }
+
+    .main-content::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(180deg,
+        rgba(var(--primary-rgb), 0.03) 0%,
+        transparent 100%
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* File Explorer - ensure it takes full height */
+    app-file-explorer {
+      height: 100%;
+      flex-shrink: 0;
+      overflow: hidden;
     }
   `],
 })
@@ -343,29 +488,26 @@ export class DashboardComponent implements OnInit, OnDestroy {
   settingsStore = inject(SettingsStore);
   agentStore = inject(AgentStore);
   keybindingService = inject(KeybindingService);
+  private viewLayoutService = inject(ViewLayoutService);
 
   showSettings = signal(false);
   showHistory = signal(false);
   showCommandPalette = signal(false);
   showSidebar = signal(true);
 
-  // Sidebar resize state
-  sidebarWidth = signal(this.loadSidebarWidth());
+  // Computed: selected instance's working directory for file explorer
+  selectedInstanceWorkingDir = computed(() => {
+    const instance = this.store.selectedInstance();
+    return instance?.workingDirectory || null;
+  });
+
+  // Sidebar resize state - using ViewLayoutService for persistence
+  sidebarWidth = signal(this.viewLayoutService.sidebarWidth);
   isResizing = signal(false);
   private resizeStartX = 0;
   private resizeStartWidth = 0;
 
   private keybindingCleanup: (() => void)[] = [];
-
-  private loadSidebarWidth(): number {
-    const saved = localStorage.getItem('sidebarWidth');
-    const width = saved ? parseInt(saved, 10) : 320;
-    return Math.max(285, Math.min(600, width)); // Clamp to valid range
-  }
-
-  private saveSidebarWidth(width: number): void {
-    localStorage.setItem('sidebarWidth', width.toString());
-  }
 
   onResizeStart(event: MouseEvent): void {
     event.preventDefault();
@@ -381,13 +523,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const delta = event.clientX - this.resizeStartX;
     const newWidth = Math.max(285, Math.min(600, this.resizeStartWidth + delta));
     this.sidebarWidth.set(newWidth);
+    // Update service (debounced save)
+    this.viewLayoutService.setSidebarWidth(newWidth);
   }
 
   @HostListener('document:mouseup')
   onMouseUp(): void {
     if (this.isResizing()) {
       this.isResizing.set(false);
-      this.saveSidebarWidth(this.sidebarWidth());
     }
   }
 
@@ -529,6 +672,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   onCommandExecuted(event: { commandId: string; args: string[] }): void {
     console.log('Command executed:', event);
     // Command execution is handled by the palette component via CommandStore
+  }
+
+  onFileDragged(event: { path: string; name: string; isDirectory: boolean }): void {
+    // File dragged from explorer - can be used for drag preview feedback
+    console.log('File dragged from explorer:', event);
   }
 
   ngOnDestroy(): void {

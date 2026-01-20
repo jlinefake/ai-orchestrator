@@ -24,6 +24,7 @@ import {
   SummaryLevel,
   RLMStoreStats,
   RLMSessionStats,
+  BloomFilter,
 } from '../../shared/types/rlm.types';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
 import { ContextSectionRow } from '../persistence/rlm-database.types';
@@ -999,6 +1000,247 @@ export class RLMContextManager extends EventEmitter {
 
   private computeChecksum(content: string): string {
     return crypto.createHash('md5').update(content).digest('hex').slice(0, 12);
+  }
+
+  // ============ Performance Optimizations ============
+
+  /**
+   * Simple Bloom Filter implementation for fast negative lookups
+   * Uses multiple hash functions to minimize false positives
+   */
+  private createBloomFilter(expectedItems: number = 10000): BloomFilter {
+    const size = Math.max(1000, expectedItems * 10); // ~10 bits per item
+    const hashCount = 4;
+    return {
+      bits: new Uint8Array(Math.ceil(size / 8)),
+      size,
+      hashCount,
+    };
+  }
+
+  private bloomAdd(filter: BloomFilter, item: string): void {
+    const hashes = this.getBloomHashes(item, filter.hashCount, filter.size);
+    for (const hash of hashes) {
+      const byteIndex = Math.floor(hash / 8);
+      const bitIndex = hash % 8;
+      filter.bits[byteIndex] |= (1 << bitIndex);
+    }
+  }
+
+  private bloomMightContain(filter: BloomFilter, item: string): boolean {
+    const hashes = this.getBloomHashes(item, filter.hashCount, filter.size);
+    for (const hash of hashes) {
+      const byteIndex = Math.floor(hash / 8);
+      const bitIndex = hash % 8;
+      if (!(filter.bits[byteIndex] & (1 << bitIndex))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private getBloomHashes(item: string, count: number, size: number): number[] {
+    const hashes: number[] = [];
+    // Simple hash function using DJB2 with different seeds
+    for (let i = 0; i < count; i++) {
+      let hash = 5381 + i * 33;
+      for (let j = 0; j < item.length; j++) {
+        hash = ((hash << 5) + hash) ^ item.charCodeAt(j);
+      }
+      hashes.push(Math.abs(hash) % size);
+    }
+    return hashes;
+  }
+
+  /**
+   * Batch add multiple sections with deferred index rebuild
+   * Much faster than adding sections one by one
+   */
+  async addSectionsBatch(
+    storeId: string,
+    sections: Array<{
+      type: ContextSection['type'];
+      name: string;
+      content: string;
+      metadata?: Partial<ContextSection>;
+    }>
+  ): Promise<string[]> {
+    const store = this.stores.get(storeId);
+    if (!store) throw new Error(`Store not found: ${storeId}`);
+
+    const ids: string[] = [];
+    const addedSections: ContextSection[] = [];
+
+    // Process all sections without rebuilding index each time
+    for (const input of sections) {
+      const tokens = this.estimateTokens(input.content);
+      const section: ContextSection = {
+        id: `sec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: input.type,
+        name: input.name,
+        content: input.content,
+        tokens,
+        startOffset: store.totalSize,
+        endOffset: store.totalSize + input.content.length,
+        checksum: this.computeChecksum(input.content),
+        depth: 0,
+        ...input.metadata,
+      };
+
+      store.sections.push(section);
+      store.totalTokens += tokens;
+      store.totalSize += input.content.length;
+      ids.push(section.id);
+      addedSections.push(section);
+
+      // Persist section to database
+      if (this.db && this.persistenceEnabled) {
+        try {
+          this.db.addSection({
+            id: section.id,
+            storeId,
+            type: section.type,
+            name: section.name,
+            startOffset: section.startOffset,
+            endOffset: section.endOffset,
+            tokens: section.tokens,
+            checksum: section.checksum,
+            depth: section.depth,
+            filePath: section.filePath,
+            language: section.language,
+            sourceUrl: section.sourceUrl,
+            content: section.content,
+          });
+        } catch (error) {
+          console.error('[RLM] Failed to persist batch section:', error);
+        }
+      }
+    }
+
+    // Rebuild search index once for all sections
+    for (const section of addedSections) {
+      this.updateSearchIndex(store, section);
+    }
+
+    // Batch index sections in database
+    if (this.db && this.persistenceEnabled) {
+      for (const section of addedSections) {
+        try {
+          this.db.indexSection(storeId, section.id, section.content);
+        } catch (error) {
+          console.error('[RLM] Failed to index batch section:', error);
+        }
+      }
+    }
+
+    // Batch generate embeddings for semantic search
+    if (this.vectorStore) {
+      try {
+        await this.vectorStore.indexStore(
+          storeId,
+          addedSections.map(s => ({ id: s.id, content: s.content }))
+        );
+      } catch (error) {
+        console.error('[RLM] Failed to batch index vectors:', error);
+      }
+    }
+
+    this.emit('sections:batch_added', { storeId, count: addedSections.length, ids });
+    return ids;
+  }
+
+  /**
+   * Get section content with lazy loading support
+   * Content is loaded from DB only when accessed
+   */
+  getSectionContentLazy(storeId: string, sectionId: string): string {
+    const store = this.stores.get(storeId);
+    if (!store) return '';
+
+    const section = store.sections.find(s => s.id === sectionId);
+    if (!section) return '';
+
+    // If content is already loaded, return it
+    if (section.content) {
+      return section.content;
+    }
+
+    // Load from database if available
+    if (this.db && this.persistenceEnabled) {
+      try {
+        const row = this.db.getSection(sectionId);
+        if (row) {
+          const content = this.db.getSectionContent(row);
+          // Cache the loaded content
+          section.content = content;
+          return content;
+        }
+      } catch (error) {
+        console.error('[RLM] Failed to lazy load section content:', error);
+      }
+    }
+
+    return '';
+  }
+
+  /**
+   * Quick check if a term might exist in the store using bloom filter
+   * Returns false if definitely not present, true if possibly present
+   */
+  mightContainTerm(storeId: string, term: string): boolean {
+    const store = this.stores.get(storeId);
+    if (!store || !store.bloomFilter) return true; // If no filter, assume might contain
+
+    return this.bloomMightContain(store.bloomFilter, term.toLowerCase());
+  }
+
+  /**
+   * Rebuild the bloom filter for a store
+   */
+  rebuildBloomFilter(storeId: string): void {
+    const store = this.stores.get(storeId);
+    if (!store) return;
+
+    const filter = this.createBloomFilter(store.sections.length * 100);
+
+    for (const section of store.sections) {
+      if (section.depth > 0) continue; // Skip summaries
+      const words = section.content.toLowerCase().match(/\b\w{3,}\b/g) || [];
+      for (const word of words) {
+        this.bloomAdd(filter, word);
+      }
+    }
+
+    store.bloomFilter = filter;
+    this.emit('bloom_filter:rebuilt', { storeId, termCount: filter.size });
+  }
+
+  /**
+   * Optimized search using bloom filter for fast negative lookups
+   */
+  searchStoreOptimized(
+    storeId: string,
+    terms: string[],
+    maxResults: number = 10
+  ): { result: string; sectionsAccessed: string[] } {
+    const store = this.stores.get(storeId);
+    if (!store) return { result: '', sectionsAccessed: [] };
+
+    // Quick check with bloom filter
+    if (store.bloomFilter) {
+      const possibleTerms = terms.filter(term =>
+        this.bloomMightContain(store.bloomFilter!, term.toLowerCase())
+      );
+
+      // If none of the terms might be present, return early
+      if (possibleTerms.length === 0) {
+        return { result: 'No matches found.', sectionsAccessed: [] };
+      }
+    }
+
+    // Proceed with actual search
+    const pattern = terms.join('|');
+    return this.executeGrep(store, { pattern, maxResults });
   }
 
   // ============ Queries ============

@@ -18,11 +18,22 @@ export interface ContextStore {
   // Indexing (for efficient search)
   searchIndex?: SearchIndex;
   summaryIndex?: SummaryIndex;
+  bloomFilter?: BloomFilter; // For fast negative lookups
 
   // Metadata
   createdAt: number;
   lastAccessed: number;
   accessCount: number;
+}
+
+/**
+ * Bloom Filter for fast probabilistic set membership testing
+ * Returns "definitely not in set" or "possibly in set"
+ */
+export interface BloomFilter {
+  bits: Uint8Array;
+  size: number;
+  hashCount: number;
 }
 
 export interface ContextSection {

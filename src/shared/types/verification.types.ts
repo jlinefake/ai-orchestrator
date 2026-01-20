@@ -41,6 +41,7 @@ export interface VerificationRequest {
   config: VerificationConfig;
   context?: string; // Additional context to include
   taskType?: string; // Task classification for strategy selection
+  attachments?: { name: string; mimeType: string; data: string }[]; // Base64 encoded files
 }
 
 export interface AgentResponse {

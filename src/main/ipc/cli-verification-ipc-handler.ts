@@ -30,6 +30,7 @@ interface CliVerificationStartPayload {
   id: string;
   prompt: string;
   context?: string;
+  attachments?: { name: string; mimeType: string; data: string }[]; // Base64 encoded files
   config: {
     cliAgents?: CliType[];
     agentCount?: number;
@@ -218,7 +219,7 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
         // Start verification (async - result sent via events)
         // Pass the frontend's session ID so events use the same ID
         coordinator.startVerificationWithCli(
-          { prompt: payload.prompt, context: payload.context, id: payload.id },
+          { prompt: payload.prompt, context: payload.context, id: payload.id, attachments: payload.attachments },
           config
         ).then((result) => {
           sendToRenderer('verification:complete', {

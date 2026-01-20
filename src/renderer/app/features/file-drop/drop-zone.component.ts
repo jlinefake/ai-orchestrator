@@ -78,6 +78,8 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DropZoneComponent {
+  // Counter for generating short pasted image names (static to persist across instances)
+  private static pastedImageCounter = 1;
   filesDropped = output<File[]>();
   imagesPasted = output<File[]>();
 
@@ -105,15 +107,26 @@ export class DropZoneComponent {
     }
   }
 
+  // Output for file paths dragged from file explorer
+  filePathDropped = output<string>();
+
   @HostListener('drop', ['$event'])
   onDrop(event: DragEvent): void {
     event.preventDefault();
     event.stopPropagation();
     this.isDragOver.set(false);
 
+    // Check for native file drop first
     const files = Array.from(event.dataTransfer?.files || []);
     if (files.length > 0) {
       this.filesDropped.emit(files);
+      return;
+    }
+
+    // Check for file path from file explorer
+    const filePath = event.dataTransfer?.getData('application/x-file-path');
+    if (filePath) {
+      this.filePathDropped.emit(filePath);
     }
   }
 
@@ -127,10 +140,11 @@ export class DropZoneComponent {
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile();
         if (file) {
-          // Create a named file from the blob
+          // Create a named file from the blob with a short, friendly name
+          const ext = file.type.split('/')[1] || 'png';
           const namedFile = new File(
             [file],
-            `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+            `pasted-image-${DropZoneComponent.pastedImageCounter++}.${ext}`,
             { type: file.type }
           );
           imageFiles.push(namedFile);

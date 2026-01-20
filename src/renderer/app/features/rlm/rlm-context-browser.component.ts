@@ -16,8 +16,11 @@ import {
   computed,
   ChangeDetectionStrategy,
   HostListener,
+  OnInit,
+  OnDestroy,
+  inject
 } from '@angular/core';
-import { SlicePipe } from '@angular/common';
+import { SlicePipe, JsonPipe } from '@angular/common';
 import type {
   ContextStore,
   ContextSection,
@@ -25,8 +28,9 @@ import type {
   QueryType,
   RLMSession,
   RLMStoreStats,
-  RLMSessionStats,
+  RLMSessionStats
 } from '../../../../shared/types/rlm.types';
+import { ElectronIpcService } from '../../core/services/electron-ipc.service';
 
 /** Query result interface */
 interface QueryResult {
@@ -38,6 +42,23 @@ interface QueryResult {
   timestamp: number;
   duration: number;
   error?: string;
+}
+
+/** Saved query template interface */
+interface SavedQueryTemplate {
+  id: string;
+  name: string;
+  type: QueryType;
+  params: Record<string, unknown>;
+  createdAt: number;
+}
+
+/** Toast notification interface */
+interface ToastNotification {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info';
+  timestamp: number;
 }
 
 @Component({
@@ -52,14 +73,14 @@ interface QueryResult {
           <span class="rlm-icon">🧩</span>
           <span class="rlm-title">RLM Context Manager</span>
           @if (store()) {
-            <span class="section-count">{{ store()!.sections.length }} sections</span>
+            <span class="section-count"
+              >{{ store()!.sections.length }} sections</span
+            >
           }
         </div>
         <div class="header-actions">
           @if (session()) {
-            <div class="session-badge active">
-              Session Active
-            </div>
+            <div class="session-badge active">Session Active</div>
           } @else {
             <button class="action-btn primary" (click)="startSession.emit()">
               Start Session
@@ -68,12 +89,48 @@ interface QueryResult {
         </div>
       </div>
 
+      <!-- Toast Notifications Container -->
+      @if (toasts().length > 0) {
+        <div class="toast-container">
+          @for (toast of toasts(); track toast.id) {
+            <div
+              class="toast"
+              [class]="'toast-' + toast.type"
+              (click)="dismissToast(toast.id)"
+            >
+              <span class="toast-icon">
+                @switch (toast.type) {
+                  @case ('success') {
+                    ✓
+                  }
+                  @case ('error') {
+                    ✗
+                  }
+                  @case ('info') {
+                    ℹ
+                  }
+                }
+              </span>
+              <span class="toast-message">{{ toast.message }}</span>
+              <button
+                class="toast-close"
+                (click)="dismissToast(toast.id); $event.stopPropagation()"
+              >
+                ✕
+              </button>
+            </div>
+          }
+        </div>
+      }
+
       @if (store(); as storeData) {
         <!-- Stats Overview -->
         <div class="stats-overview">
           <div class="stat-card">
             <span class="stat-label">Total Tokens</span>
-            <span class="stat-value">{{ formatNumber(storeData.totalTokens) }}</span>
+            <span class="stat-value">{{
+              formatNumber(storeData.totalTokens)
+            }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Sections</span>
@@ -81,7 +138,9 @@ interface QueryResult {
           </div>
           <div class="stat-card">
             <span class="stat-label">Size</span>
-            <span class="stat-value">{{ formatBytes(storeData.totalSize) }}</span>
+            <span class="stat-value">{{
+              formatBytes(storeData.totalSize)
+            }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">Access Count</span>
@@ -94,7 +153,9 @@ interface QueryResult {
           <div class="session-stats">
             <div class="session-header">
               <span class="session-title">Session Statistics</span>
-              <span class="session-id">{{ sessionData.id | slice:0:12 }}...</span>
+              <span class="session-id"
+                >{{ sessionData.id | slice: 0 : 12 }}...</span
+              >
             </div>
             <div class="savings-display">
               <div class="savings-bar">
@@ -110,19 +171,27 @@ interface QueryResult {
             <div class="session-metrics">
               <div class="metric">
                 <span class="metric-label">Root Tokens</span>
-                <span class="metric-value">{{ formatNumber(sessionData.totalRootTokens) }}</span>
+                <span class="metric-value">{{
+                  formatNumber(sessionData.totalRootTokens)
+                }}</span>
               </div>
               <div class="metric">
                 <span class="metric-label">Sub-Query Tokens</span>
-                <span class="metric-value">{{ formatNumber(sessionData.totalSubQueryTokens) }}</span>
+                <span class="metric-value">{{
+                  formatNumber(sessionData.totalSubQueryTokens)
+                }}</span>
               </div>
               <div class="metric">
                 <span class="metric-label">Direct Estimate</span>
-                <span class="metric-value strikethrough">{{ formatNumber(sessionData.estimatedDirectTokens) }}</span>
+                <span class="metric-value strikethrough">{{
+                  formatNumber(sessionData.estimatedDirectTokens)
+                }}</span>
               </div>
               <div class="metric">
                 <span class="metric-label">Queries</span>
-                <span class="metric-value">{{ sessionData.queries.length }}</span>
+                <span class="metric-value">{{
+                  sessionData.queries.length
+                }}</span>
               </div>
             </div>
           </div>
@@ -199,7 +268,9 @@ interface QueryResult {
                     (input)="updateQueryParam('prompt', $event)"
                     [disabled]="!session()"
                   ></textarea>
-                  <label class="form-label">Context Hints (comma-separated)</label>
+                  <label class="form-label"
+                    >Context Hints (comma-separated)</label
+                  >
                   <input
                     type="text"
                     class="query-input"
@@ -216,12 +287,19 @@ interface QueryResult {
                   <div class="selected-sections">
                     @for (id of sectionIds(); track id) {
                       <span class="selected-section">
-                        {{ id | slice:0:8 }}...
-                        <button class="remove-btn" (click)="removeSectionId(id)">✕</button>
+                        {{ id | slice: 0 : 8 }}...
+                        <button
+                          class="remove-btn"
+                          (click)="removeSectionId(id)"
+                        >
+                          ✕
+                        </button>
                       </span>
                     }
                     @if (sectionIds().length === 0) {
-                      <span class="no-selection">Click sections below to select</span>
+                      <span class="no-selection"
+                        >Click sections below to select</span
+                      >
                     }
                   </div>
                 </div>
@@ -262,25 +340,118 @@ interface QueryResult {
               }
             }
 
-            <button
-              class="execute-btn"
-              [disabled]="!session() || !canExecuteQuery() || isQuerying()"
-              (click)="executeQuery()"
-            >
-              @if (isQuerying()) {
-                <span class="spinner">⟳</span> Querying...
-              } @else {
-                Execute Query
+            <div class="query-actions">
+              <button
+                class="execute-btn"
+                [disabled]="!session() || !canExecuteQuery() || isQuerying()"
+                (click)="executeQuery()"
+              >
+                @if (isQuerying()) {
+                  <span class="spinner">⟳</span> Querying...
+                } @else {
+                  Execute Query
+                }
+              </button>
+              @if (canExecuteQuery()) {
+                <button
+                  class="save-template-btn"
+                  (click)="openSaveTemplateDialog()"
+                  title="Save as template"
+                >
+                  💾
+                </button>
               }
-            </button>
+            </div>
           </div>
+
+          <!-- Saved Templates Section -->
+          @if (savedTemplates().length > 0) {
+            <div class="saved-templates">
+              <div class="templates-header">
+                <span class="templates-title">📑 Saved Templates</span>
+                <button
+                  class="collapse-btn"
+                  (click)="templatesExpanded.set(!templatesExpanded())"
+                >
+                  {{ templatesExpanded() ? '▼' : '▶' }}
+                </button>
+              </div>
+              @if (templatesExpanded()) {
+                <div class="templates-list">
+                  @for (template of savedTemplates(); track template.id) {
+                    <div class="template-item">
+                      <div
+                        class="template-info"
+                        (click)="loadTemplate(template)"
+                      >
+                        <span class="template-type">{{
+                          getQueryTypeIcon(template.type)
+                        }}</span>
+                        <span class="template-name">{{ template.name }}</span>
+                      </div>
+                      <button
+                        class="template-delete"
+                        (click)="deleteTemplate(template.id)"
+                        title="Delete template"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          <!-- Save Template Dialog -->
+          @if (showSaveTemplateDialog()) {
+            <div class="save-template-dialog">
+              <div class="dialog-header">
+                <span>Save Query Template</span>
+                <button class="close-btn" (click)="closeSaveTemplateDialog()">
+                  ✕
+                </button>
+              </div>
+              <div class="dialog-body">
+                <label class="form-label">Template Name</label>
+                <input
+                  type="text"
+                  class="query-input"
+                  placeholder="Enter template name..."
+                  [value]="newTemplateName()"
+                  (input)="updateTemplateName($event)"
+                />
+                <div class="template-preview">
+                  <span class="preview-label">Query Type:</span>
+                  <span class="preview-value"
+                    >{{ getQueryTypeIcon(selectedQueryType()) }}
+                    {{ selectedQueryType() }}</span
+                  >
+                </div>
+              </div>
+              <div class="dialog-footer">
+                <button class="action-btn" (click)="closeSaveTemplateDialog()">
+                  Cancel
+                </button>
+                <button
+                  class="action-btn primary"
+                  [disabled]="!newTemplateName().trim()"
+                  (click)="saveTemplate()"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          }
 
           <!-- Error Banner -->
           @if (queryError()) {
             <div class="error-banner">
               <span class="error-icon">⚠️</span>
               <span class="error-text">{{ queryError() }}</span>
-              <button class="close-error-btn" (click)="queryError.set(null)">✕</button>
+              <button class="close-error-btn" (click)="queryError.set(null)">
+                ✕
+              </button>
             </div>
           }
         </div>
@@ -290,8 +461,12 @@ interface QueryResult {
           <div class="query-results-section">
             <div class="results-header">
               <span class="results-title">Query Results</span>
-              <span class="results-count">{{ queryResults().length }} results</span>
-              <button class="clear-results-btn" (click)="clearResults()">Clear</button>
+              <span class="results-count"
+                >{{ queryResults().length }} results</span
+              >
+              <button class="clear-results-btn" (click)="clearResults()">
+                Clear
+              </button>
             </div>
             <div class="results-list">
               @for (result of queryResults(); track result.id) {
@@ -302,15 +477,26 @@ interface QueryResult {
                   (click)="selectResult(result)"
                 >
                   <div class="result-header">
-                    <span class="result-type">{{ getQueryTypeIcon(result.type) }} {{ result.type }}</span>
-                    <span class="result-time">{{ formatRelativeTime(result.timestamp) }}</span>
+                    <span class="result-type"
+                      >{{ getQueryTypeIcon(result.type) }}
+                      {{ result.type }}</span
+                    >
+                    <span class="result-time">{{
+                      formatRelativeTime(result.timestamp)
+                    }}</span>
                   </div>
-                  <div class="result-preview">{{ truncateContent(result.error || result.content) }}</div>
+                  <div class="result-preview">
+                    {{ truncateContent(result.error || result.content) }}
+                  </div>
                   <div class="result-meta">
-                    <span class="result-tokens">{{ result.tokens }} tokens</span>
+                    <span class="result-tokens"
+                      >{{ result.tokens }} tokens</span
+                    >
                     <span class="result-duration">{{ result.duration }}ms</span>
                     @if (result.sections.length > 0) {
-                      <span class="result-sections">{{ result.sections.length }} sections</span>
+                      <span class="result-sections"
+                        >{{ result.sections.length }} sections</span
+                      >
                     }
                   </div>
                 </div>
@@ -326,7 +512,9 @@ interface QueryResult {
               <span class="detail-title">
                 {{ getQueryTypeIcon(result.type) }} {{ result.type }} Result
               </span>
-              <button class="close-btn" (click)="activeQueryResult.set(null)">✕</button>
+              <button class="close-btn" (click)="activeQueryResult.set(null)">
+                ✕
+              </button>
             </div>
             <div class="detail-content">
               @if (result.error) {
@@ -346,12 +534,18 @@ interface QueryResult {
               </div>
               <div class="result-actions">
                 @if (!result.error) {
-                  <button class="action-btn" (click)="copyToClipboard(result.content)">
+                  <button
+                    class="action-btn"
+                    (click)="copyToClipboard(result.content)"
+                  >
                     📋 Copy
                   </button>
                 }
                 @if (result.sections.length > 0) {
-                  <button class="action-btn" (click)="showResultSections(result)">
+                  <button
+                    class="action-btn"
+                    (click)="showResultSections(result)"
+                  >
                     📄 View Sections
                   </button>
                 }
@@ -396,7 +590,9 @@ interface QueryResult {
                   <span class="section-type" [class]="'type-' + section.type">
                     {{ getSectionTypeIcon(section.type) }} {{ section.type }}
                   </span>
-                  <span class="section-tokens">{{ section.tokens }} tokens</span>
+                  <span class="section-tokens"
+                    >{{ section.tokens }} tokens</span
+                  >
                 </div>
                 <div class="section-name">{{ section.name }}</div>
                 <div class="section-preview">
@@ -404,13 +600,20 @@ interface QueryResult {
                 </div>
                 <div class="section-meta">
                   @if (section.filePath) {
-                    <span class="meta-item">📁 {{ section.filePath | slice:-30 }}</span>
+                    <span class="meta-item"
+                      >📁 {{ section.filePath | slice: -30 }}</span
+                    >
                   }
                   @if (section.depth > 0) {
-                    <span class="meta-item depth">Depth: {{ section.depth }}</span>
+                    <span class="meta-item depth"
+                      >Depth: {{ section.depth }}</span
+                    >
                   }
                   @if (section.summarizes && section.summarizes.length > 0) {
-                    <span class="meta-item">📚 Summarizes {{ section.summarizes.length }} sections</span>
+                    <span class="meta-item"
+                      >📚 Summarizes
+                      {{ section.summarizes.length }} sections</span
+                    >
                   }
                 </div>
               </div>
@@ -455,7 +658,9 @@ interface QueryResult {
                   </div>
                   <div class="metadata-item">
                     <span class="metadata-label">Offset</span>
-                    <span class="metadata-value">{{ section.startOffset }} - {{ section.endOffset }}</span>
+                    <span class="metadata-value"
+                      >{{ section.startOffset }} - {{ section.endOffset }}</span
+                    >
                   </div>
                   @if (section.filePath) {
                     <div class="metadata-item">
@@ -471,7 +676,9 @@ interface QueryResult {
                   }
                   <div class="metadata-item">
                     <span class="metadata-label">Checksum</span>
-                    <span class="metadata-value mono">{{ section.checksum }}</span>
+                    <span class="metadata-value mono">{{
+                      section.checksum
+                    }}</span>
                   </div>
                 </div>
               </div>
@@ -481,8 +688,11 @@ interface QueryResult {
                   <span class="section-label">Summarizes</span>
                   <div class="summarizes-list">
                     @for (id of section.summarizes; track id) {
-                      <button class="summarized-item" (click)="navigateToSection(id)">
-                        {{ id | slice:0:12 }}...
+                      <button
+                        class="summarized-item"
+                        (click)="navigateToSection(id)"
+                      >
+                        {{ id | slice: 0 : 12 }}...
                       </button>
                     }
                   </div>
@@ -500,7 +710,10 @@ interface QueryResult {
                   {{ isSectionInQuery(section.id) ? 'Added' : 'Add to Query' }}
                 </button>
               }
-              <button class="action-btn" (click)="getSectionContent(section.id)">
+              <button
+                class="action-btn"
+                (click)="getSectionContent(section.id)"
+              >
                 Get Full Content
               </button>
             </div>
@@ -521,911 +734,1151 @@ interface QueryResult {
       }
     </div>
   `,
-  styles: [`
-    .rlm-container {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      display: flex;
-      flex-direction: column;
-      max-height: 800px;
-      overflow: hidden;
-    }
+  styles: [
+    `
+      .rlm-container {
+        position: relative;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        display: flex;
+        flex-direction: column;
+        max-height: 800px;
+        overflow: hidden;
+      }
 
-    .rlm-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
+      .rlm-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
 
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: var(--spacing-sm);
-    }
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+      }
 
-    .rlm-icon {
-      font-size: 18px;
-    }
+      .rlm-icon {
+        font-size: 18px;
+      }
 
-    .rlm-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
+      .rlm-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
 
-    .section-count {
-      padding: 2px 6px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-      font-size: 11px;
-      color: var(--text-secondary);
-    }
+      .section-count {
+        padding: 2px 6px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
 
-    .session-badge {
-      padding: 4px 10px;
-      border-radius: var(--radius-sm);
-      font-size: 11px;
-      font-weight: 600;
+      .session-badge {
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        font-weight: 600;
 
-      &.active {
-        background: rgba(16, 185, 129, 0.2);
+        &.active {
+          background: rgba(16, 185, 129, 0.2);
+          color: #10b981;
+        }
+      }
+
+      .action-btn {
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 12px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover:not(:disabled) {
+          background: var(--bg-hover);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        &.primary {
+          background: var(--primary-color);
+          border-color: var(--primary-color);
+          color: white;
+
+          &:hover:not(:disabled) {
+            opacity: 0.9;
+          }
+        }
+      }
+
+      /* Stats Overview */
+      .stats-overview {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-sm);
+        padding: var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .stat-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: var(--spacing-sm);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+      }
+
+      .stat-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .stat-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      /* Session Stats */
+      .session-stats {
+        padding: var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+      }
+
+      .session-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--spacing-sm);
+      }
+
+      .session-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .session-id {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+      }
+
+      .savings-display {
+        margin-bottom: var(--spacing-sm);
+      }
+
+      .savings-bar {
+        height: 8px;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 4px;
+      }
+
+      .savings-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #10b981, #34d399);
+        border-radius: 4px;
+        transition: width var(--transition-normal);
+      }
+
+      .savings-text {
+        font-size: 11px;
         color: #10b981;
-      }
-    }
-
-    .action-btn {
-      padding: 6px 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
-      font-size: 12px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover:not(:disabled) {
-        background: var(--bg-hover);
+        font-weight: 600;
       }
 
-      &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
+      .session-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-sm);
       }
 
-      &.primary {
+      .metric {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .metric-label {
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+
+      .metric-value {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-primary);
+
+        &.strikethrough {
+          text-decoration: line-through;
+          color: var(--text-muted);
+        }
+      }
+
+      /* Query Panel */
+      .query-panel {
+        padding: var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .query-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--spacing-sm);
+      }
+
+      .query-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .query-type-selector {
+        display: flex;
+        gap: 4px;
+      }
+
+      .query-type-btn {
+        padding: 4px 8px;
+        background: var(--bg-tertiary);
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 10px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover:not(:disabled) {
+          background: var(--bg-hover);
+        }
+
+        &.active {
+          background: var(--primary-color);
+          color: white;
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+      }
+
+      .query-input-area {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+      }
+
+      .query-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+      }
+
+      .form-label {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+
+      .query-input {
+        padding: 8px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 12px;
+
+        &:focus {
+          outline: none;
+          border-color: var(--primary-color);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+        }
+
+        &.small {
+          width: 100px;
+        }
+      }
+
+      .query-textarea {
+        padding: 8px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 12px;
+        min-height: 60px;
+        resize: vertical;
+
+        &:focus {
+          outline: none;
+          border-color: var(--primary-color);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+        }
+      }
+
+      .selected-sections {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: var(--spacing-xs);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+        min-height: 32px;
+      }
+
+      .selected-section {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
         background: var(--primary-color);
-        border-color: var(--primary-color);
         color: white;
+        border-radius: var(--radius-sm);
+        font-size: 10px;
+      }
+
+      .remove-btn {
+        background: transparent;
+        border: none;
+        color: white;
+        cursor: pointer;
+        opacity: 0.7;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
+      .no-selection {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .execute-btn {
+        padding: 8px 16px;
+        background: var(--primary-color);
+        border: none;
+        border-radius: var(--radius-sm);
+        color: white;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--transition-fast);
 
         &:hover:not(:disabled) {
           opacity: 0.9;
         }
-      }
-    }
 
-    /* Stats Overview */
-    .stats-overview {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: var(--spacing-sm);
-      padding: var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .stat-card {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: var(--spacing-sm);
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-    }
-
-    .stat-label {
-      font-size: 10px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .stat-value {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    /* Session Stats */
-    .session-stats {
-      padding: var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-tertiary);
-    }
-
-    .session-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--spacing-sm);
-    }
-
-    .session-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .session-id {
-      font-size: 10px;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-    }
-
-    .savings-display {
-      margin-bottom: var(--spacing-sm);
-    }
-
-    .savings-bar {
-      height: 8px;
-      background: var(--bg-secondary);
-      border-radius: 4px;
-      overflow: hidden;
-      margin-bottom: 4px;
-    }
-
-    .savings-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #10b981, #34d399);
-      border-radius: 4px;
-      transition: width var(--transition-normal);
-    }
-
-    .savings-text {
-      font-size: 11px;
-      color: #10b981;
-      font-weight: 600;
-    }
-
-    .session-metrics {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: var(--spacing-sm);
-    }
-
-    .metric {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .metric-label {
-      font-size: 9px;
-      color: var(--text-muted);
-    }
-
-    .metric-value {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-primary);
-
-      &.strikethrough {
-        text-decoration: line-through;
-        color: var(--text-muted);
-      }
-    }
-
-    /* Query Panel */
-    .query-panel {
-      padding: var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .query-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--spacing-sm);
-    }
-
-    .query-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .query-type-selector {
-      display: flex;
-      gap: 4px;
-    }
-
-    .query-type-btn {
-      padding: 4px 8px;
-      background: var(--bg-tertiary);
-      border: none;
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
-      font-size: 10px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover:not(:disabled) {
-        background: var(--bg-hover);
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
       }
 
-      &.active {
-        background: var(--primary-color);
-        color: white;
+      /* Sections Panel */
+      .sections-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
 
-      &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-    }
-
-    .query-input-area {
-      display: flex;
-      flex-direction: column;
-      gap: var(--spacing-sm);
-    }
-
-    .query-form {
-      display: flex;
-      flex-direction: column;
-      gap: var(--spacing-xs);
-    }
-
-    .form-label {
-      font-size: 10px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    .query-input {
-      padding: 8px 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
-      font-size: 12px;
-
-      &:focus {
-        outline: none;
-        border-color: var(--primary-color);
+      .sections-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
       }
 
-      &:disabled {
-        opacity: 0.5;
-      }
-
-      &.small {
-        width: 100px;
-      }
-    }
-
-    .query-textarea {
-      padding: 8px 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      color: var(--text-primary);
-      font-size: 12px;
-      min-height: 60px;
-      resize: vertical;
-
-      &:focus {
-        outline: none;
-        border-color: var(--primary-color);
-      }
-
-      &:disabled {
-        opacity: 0.5;
-      }
-    }
-
-    .selected-sections {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      padding: var(--spacing-xs);
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-      min-height: 32px;
-    }
-
-    .selected-section {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      background: var(--primary-color);
-      color: white;
-      border-radius: var(--radius-sm);
-      font-size: 10px;
-    }
-
-    .remove-btn {
-      background: transparent;
-      border: none;
-      color: white;
-      cursor: pointer;
-      opacity: 0.7;
-
-      &:hover {
-        opacity: 1;
-      }
-    }
-
-    .no-selection {
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .execute-btn {
-      padding: 8px 16px;
-      background: var(--primary-color);
-      border: none;
-      border-radius: var(--radius-sm);
-      color: white;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover:not(:disabled) {
-        opacity: 0.9;
-      }
-
-      &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-    }
-
-    /* Sections Panel */
-    .sections-panel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    .sections-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .sections-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .section-filters {
-      display: flex;
-      gap: 4px;
-    }
-
-    .filter-btn {
-      padding: 3px 8px;
-      background: var(--bg-tertiary);
-      border: none;
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
-      font-size: 10px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover {
-        background: var(--bg-hover);
-      }
-
-      &.active {
-        background: var(--primary-color);
-        color: white;
-      }
-    }
-
-    .sections-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: var(--spacing-sm);
-      display: flex;
-      flex-direction: column;
-      gap: var(--spacing-xs);
-    }
-
-    .section-card {
-      background: var(--bg-tertiary);
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
-      padding: var(--spacing-sm);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover {
-        border-color: var(--border-color);
-      }
-
-      &.selected {
-        border-color: var(--primary-color);
-        background: var(--bg-secondary);
-      }
-
-      &.summary {
-        border-left: 3px solid #f59e0b;
-      }
-    }
-
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 4px;
-    }
-
-    .section-type {
-      padding: 2px 6px;
-      border-radius: var(--radius-sm);
-      font-size: 10px;
-      font-weight: 600;
-
-      &.type-file {
-        background: rgba(59, 130, 246, 0.2);
-        color: #3b82f6;
-      }
-
-      &.type-conversation {
-        background: rgba(16, 185, 129, 0.2);
-        color: #10b981;
-      }
-
-      &.type-tool_output {
-        background: rgba(245, 158, 11, 0.2);
-        color: #f59e0b;
-      }
-
-      &.type-external {
-        background: rgba(139, 92, 246, 0.2);
-        color: #8b5cf6;
-      }
-
-      &.type-summary {
-        background: rgba(236, 72, 153, 0.2);
-        color: #ec4899;
-      }
-    }
-
-    .section-tokens {
-      font-size: 10px;
-      color: var(--text-muted);
-    }
-
-    .section-name {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-primary);
-      margin-bottom: 4px;
-    }
-
-    .section-preview {
-      font-size: 11px;
-      color: var(--text-secondary);
-      line-height: 1.4;
-      margin-bottom: 4px;
-    }
-
-    .section-meta {
-      display: flex;
-      gap: var(--spacing-sm);
-    }
-
-    .meta-item {
-      font-size: 9px;
-      color: var(--text-muted);
-
-      &.depth {
-        color: #f59e0b;
-      }
-    }
-
-    /* Section Detail */
-    .section-detail {
-      border-top: 1px solid var(--border-color);
-      background: var(--bg-tertiary);
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
-    .detail-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .detail-type {
-      padding: 4px 8px;
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .close-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      font-size: 16px;
-      cursor: pointer;
-
-      &:hover {
+      .sections-title {
+        font-size: 12px;
+        font-weight: 600;
         color: var(--text-primary);
       }
-    }
 
-    .detail-body {
-      padding: var(--spacing-md);
-    }
-
-    .detail-section {
-      margin-bottom: var(--spacing-md);
-
-      &:last-child {
-        margin-bottom: 0;
+      .section-filters {
+        display: flex;
+        gap: 4px;
       }
-    }
 
-    .section-label {
-      display: block;
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: var(--spacing-xs);
-    }
+      .filter-btn {
+        padding: 3px 8px;
+        background: var(--bg-tertiary);
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 10px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
 
-    .section-value {
-      font-size: 12px;
-      color: var(--text-primary);
-    }
+        &:hover {
+          background: var(--bg-hover);
+        }
 
-    .section-content {
-      margin: 0;
-      padding: var(--spacing-sm);
-      background: var(--bg-secondary);
-      border-radius: var(--radius-sm);
-      font-size: 11px;
-      color: var(--text-primary);
-      white-space: pre-wrap;
-      max-height: 120px;
-      overflow-y: auto;
-      font-family: var(--font-mono);
-    }
+        &.active {
+          background: var(--primary-color);
+          color: white;
+        }
+      }
 
-    .metadata-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--spacing-sm);
-    }
+      .sections-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--spacing-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+      }
 
-    .metadata-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
+      .section-card {
+        background: var(--bg-tertiary);
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        padding: var(--spacing-sm);
+        cursor: pointer;
+        transition: all var(--transition-fast);
 
-    .metadata-label {
-      font-size: 9px;
-      color: var(--text-muted);
-    }
+        &:hover {
+          border-color: var(--border-color);
+        }
 
-    .metadata-value {
-      font-size: 11px;
-      color: var(--text-primary);
+        &.selected {
+          border-color: var(--primary-color);
+          background: var(--bg-secondary);
+        }
 
-      &.mono {
+        &.summary {
+          border-left: 3px solid #f59e0b;
+        }
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+
+      .section-type {
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        font-size: 10px;
+        font-weight: 600;
+
+        &.type-file {
+          background: rgba(59, 130, 246, 0.2);
+          color: #3b82f6;
+        }
+
+        &.type-conversation {
+          background: rgba(16, 185, 129, 0.2);
+          color: #10b981;
+        }
+
+        &.type-tool_output {
+          background: rgba(245, 158, 11, 0.2);
+          color: #f59e0b;
+        }
+
+        &.type-external {
+          background: rgba(139, 92, 246, 0.2);
+          color: #8b5cf6;
+        }
+
+        &.type-summary {
+          background: rgba(236, 72, 153, 0.2);
+          color: #ec4899;
+        }
+      }
+
+      .section-tokens {
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      .section-name {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+      }
+
+      .section-preview {
+        font-size: 11px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+        margin-bottom: 4px;
+      }
+
+      .section-meta {
+        display: flex;
+        gap: var(--spacing-sm);
+      }
+
+      .meta-item {
+        font-size: 9px;
+        color: var(--text-muted);
+
+        &.depth {
+          color: #f59e0b;
+        }
+      }
+
+      /* Section Detail */
+      .section-detail {
+        border-top: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+        max-height: 300px;
+        overflow-y: auto;
+      }
+
+      .detail-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .detail-type {
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .close-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 16px;
+        cursor: pointer;
+
+        &:hover {
+          color: var(--text-primary);
+        }
+      }
+
+      .detail-body {
+        padding: var(--spacing-md);
+      }
+
+      .detail-section {
+        margin-bottom: var(--spacing-md);
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+      }
+
+      .section-label {
+        display: block;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: var(--spacing-xs);
+      }
+
+      .section-value {
+        font-size: 12px;
+        color: var(--text-primary);
+      }
+
+      .section-content {
+        margin: 0;
+        padding: var(--spacing-sm);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        max-height: 120px;
+        overflow-y: auto;
         font-family: var(--font-mono);
       }
-    }
 
-    .summarizes-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
+      .metadata-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+      }
 
-    .summarized-item {
-      padding: 4px 8px;
-      background: var(--bg-secondary);
-      border: none;
-      border-radius: var(--radius-sm);
-      color: var(--primary-color);
-      font-size: 10px;
-      cursor: pointer;
-      font-family: var(--font-mono);
+      .metadata-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
 
-      &:hover {
-        background: var(--primary-color);
+      .metadata-label {
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+
+      .metadata-value {
+        font-size: 11px;
+        color: var(--text-primary);
+
+        &.mono {
+          font-family: var(--font-mono);
+        }
+      }
+
+      .summarizes-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .summarized-item {
+        padding: 4px 8px;
+        background: var(--bg-secondary);
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--primary-color);
+        font-size: 10px;
+        cursor: pointer;
+        font-family: var(--font-mono);
+
+        &:hover {
+          background: var(--primary-color);
+          color: white;
+        }
+      }
+
+      .detail-actions {
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        gap: var(--spacing-sm);
+        justify-content: flex-end;
+      }
+
+      /* No Store State */
+      .no-store {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--spacing-md);
+        padding: var(--spacing-xl) var(--spacing-lg);
+      }
+
+      .no-store-icon {
+        font-size: 48px;
+        opacity: 0.5;
+      }
+
+      .no-store-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .no-store-text {
+        font-size: 13px;
+        color: var(--text-muted);
+        text-align: center;
+      }
+
+      /* Empty State */
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-xl);
+        color: var(--text-muted);
+      }
+
+      .empty-icon {
+        font-size: 32px;
+        opacity: 0.5;
+      }
+
+      .empty-text {
+        font-size: 13px;
+      }
+
+      /* Query Results Section */
+      .query-results-section {
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+      }
+
+      .results-header {
+        display: flex;
+        align-items: center;
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .results-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+      }
+
+      .results-count {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-right: var(--spacing-sm);
+      }
+
+      .clear-results-btn {
+        padding: 2px 8px;
+        background: var(--bg-secondary);
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 10px;
+        cursor: pointer;
+
+        &:hover {
+          background: var(--bg-hover);
+        }
+      }
+
+      .results-list {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .result-item {
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover {
+          background: var(--bg-hover);
+        }
+
+        &.active {
+          background: var(--bg-secondary);
+          border-left: 3px solid var(--primary-color);
+        }
+
+        &.error {
+          background: rgba(239, 68, 68, 0.1);
+
+          .result-type {
+            color: #ef4444;
+          }
+        }
+      }
+
+      .result-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+
+      .result-type {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .result-time {
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      .result-preview {
+        font-size: 11px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 4px;
+      }
+
+      .result-meta {
+        display: flex;
+        gap: var(--spacing-md);
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      /* Result Detail Panel */
+      .result-detail-panel {
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        max-height: 350px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .detail-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .detail-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .detail-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--spacing-md);
+      }
+
+      .result-content-pre {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        line-height: 1.5;
+      }
+
+      .error-display {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-md);
+        background: rgba(239, 68, 68, 0.1);
+        border-radius: var(--radius-sm);
+      }
+
+      .error-icon-large {
+        font-size: 24px;
+      }
+
+      .error-message {
+        color: #ef4444;
+        font-size: 12px;
+      }
+
+      .detail-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-top: 1px solid var(--border-color);
+      }
+
+      .result-stats {
+        display: flex;
+        gap: var(--spacing-md);
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      .result-actions {
+        display: flex;
+        gap: var(--spacing-sm);
+      }
+
+      /* Error Banner */
+      .error-banner {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-sm) var(--spacing-md);
+        background: rgba(239, 68, 68, 0.1);
+        border-radius: var(--radius-sm);
+        margin-top: var(--spacing-sm);
+      }
+
+      .error-text {
+        flex: 1;
+        font-size: 12px;
+        color: #ef4444;
+      }
+
+      .close-error-btn {
+        background: transparent;
+        border: none;
+        color: #ef4444;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      /* Spinner */
+      .spinner {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Toast Notifications */
+      .toast-container {
+        position: absolute;
+        top: 60px;
+        right: var(--spacing-md);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        max-width: 300px;
+      }
+
+      .toast {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-radius: var(--radius-sm);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        animation: slideIn 0.3s ease;
+        cursor: pointer;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateX(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+
+      .toast-success {
+        background: rgba(16, 185, 129, 0.95);
         color: white;
       }
-    }
 
-    .detail-actions {
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      gap: var(--spacing-sm);
-      justify-content: flex-end;
-    }
-
-    /* No Store State */
-    .no-store {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: var(--spacing-md);
-      padding: var(--spacing-xl) var(--spacing-lg);
-    }
-
-    .no-store-icon {
-      font-size: 48px;
-      opacity: 0.5;
-    }
-
-    .no-store-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .no-store-text {
-      font-size: 13px;
-      color: var(--text-muted);
-      text-align: center;
-    }
-
-    /* Empty State */
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: var(--spacing-sm);
-      padding: var(--spacing-xl);
-      color: var(--text-muted);
-    }
-
-    .empty-icon {
-      font-size: 32px;
-      opacity: 0.5;
-    }
-
-    .empty-text {
-      font-size: 13px;
-    }
-
-    /* Query Results Section */
-    .query-results-section {
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-tertiary);
-    }
-
-    .results-header {
-      display: flex;
-      align-items: center;
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .results-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-      flex: 1;
-    }
-
-    .results-count {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-right: var(--spacing-sm);
-    }
-
-    .clear-results-btn {
-      padding: 2px 8px;
-      background: var(--bg-secondary);
-      border: none;
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
-      font-size: 10px;
-      cursor: pointer;
-
-      &:hover {
-        background: var(--bg-hover);
-      }
-    }
-
-    .results-list {
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    .result-item {
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover {
-        background: var(--bg-hover);
+      .toast-error {
+        background: rgba(239, 68, 68, 0.95);
+        color: white;
       }
 
-      &.active {
-        background: var(--bg-secondary);
-        border-left: 3px solid var(--primary-color);
+      .toast-info {
+        background: rgba(59, 130, 246, 0.95);
+        color: white;
       }
 
-      &.error {
-        background: rgba(239, 68, 68, 0.1);
+      .toast-icon {
+        font-weight: bold;
+        font-size: 14px;
+      }
 
-        .result-type {
+      .toast-message {
+        flex: 1;
+        font-size: 12px;
+      }
+
+      .toast-close {
+        background: transparent;
+        border: none;
+        color: inherit;
+        opacity: 0.7;
+        cursor: pointer;
+        font-size: 12px;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
+      /* Query Actions */
+      .query-actions {
+        display: flex;
+        gap: var(--spacing-sm);
+        align-items: center;
+      }
+
+      .save-template-btn {
+        padding: 8px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 14px;
+        transition: all var(--transition-fast);
+
+        &:hover {
+          background: var(--bg-hover);
+        }
+      }
+
+      /* Saved Templates */
+      .saved-templates {
+        margin-top: var(--spacing-sm);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
+
+      .templates-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-xs) var(--spacing-sm);
+        cursor: pointer;
+      }
+
+      .templates-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .collapse-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 10px;
+      }
+
+      .templates-list {
+        border-top: 1px solid var(--border-color);
+        max-height: 120px;
+        overflow-y: auto;
+      }
+
+      .template-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-xs) var(--spacing-sm);
+        border-bottom: 1px solid var(--border-color);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:last-child {
+          border-bottom: none;
+        }
+
+        &:hover {
+          background: var(--bg-hover);
+        }
+      }
+
+      .template-info {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-xs);
+        flex: 1;
+      }
+
+      .template-type {
+        font-size: 12px;
+      }
+
+      .template-name {
+        font-size: 11px;
+        color: var(--text-primary);
+      }
+
+      .template-delete {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 10px;
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+
+        .template-item:hover & {
+          opacity: 1;
+        }
+
+        &:hover {
           color: #ef4444;
         }
       }
-    }
 
-    .result-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 4px;
-    }
+      /* Save Template Dialog */
+      .save-template-dialog {
+        margin-top: var(--spacing-sm);
+        border: 1px solid var(--primary-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+      }
 
-    .result-type {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-primary);
-    }
+      .dialog-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-sm);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
 
-    .result-time {
-      font-size: 10px;
-      color: var(--text-muted);
-    }
+      .dialog-body {
+        padding: var(--spacing-sm);
+      }
 
-    .result-preview {
-      font-size: 11px;
-      color: var(--text-secondary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 4px;
-    }
+      .template-preview {
+        margin-top: var(--spacing-sm);
+        padding: var(--spacing-xs);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+      }
 
-    .result-meta {
-      display: flex;
-      gap: var(--spacing-md);
-      font-size: 10px;
-      color: var(--text-muted);
-    }
+      .preview-label {
+        color: var(--text-muted);
+      }
 
-    /* Result Detail Panel */
-    .result-detail-panel {
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-      max-height: 350px;
-      display: flex;
-      flex-direction: column;
-    }
+      .preview-value {
+        color: var(--text-primary);
+        margin-left: var(--spacing-xs);
+      }
 
-    .detail-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .detail-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .detail-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: var(--spacing-md);
-    }
-
-    .result-content-pre {
-      margin: 0;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--text-primary);
-      white-space: pre-wrap;
-      line-height: 1.5;
-    }
-
-    .error-display {
-      display: flex;
-      align-items: center;
-      gap: var(--spacing-sm);
-      padding: var(--spacing-md);
-      background: rgba(239, 68, 68, 0.1);
-      border-radius: var(--radius-sm);
-    }
-
-    .error-icon-large {
-      font-size: 24px;
-    }
-
-    .error-message {
-      color: #ef4444;
-      font-size: 12px;
-    }
-
-    .detail-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--spacing-sm) var(--spacing-md);
-      border-top: 1px solid var(--border-color);
-    }
-
-    .result-stats {
-      display: flex;
-      gap: var(--spacing-md);
-      font-size: 10px;
-      color: var(--text-muted);
-    }
-
-    .result-actions {
-      display: flex;
-      gap: var(--spacing-sm);
-    }
-
-    /* Error Banner */
-    .error-banner {
-      display: flex;
-      align-items: center;
-      gap: var(--spacing-sm);
-      padding: var(--spacing-sm) var(--spacing-md);
-      background: rgba(239, 68, 68, 0.1);
-      border-radius: var(--radius-sm);
-      margin-top: var(--spacing-sm);
-    }
-
-    .error-text {
-      flex: 1;
-      font-size: 12px;
-      color: #ef4444;
-    }
-
-    .close-error-btn {
-      background: transparent;
-      border: none;
-      color: #ef4444;
-      cursor: pointer;
-      font-size: 14px;
-    }
-
-    /* Spinner */
-    .spinner {
-      display: inline-block;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-  `],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+      .dialog-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-sm);
+        border-top: 1px solid var(--border-color);
+      }
+    `
+  ],
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class RlmContextBrowserComponent {
+export class RlmContextBrowserComponent implements OnInit, OnDestroy {
+  private readonly ipc = inject(ElectronIpcService);
+  private subscriptions: (() => void)[] = [];
+  private readonly TEMPLATES_STORAGE_KEY = 'rlm-query-templates';
+
   /** Context store */
   store = input<ContextStore | null>(null);
 
@@ -1438,6 +1891,7 @@ export class RlmContextBrowserComponent {
   executeQueryRequest = output<ContextQuery>();
   sectionSelected = output<ContextSection>();
   queryExecuted = output<QueryResult>();
+  storeUpdated = output<ContextStore>();
 
   /** Query results state */
   readonly queryResults = signal<QueryResult[]>([]);
@@ -1445,11 +1899,33 @@ export class RlmContextBrowserComponent {
   readonly isQuerying = signal<boolean>(false);
   readonly queryError = signal<string | null>(null);
 
+  /** Toast notification state */
+  readonly toasts = signal<ToastNotification[]>([]);
+
+  /** Saved templates state */
+  readonly savedTemplates = signal<SavedQueryTemplate[]>([]);
+  readonly templatesExpanded = signal<boolean>(true);
+  readonly showSaveTemplateDialog = signal<boolean>(false);
+  readonly newTemplateName = signal<string>('');
+
   /** Query types */
-  queryTypes: QueryType[] = ['grep', 'slice', 'sub_query', 'summarize', 'get_section', 'semantic_search'];
+  queryTypes: QueryType[] = [
+    'grep',
+    'slice',
+    'sub_query',
+    'summarize',
+    'get_section',
+    'semantic_search'
+  ];
 
   /** Section types */
-  sectionTypes: ContextSection['type'][] = ['file', 'conversation', 'tool_output', 'external', 'summary'];
+  sectionTypes: ContextSection['type'][] = [
+    'file',
+    'conversation',
+    'tool_output',
+    'external',
+    'summary'
+  ];
 
   /** Selected query type */
   selectedQueryType = signal<QueryType>('grep');
@@ -1458,16 +1934,36 @@ export class RlmContextBrowserComponent {
   queryParams = signal<Record<string, unknown>>({});
 
   /** Computed query param accessors for template */
-  sectionIds = computed(() => (this.queryParams()['sectionIds'] as string[] | undefined) || []);
-  sectionId = computed(() => (this.queryParams()['sectionId'] as string | undefined) || '');
-  queryText = computed(() => (this.queryParams()['query'] as string | undefined) || '');
-  topK = computed(() => (this.queryParams()['topK'] as number | undefined) || 5);
-  pattern = computed(() => (this.queryParams()['pattern'] as string | undefined) || '');
-  maxResults = computed(() => (this.queryParams()['maxResults'] as number | undefined) || 10);
-  start = computed(() => (this.queryParams()['start'] as number | undefined) || 0);
-  end = computed(() => (this.queryParams()['end'] as number | undefined) || 1000);
-  prompt = computed(() => (this.queryParams()['prompt'] as string | undefined) || '');
-  contextHints = computed(() => (this.queryParams()['contextHints'] as string[] | undefined) || []);
+  sectionIds = computed(
+    () => (this.queryParams()['sectionIds'] as string[] | undefined) || []
+  );
+  sectionId = computed(
+    () => (this.queryParams()['sectionId'] as string | undefined) || ''
+  );
+  queryText = computed(
+    () => (this.queryParams()['query'] as string | undefined) || ''
+  );
+  topK = computed(
+    () => (this.queryParams()['topK'] as number | undefined) || 5
+  );
+  pattern = computed(
+    () => (this.queryParams()['pattern'] as string | undefined) || ''
+  );
+  maxResults = computed(
+    () => (this.queryParams()['maxResults'] as number | undefined) || 10
+  );
+  start = computed(
+    () => (this.queryParams()['start'] as number | undefined) || 0
+  );
+  end = computed(
+    () => (this.queryParams()['end'] as number | undefined) || 1000
+  );
+  prompt = computed(
+    () => (this.queryParams()['prompt'] as string | undefined) || ''
+  );
+  contextHints = computed(
+    () => (this.queryParams()['contextHints'] as string[] | undefined) || []
+  );
 
   /** Section type filter */
   sectionTypeFilter = signal<ContextSection['type'] | ''>('');
@@ -1484,32 +1980,224 @@ export class RlmContextBrowserComponent {
     let sections = storeData.sections;
 
     if (filter) {
-      sections = sections.filter(s => s.type === filter);
+      sections = sections.filter((s) => s.type === filter);
     }
 
     return sections.sort((a, b) => a.startOffset - b.startOffset);
   });
 
+  // ============================================
+  // Lifecycle Hooks
+  // ============================================
+
+  ngOnInit(): void {
+    this.setupEventSubscriptions();
+    this.loadSavedTemplates();
+  }
+
+  ngOnDestroy(): void {
+    // Clean up all IPC subscriptions
+    this.subscriptions.forEach((unsub) => unsub());
+    this.subscriptions = [];
+  }
+
+  // ============================================
+  // IPC Event Subscriptions
+  // ============================================
+
+  private setupEventSubscriptions(): void {
+    // Subscribe to store updates
+    const unsubStoreUpdate = this.ipc.on(
+      'rlm:store-updated',
+      (data: unknown) => {
+        const update = data as { storeId: string; store: ContextStore };
+        const currentStore = this.store();
+        if (currentStore && update.storeId === currentStore.id) {
+          this.storeUpdated.emit(update.store);
+          this.showToast('Store updated', 'info');
+        }
+      }
+    );
+    this.subscriptions.push(unsubStoreUpdate);
+
+    // Subscribe to section added events
+    const unsubSectionAdded = this.ipc.on(
+      'rlm:section-added',
+      (data: unknown) => {
+        const update = data as { storeId: string; section: ContextSection };
+        const currentStore = this.store();
+        if (currentStore && update.storeId === currentStore.id) {
+          this.showToast(`Section "${update.section.name}" added`, 'success');
+        }
+      }
+    );
+    this.subscriptions.push(unsubSectionAdded);
+
+    // Subscribe to section removed events
+    const unsubSectionRemoved = this.ipc.on(
+      'rlm:section-removed',
+      (data: unknown) => {
+        const update = data as { storeId: string; sectionId: string };
+        const currentStore = this.store();
+        if (currentStore && update.storeId === currentStore.id) {
+          this.showToast('Section removed', 'info');
+        }
+      }
+    );
+    this.subscriptions.push(unsubSectionRemoved);
+
+    // Subscribe to query completion events
+    const unsubQueryComplete = this.ipc.on(
+      'rlm:query-complete',
+      (data: unknown) => {
+        const result = data as { sessionId: string; queryResult: QueryResult };
+        const currentSession = this.session();
+        if (currentSession && result.sessionId === currentSession.id) {
+          this.addQueryResult(result.queryResult);
+        }
+      }
+    );
+    this.subscriptions.push(unsubQueryComplete);
+  }
+
+  // ============================================
+  // Toast Notifications
+  // ============================================
+
+  showToast(message: string, type: ToastNotification['type'] = 'info'): void {
+    const toast: ToastNotification = {
+      id: `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      message,
+      type,
+      timestamp: Date.now()
+    };
+
+    this.toasts.update((toasts) => [...toasts, toast]);
+
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      this.dismissToast(toast.id);
+    }, 3000);
+  }
+
+  dismissToast(toastId: string): void {
+    this.toasts.update((toasts) => toasts.filter((t) => t.id !== toastId));
+  }
+
+  // ============================================
+  // Saved Query Templates
+  // ============================================
+
+  private loadSavedTemplates(): void {
+    try {
+      const stored = localStorage.getItem(this.TEMPLATES_STORAGE_KEY);
+      if (stored) {
+        const templates = JSON.parse(stored) as SavedQueryTemplate[];
+        this.savedTemplates.set(templates);
+      }
+    } catch (error) {
+      console.error('Failed to load saved templates:', error);
+    }
+  }
+
+  private persistTemplates(): void {
+    try {
+      localStorage.setItem(
+        this.TEMPLATES_STORAGE_KEY,
+        JSON.stringify(this.savedTemplates())
+      );
+    } catch (error) {
+      console.error('Failed to save templates:', error);
+    }
+  }
+
+  openSaveTemplateDialog(): void {
+    this.newTemplateName.set('');
+    this.showSaveTemplateDialog.set(true);
+  }
+
+  closeSaveTemplateDialog(): void {
+    this.showSaveTemplateDialog.set(false);
+    this.newTemplateName.set('');
+  }
+
+  updateTemplateName(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    this.newTemplateName.set(target.value);
+  }
+
+  saveTemplate(): void {
+    const name = this.newTemplateName().trim();
+    if (!name) return;
+
+    const template: SavedQueryTemplate = {
+      id: `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      type: this.selectedQueryType(),
+      params: { ...this.queryParams() },
+      createdAt: Date.now()
+    };
+
+    this.savedTemplates.update((templates) => [...templates, template]);
+    this.persistTemplates();
+    this.closeSaveTemplateDialog();
+    this.showToast(`Template "${name}" saved`, 'success');
+  }
+
+  loadTemplate(template: SavedQueryTemplate): void {
+    this.selectedQueryType.set(template.type);
+    this.queryParams.set({ ...template.params });
+    this.showToast(`Loaded template "${template.name}"`, 'info');
+  }
+
+  deleteTemplate(templateId: string): void {
+    const template = this.savedTemplates().find((t) => t.id === templateId);
+    this.savedTemplates.update((templates) =>
+      templates.filter((t) => t.id !== templateId)
+    );
+    this.persistTemplates();
+    if (template) {
+      this.showToast(`Template "${template.name}" deleted`, 'info');
+    }
+  }
+
+  // ============================================
+  // Icon & Formatting Methods
+  // ============================================
+
   getQueryTypeIcon(type: QueryType): string {
     switch (type) {
-      case 'grep': return '🔍';
-      case 'slice': return '✂️';
-      case 'sub_query': return '🔄';
-      case 'summarize': return '📝';
-      case 'get_section': return '📄';
-      case 'semantic_search': return '🎯';
-      default: return '❓';
+      case 'grep':
+        return '🔍';
+      case 'slice':
+        return '✂️';
+      case 'sub_query':
+        return '🔄';
+      case 'summarize':
+        return '📝';
+      case 'get_section':
+        return '📄';
+      case 'semantic_search':
+        return '🎯';
+      default:
+        return '❓';
     }
   }
 
   getSectionTypeIcon(type: ContextSection['type']): string {
     switch (type) {
-      case 'file': return '📁';
-      case 'conversation': return '💬';
-      case 'tool_output': return '🔧';
-      case 'external': return '🌐';
-      case 'summary': return '📋';
-      default: return '📄';
+      case 'file':
+        return '📁';
+      case 'conversation':
+        return '💬';
+      case 'tool_output':
+        return '🔧';
+      case 'external':
+        return '🌐';
+      case 'summary':
+        return '📋';
+      default:
+        return '📄';
     }
   }
 
@@ -1543,13 +2231,16 @@ export class RlmContextBrowserComponent {
       value = parseInt(target.value, 10) || 0;
     }
 
-    this.queryParams.update(params => ({ ...params, [key]: value }));
+    this.queryParams.update((params) => ({ ...params, [key]: value }));
   }
 
   updateContextHints(event: Event): void {
     const target = event.target as HTMLInputElement;
-    const hints = target.value.split(',').map(h => h.trim()).filter(h => h);
-    this.queryParams.update(params => ({ ...params, contextHints: hints }));
+    const hints = target.value
+      .split(',')
+      .map((h) => h.trim())
+      .filter((h) => h);
+    this.queryParams.update((params) => ({ ...params, contextHints: hints }));
   }
 
   setSectionTypeFilter(type: ContextSection['type'] | ''): void {
@@ -1568,7 +2259,7 @@ export class RlmContextBrowserComponent {
   navigateToSection(id: string): void {
     const storeData = this.store();
     if (storeData) {
-      const section = storeData.sections.find(s => s.id === id);
+      const section = storeData.sections.find((s) => s.id === id);
       if (section) {
         this.selectSection(section);
       }
@@ -1576,7 +2267,7 @@ export class RlmContextBrowserComponent {
   }
 
   addSectionToQuery(id: string): void {
-    this.queryParams.update(params => {
+    this.queryParams.update((params) => {
       const sectionIds = (params['sectionIds'] as string[]) || [];
       if (!sectionIds.includes(id)) {
         return { ...params, sectionIds: [...sectionIds, id] };
@@ -1586,9 +2277,9 @@ export class RlmContextBrowserComponent {
   }
 
   removeSectionId(id: string): void {
-    this.queryParams.update(params => {
+    this.queryParams.update((params) => {
       const sectionIds = (params['sectionIds'] as string[]) || [];
-      return { ...params, sectionIds: sectionIds.filter(sid => sid !== id) };
+      return { ...params, sectionIds: sectionIds.filter((sid) => sid !== id) };
     });
   }
 
@@ -1630,7 +2321,7 @@ export class RlmContextBrowserComponent {
 
     const query: ContextQuery = {
       type: queryType,
-      params: this.queryParams(),
+      params: this.queryParams()
     };
 
     // Emit to parent for actual execution
@@ -1651,7 +2342,7 @@ export class RlmContextBrowserComponent {
     }
 
     // Add to results list (keep last 50)
-    this.queryResults.update(results => [result, ...results].slice(0, 50));
+    this.queryResults.update((results) => [result, ...results].slice(0, 50));
     this.activeQueryResult.set(result);
     this.queryExecuted.emit(result);
   }
@@ -1692,9 +2383,10 @@ export class RlmContextBrowserComponent {
   async copyToClipboard(content: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(content);
-      // Could emit an event or show a toast here
+      this.showToast('Copied to clipboard', 'success');
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
+      this.showToast('Failed to copy to clipboard', 'error');
     }
   }
 
@@ -1742,11 +2434,14 @@ export class RlmContextBrowserComponent {
       if (results.length === 0) return;
 
       const currentIndex = this.activeQueryResult()
-        ? results.findIndex(r => r.id === this.activeQueryResult()!.id)
+        ? results.findIndex((r) => r.id === this.activeQueryResult()!.id)
         : -1;
 
       const direction = event.key === 'ArrowUp' ? -1 : 1;
-      const newIndex = Math.max(0, Math.min(results.length - 1, currentIndex + direction));
+      const newIndex = Math.max(
+        0,
+        Math.min(results.length - 1, currentIndex + direction)
+      );
 
       if (newIndex !== currentIndex) {
         this.activeQueryResult.set(results[newIndex]);
@@ -1758,7 +2453,7 @@ export class RlmContextBrowserComponent {
   getSectionContent(sectionId: string): void {
     this.executeQueryRequest.emit({
       type: 'get_section',
-      params: { sectionId },
+      params: { sectionId }
     });
   }
 }

@@ -4,9 +4,12 @@
  *
  * Uses lightweight API calls rather than spawning CLI processes
  * for faster response times on quick tasks.
+ *
+ * Supports both streaming and non-streaming modes for real-time output.
  */
 
 import { EventEmitter } from 'events';
+import { getTokenCounter, TokenCounter } from './token-counter';
 
 export interface LLMServiceConfig {
   provider: 'anthropic' | 'ollama' | 'openai' | 'local';
@@ -47,6 +50,21 @@ export interface SubQueryResponse {
   tokens: { input: number; output: number };
 }
 
+/**
+ * Streaming chunk for real-time output
+ */
+export interface StreamChunk {
+  requestId: string;
+  chunk: string;
+  done: boolean;
+  error?: string;
+}
+
+/**
+ * Streaming callback type
+ */
+export type StreamCallback = (chunk: StreamChunk) => void;
+
 const DEFAULT_CONFIG: LLMServiceConfig = {
   provider: 'local', // Start with local fallback
   maxTokens: 4096,
@@ -76,10 +94,14 @@ export class LLMService extends EventEmitter {
   private anthropicAvailable: boolean | null = null;
   private ollamaAvailable: boolean | null = null;
   private openaiAvailable: boolean | null = null;
+  private tokenCounter: TokenCounter;
+  private activeStreams: Map<string, AbortController> = new Map();
 
   private constructor(config: Partial<LLMServiceConfig> = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.tokenCounter = getTokenCounter();
+    this.tokenCounter.setDefaultModel(this.config.model);
   }
 
   static getInstance(config?: Partial<LLMServiceConfig>): LLMService {
@@ -95,10 +117,35 @@ export class LLMService extends EventEmitter {
     if (config.anthropicApiKey !== undefined) this.anthropicAvailable = null;
     if (config.openaiApiKey !== undefined) this.openaiAvailable = null;
     if (config.ollamaHost !== undefined) this.ollamaAvailable = null;
+    // Update token counter model
+    if (config.model) {
+      this.tokenCounter.setDefaultModel(config.model);
+    }
   }
 
   getConfig(): LLMServiceConfig {
     return { ...this.config };
+  }
+
+  /**
+   * Get the token counter instance for external use
+   */
+  getTokenCounter(): TokenCounter {
+    return this.tokenCounter;
+  }
+
+  /**
+   * Count tokens in text using the configured model
+   */
+  countTokens(text: string): number {
+    return this.tokenCounter.countTokens(text, this.config.model);
+  }
+
+  /**
+   * Truncate text to fit within a token limit
+   */
+  truncateToTokens(text: string, maxTokens: number): string {
+    return this.tokenCounter.truncateToTokens(text, maxTokens, this.config.model);
   }
 
   /**
@@ -113,12 +160,14 @@ Summary:`;
 
     try {
       const summary = await this.generateCompletion(SUMMARIZE_SYSTEM_PROMPT, userPrompt);
+      const originalTokens = this.countTokens(request.content);
+      const summaryTokens = this.countTokens(summary);
 
       this.emit('summarize:complete', {
         requestId: request.requestId,
         summary,
-        originalTokens: Math.ceil(request.content.length / 4),
-        summaryTokens: Math.ceil(summary.length / 4),
+        originalTokens,
+        summaryTokens,
       } as SummarizeResponse);
 
       return summary;
@@ -134,6 +183,63 @@ Summary:`;
   }
 
   /**
+   * Summarize content with streaming output
+   * Yields chunks as they are received from the LLM
+   */
+  async *summarizeStreaming(
+    request: SummarizeRequest
+  ): AsyncGenerator<StreamChunk, string, unknown> {
+    const userPrompt = `Please summarize the following content to approximately ${request.targetTokens} tokens:
+
+${request.content}
+
+Summary:`;
+
+    let fullResponse = '';
+    const originalTokens = this.countTokens(request.content);
+
+    try {
+      for await (const chunk of this.generateCompletionStreaming(
+        SUMMARIZE_SYSTEM_PROMPT,
+        userPrompt,
+        request.requestId
+      )) {
+        fullResponse += chunk.chunk;
+
+        yield chunk;
+
+        if (chunk.done) {
+          const summaryTokens = this.countTokens(fullResponse);
+          this.emit('summarize:complete', {
+            requestId: request.requestId,
+            summary: fullResponse,
+            originalTokens,
+            summaryTokens,
+          } as SummarizeResponse);
+        }
+      }
+    } catch (error) {
+      const errorChunk: StreamChunk = {
+        requestId: request.requestId,
+        chunk: '',
+        done: true,
+        error: (error as Error).message,
+      };
+      yield errorChunk;
+
+      this.emit('summarize:error', {
+        requestId: request.requestId,
+        error: (error as Error).message,
+      });
+
+      // Return fallback summary
+      fullResponse = this.fallbackSummarize(request.content, request.targetTokens);
+    }
+
+    return fullResponse;
+  }
+
+  /**
    * Execute a sub-query against context
    */
   async subQuery(request: SubQueryRequest): Promise<string> {
@@ -146,14 +252,16 @@ Answer:`;
 
     try {
       const response = await this.generateCompletion(SUBQUERY_SYSTEM_PROMPT, userPrompt);
+      const inputTokens = this.countTokens(request.context + request.prompt);
+      const outputTokens = this.countTokens(response);
 
       this.emit('sub_query:complete', {
         requestId: request.requestId,
         response,
         depth: request.depth,
         tokens: {
-          input: Math.ceil((request.context.length + request.prompt.length) / 4),
-          output: Math.ceil(response.length / 4),
+          input: inputTokens,
+          output: outputTokens,
         },
       } as SubQueryResponse);
 
@@ -166,6 +274,79 @@ Answer:`;
 
       return `Unable to process sub-query: ${(error as Error).message}`;
     }
+  }
+
+  /**
+   * Execute a sub-query with streaming output
+   * Yields chunks as they are received from the LLM
+   */
+  async *subQueryStreaming(
+    request: SubQueryRequest
+  ): AsyncGenerator<StreamChunk, string, unknown> {
+    const userPrompt = `Context:
+${request.context}
+
+Question: ${request.prompt}
+
+Answer:`;
+
+    let fullResponse = '';
+    const inputTokens = this.countTokens(request.context + request.prompt);
+
+    try {
+      for await (const chunk of this.generateCompletionStreaming(
+        SUBQUERY_SYSTEM_PROMPT,
+        userPrompt,
+        request.requestId
+      )) {
+        fullResponse += chunk.chunk;
+
+        yield chunk;
+
+        if (chunk.done) {
+          const outputTokens = this.countTokens(fullResponse);
+          this.emit('sub_query:complete', {
+            requestId: request.requestId,
+            response: fullResponse,
+            depth: request.depth,
+            tokens: {
+              input: inputTokens,
+              output: outputTokens,
+            },
+          } as SubQueryResponse);
+        }
+      }
+    } catch (error) {
+      const errorChunk: StreamChunk = {
+        requestId: request.requestId,
+        chunk: '',
+        done: true,
+        error: (error as Error).message,
+      };
+      yield errorChunk;
+
+      this.emit('sub_query:error', {
+        requestId: request.requestId,
+        error: (error as Error).message,
+      });
+
+      fullResponse = `Unable to process sub-query: ${(error as Error).message}`;
+    }
+
+    return fullResponse;
+  }
+
+  /**
+   * Cancel an active streaming request
+   */
+  cancelStream(requestId: string): boolean {
+    const controller = this.activeStreams.get(requestId);
+    if (controller) {
+      controller.abort();
+      this.activeStreams.delete(requestId);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -205,7 +386,318 @@ Answer:`;
   }
 
   /**
-   * Generate completion using Anthropic API
+   * Generate a completion with streaming using the configured provider
+   */
+  private async *generateCompletionStreaming(
+    systemPrompt: string,
+    userPrompt: string,
+    requestId: string
+  ): AsyncGenerator<StreamChunk, void, unknown> {
+    const controller = new AbortController();
+    this.activeStreams.set(requestId, controller);
+
+    try {
+      // Try providers in order of preference based on config
+      if (this.config.provider === 'anthropic' || this.config.anthropicApiKey) {
+        try {
+          yield* this.streamWithAnthropic(systemPrompt, userPrompt, requestId, controller.signal);
+          return;
+        } catch (error) {
+          if ((error as Error).name === 'AbortError') throw error;
+          this.anthropicAvailable = false;
+          this.emit('provider:error', { provider: 'anthropic', error });
+        }
+      }
+
+      if (this.config.provider === 'ollama' || this.ollamaAvailable !== false) {
+        try {
+          yield* this.streamWithOllama(systemPrompt, userPrompt, requestId, controller.signal);
+          return;
+        } catch (error) {
+          if ((error as Error).name === 'AbortError') throw error;
+          this.ollamaAvailable = false;
+          this.emit('provider:error', { provider: 'ollama', error });
+        }
+      }
+
+      if (this.config.provider === 'openai' || this.config.openaiApiKey) {
+        try {
+          yield* this.streamWithOpenAI(systemPrompt, userPrompt, requestId, controller.signal);
+          return;
+        } catch (error) {
+          if ((error as Error).name === 'AbortError') throw error;
+          this.openaiAvailable = false;
+          this.emit('provider:error', { provider: 'openai', error });
+        }
+      }
+
+      // Fall back to local (non-streaming, emitted as single chunk)
+      const response = this.generateLocal(userPrompt);
+      yield { requestId, chunk: response, done: true };
+    } finally {
+      this.activeStreams.delete(requestId);
+    }
+  }
+
+  /**
+   * Stream completion from Anthropic API
+   */
+  private async *streamWithAnthropic(
+    systemPrompt: string,
+    userPrompt: string,
+    requestId: string,
+    signal: AbortSignal
+  ): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.config.anthropicApiKey) {
+      throw new Error('Anthropic API key not configured');
+    }
+
+    const model = this.config.model || 'claude-3-haiku-20240307';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.config.anthropicApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: this.config.maxTokens || 4096,
+        temperature: this.config.temperature || 0.3,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Anthropic error: ${response.status} ${response.statusText}`);
+    }
+
+    this.anthropicAvailable = true;
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              yield { requestId, chunk: '', done: true };
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(data) as {
+                type: string;
+                delta?: { type: string; text?: string };
+              };
+
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                yield { requestId, chunk: parsed.delta.text, done: false };
+              } else if (parsed.type === 'message_stop') {
+                yield { requestId, chunk: '', done: true };
+                return;
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    yield { requestId, chunk: '', done: true };
+  }
+
+  /**
+   * Stream completion from Ollama
+   */
+  private async *streamWithOllama(
+    systemPrompt: string,
+    userPrompt: string,
+    requestId: string,
+    signal: AbortSignal
+  ): AsyncGenerator<StreamChunk, void, unknown> {
+    const host = this.config.ollamaHost || 'http://localhost:11434';
+    const model = this.config.model || 'llama3';
+
+    const response = await fetch(`${host}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        prompt: `${systemPrompt}\n\nUser: ${userPrompt}`,
+        stream: true,
+        options: {
+          temperature: this.config.temperature || 0.3,
+          num_predict: this.config.maxTokens || 4096,
+        },
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama error: ${response.status} ${response.statusText}`);
+    }
+
+    this.ollamaAvailable = true;
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const parsed = JSON.parse(line) as { response: string; done: boolean };
+              yield {
+                requestId,
+                chunk: parsed.response || '',
+                done: parsed.done,
+              };
+
+              if (parsed.done) {
+                return;
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    yield { requestId, chunk: '', done: true };
+  }
+
+  /**
+   * Stream completion from OpenAI API
+   */
+  private async *streamWithOpenAI(
+    systemPrompt: string,
+    userPrompt: string,
+    requestId: string,
+    signal: AbortSignal
+  ): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.config.openaiApiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    const model = this.config.model || 'gpt-4o-mini';
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: this.config.maxTokens || 4096,
+        temperature: this.config.temperature || 0.3,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI error: ${response.status} ${response.statusText}`);
+    }
+
+    this.openaiAvailable = true;
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              yield { requestId, chunk: '', done: true };
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(data) as {
+                choices: { delta: { content?: string }; finish_reason?: string }[];
+              };
+
+              const choice = parsed.choices[0];
+              if (choice?.delta?.content) {
+                yield { requestId, chunk: choice.delta.content, done: false };
+              }
+
+              if (choice?.finish_reason === 'stop') {
+                yield { requestId, chunk: '', done: true };
+                return;
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    yield { requestId, chunk: '', done: true };
+  }
+
+  /**
+   * Generate completion using Anthropic API (non-streaming)
    */
   private async generateWithAnthropic(systemPrompt: string, userPrompt: string): Promise<string> {
     if (!this.config.anthropicApiKey) {
@@ -234,7 +726,7 @@ Answer:`;
       throw new Error(`Anthropic error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       content: { type: string; text: string }[];
     };
 
@@ -267,7 +759,7 @@ Answer:`;
       throw new Error(`Ollama error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as { response: string };
+    const data = (await response.json()) as { response: string };
     this.ollamaAvailable = true;
     return data.response || '';
   }
@@ -286,7 +778,7 @@ Answer:`;
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.openaiApiKey}`,
+        Authorization: `Bearer ${this.config.openaiApiKey}`,
       },
       body: JSON.stringify({
         model,
@@ -303,7 +795,7 @@ Answer:`;
       throw new Error(`OpenAI error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       choices: { message: { content: string } }[];
     };
 

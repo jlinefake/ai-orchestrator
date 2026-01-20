@@ -25,9 +25,15 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       [class.error]="instance().status === 'error'"
       [class.yolo]="instance().yoloMode"
       [class.is-child]="depth() > 0"
+      [class.draggable]="isDraggable()"
       [style.padding-left.px]="12 + depth() * 20"
       (click)="select.emit(instance().id)"
     >
+      <!-- Drag handle for root instances -->
+      @if (isDraggable()) {
+        <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+      }
+
       <!-- Expand/collapse button for parents, child indicator, or placeholder -->
       @if (hasChildren()) {
         <button
@@ -87,15 +93,18 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     </div>
   `,
   styles: [`
+    /* Instance Row - Clean list item with refined interactions */
     .instance-row {
       display: flex;
       align-items: center;
       padding: 12px 16px;
       gap: 10px;
       cursor: pointer;
-      border-bottom: 1px solid var(--border-color);
-      transition: background-color var(--transition-fast);
+      transition: all var(--transition-fast);
       height: 72px;
+      position: relative;
+      background: transparent;
+      border-bottom: 1px solid var(--border-subtle);
     }
 
     .instance-row:hover {
@@ -103,26 +112,25 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     }
 
     .instance-row.selected {
-      background-color: var(--bg-selected);
+      background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12) 0%, rgba(var(--primary-rgb), 0.06) 100%);
       border-left: 3px solid var(--primary-color);
     }
 
     .instance-row.error {
-      background-color: var(--error-bg);
+      background: rgba(var(--error-rgb), 0.08);
     }
 
     .instance-row.yolo {
-      border-left: 3px solid #f59e0b;
+      border-left: 3px solid var(--primary-color);
 
       &.selected {
-        border-left: 3px solid #f59e0b;
-        box-shadow: inset 3px 0 0 var(--primary-color);
+        border-left: 3px solid var(--primary-color);
       }
     }
 
-    /* Child instance styling */
+    /* Child instance styling - subtle hierarchy indication */
     .instance-row.is-child {
-      background-color: rgba(99, 102, 241, 0.05);
+      background-color: rgba(var(--secondary-rgb), 0.03);
     }
 
     .instance-row.is-child:hover {
@@ -130,16 +138,54 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     }
 
     .instance-row.is-child.selected {
-      background-color: var(--bg-selected);
+      background: linear-gradient(135deg, rgba(var(--secondary-rgb), 0.12) 0%, rgba(var(--secondary-rgb), 0.06) 100%);
+      border-left: 3px solid var(--secondary-color);
     }
 
-    /* Child connector character */
+    /* Draggable root instance */
+    .instance-row.draggable {
+      cursor: grab;
+    }
+
+    .instance-row.draggable:active {
+      cursor: grabbing;
+    }
+
+    /* Drag handle - Enhanced visibility on hover */
+    .drag-handle {
+      color: var(--text-muted);
+      font-size: 11px;
+      letter-spacing: -2px;
+      opacity: 0;
+      transition: all var(--transition-fast);
+      cursor: grab;
+      padding: 6px 4px;
+      flex-shrink: 0;
+      border-radius: var(--radius-sm);
+    }
+
+    .instance-row:hover .drag-handle {
+      opacity: 0.6;
+    }
+
+    .drag-handle:hover {
+      opacity: 1 !important;
+      background: var(--bg-tertiary);
+      color: var(--primary-color);
+    }
+
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+
+    /* Child connector - Refined tree line */
     .child-connector {
       color: var(--border-color);
       font-size: 14px;
       width: 18px;
       text-align: center;
       flex-shrink: 0;
+      opacity: 0.6;
     }
 
     /* Placeholder for consistent alignment */
@@ -149,26 +195,27 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       flex-shrink: 0;
     }
 
-    /* Expand/collapse button */
+    /* Expand/collapse button - Refined interaction */
     .expand-btn {
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
+      width: 20px;
+      height: 20px;
+      border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
       background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--border-subtle);
       cursor: pointer;
       transition: all var(--transition-fast);
       flex-shrink: 0;
-      color: var(--text-secondary);
+      color: var(--text-muted);
     }
 
     .expand-btn:hover {
-      background: var(--bg-hover);
+      background: rgba(var(--primary-rgb), 0.1);
       border-color: var(--primary-color);
       color: var(--primary-color);
+      transform: scale(1.05);
     }
 
     .expand-btn .chevron {
@@ -182,6 +229,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       transform: rotate(90deg);
     }
 
+    /* Instance Info Section */
     .instance-info {
       flex: 1;
       min-width: 0;
@@ -191,54 +239,65 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     .instance-name-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
     .agent-badge {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
+      width: 22px;
+      height: 22px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
       color: white;
       flex-shrink: 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
     }
 
     .instance-name {
-      font-weight: 500;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 13px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       color: var(--text-primary);
       flex: 1;
       min-width: 0;
+      letter-spacing: -0.01em;
     }
 
     .collapsed-badge {
-      background: var(--primary-color);
-      color: white;
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      color: var(--bg-primary);
+      font-family: var(--font-mono);
       font-size: 9px;
-      font-weight: 600;
-      padding: 2px 5px;
-      border-radius: 8px;
+      font-weight: 700;
+      padding: 3px 7px;
+      border-radius: 10px;
       flex-shrink: 0;
+      letter-spacing: 0.02em;
     }
 
     .instance-meta {
       display: flex;
       gap: 8px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 5px;
     }
 
     .session-id {
+      font-family: var(--font-mono);
       color: var(--text-muted);
+      letter-spacing: 0.03em;
+      opacity: 0.8;
     }
 
+    /* Instance Actions - Action buttons */
     .instance-actions {
       display: flex;
       gap: 4px;
@@ -255,34 +314,44 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       width: 28px;
       height: 28px;
       border-radius: var(--radius-sm);
+      border: none;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
-      transition: background-color var(--transition-fast);
+      font-size: 15px;
+      cursor: pointer;
+      transition: all var(--transition-fast);
     }
 
     .action-btn.restart {
       background: var(--bg-tertiary);
-      color: var(--text-primary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
 
       &:hover:not(:disabled) {
         background: var(--bg-hover);
+        color: var(--secondary-color);
+        border-color: rgba(var(--secondary-rgb), 0.3);
+        transform: rotate(180deg);
       }
     }
 
     .action-btn.terminate {
-      background: var(--error-bg);
+      background: rgba(var(--error-rgb), 0.1);
       color: var(--error-color);
+      border: 1px solid rgba(var(--error-rgb), 0.2);
 
       &:hover:not(:disabled) {
         background: var(--error-color);
+        border-color: var(--error-color);
         color: white;
+        box-shadow: 0 0 12px rgba(var(--error-rgb), 0.4);
       }
     }
 
     .action-btn:disabled {
       opacity: 0.3;
+      cursor: not-allowed;
     }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -300,6 +369,9 @@ export class InstanceRowComponent {
 
   // Selection state
   isSelected = input<boolean>(false);
+
+  // Drag state
+  isDraggable = input<boolean>(false);
 
   // Outputs
   select = output<string>();

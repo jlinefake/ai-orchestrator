@@ -12,6 +12,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { SettingsStore } from '../../core/state/settings.store';
 import { KeybindingService } from '../../core/services/keybinding.service';
+import { ViewLayoutService } from '../../core/services/view-layout.service';
 import type { SettingMetadata, AppSettings } from '../../../../shared/types/settings.types';
 
 // Helper to access API from preload
@@ -235,6 +236,22 @@ const getApi = () => (window as any).electronAPI;
                     </div>
                   </div>
                 }
+
+                <!-- Reset View Layout Section -->
+                <div class="setting-row reset-layout-row">
+                  <div class="setting-info">
+                    <label class="setting-label">Reset View Layout</label>
+                    <p class="setting-description">
+                      Reset sidebar and file explorer panel widths to their default positions.
+                      This will not affect other settings.
+                    </p>
+                  </div>
+                  <div class="setting-control">
+                    <button class="btn-reset-layout" (click)="resetViewLayout()">
+                      Reset Layout
+                    </button>
+                  </div>
+                </div>
               }
               @case ('advanced') {
                 @for (setting of store.advancedSettings(); track setting.key) {
@@ -707,11 +724,37 @@ const getApi = () => (window as any).electronAPI;
         background: var(--primary-hover);
       }
     }
+
+    /* Reset Layout Button */
+    .reset-layout-row {
+      border: 1px dashed var(--border-color);
+      background: var(--bg-tertiary);
+    }
+
+    .btn-reset-layout {
+      padding: var(--spacing-sm) var(--spacing-md);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      border-radius: var(--radius-sm);
+      font-weight: 500;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      white-space: nowrap;
+
+      &:hover {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+      }
+    }
   `],
 })
 export class SettingsComponent {
   store = inject(SettingsStore);
   keybindingService = inject(KeybindingService);
+  viewLayoutService = inject(ViewLayoutService);
   close = output<void>();
 
   activeTab = signal<'general' | 'orchestration' | 'memory' | 'display' | 'advanced' | 'keyboard'>('general');
@@ -772,5 +815,9 @@ export class SettingsComponent {
     if (confirm('Are you sure you want to reset all settings to their defaults?')) {
       this.store.reset();
     }
+  }
+
+  resetViewLayout(): void {
+    this.viewLayoutService.reset();
   }
 }

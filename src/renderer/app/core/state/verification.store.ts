@@ -291,7 +291,7 @@ export class VerificationStore implements OnDestroy {
   // ============================================
 
   /** Start a new verification session */
-  async startVerification(prompt: string, context?: string): Promise<string> {
+  async startVerification(prompt: string, context?: string, files?: File[]): Promise<string> {
     const config = this.state().defaultConfig;
     const sessionId = `verify-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -313,12 +313,31 @@ export class VerificationStore implements OnDestroy {
       selectedTab: 'monitor',
     }));
 
+    // Convert files to base64 attachments
+    let attachments: { name: string; mimeType: string; data: string }[] | undefined;
+    if (files && files.length > 0) {
+      attachments = await Promise.all(
+        files.map(async (file) => {
+          const buffer = await file.arrayBuffer();
+          const base64 = btoa(
+            new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+          );
+          return {
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            data: base64,
+          };
+        })
+      );
+    }
+
     // Start verification via IPC
     try {
       await this.ipc.invoke('verification:start-cli', {
         id: sessionId,
         prompt,
         context,
+        attachments,
         config: {
           cliAgents: config.cliAgents,
           agentCount: config.agentCount,
@@ -397,6 +416,7 @@ export class VerificationStore implements OnDestroy {
         defaultConfig: { ...s.defaultConfig, cliAgents: newAgents },
       };
     });
+    this.saveStoredState();
   }
 
   /** Remove agent from selection */
@@ -409,6 +429,7 @@ export class VerificationStore implements OnDestroy {
         defaultConfig: { ...s.defaultConfig, cliAgents: newAgents },
       };
     });
+    this.saveStoredState();
   }
 
   // ============================================
@@ -443,6 +464,17 @@ export class VerificationStore implements OnDestroy {
         selectedTab: 'results',
       }));
     }
+  }
+
+  /** Delete a specific session */
+  deleteSession(sessionId: string): void {
+    this.state.update((s) => ({
+      ...s,
+      sessions: s.sessions.filter((session) => session.id !== sessionId),
+      // Clear current session if it's the one being deleted
+      currentSession: s.currentSession?.id === sessionId ? null : s.currentSession,
+    }));
+    this.saveStoredState();
   }
 
   /** Clear session history */

@@ -170,6 +170,10 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
                             }
                           </ul>
                         </div>
+                      } @else if (response.response) {
+                        <div class="response-preview">
+                          <p>{{ truncateResponse(response.response) }}</p>
+                        </div>
                       }
 
                       <div class="card-meta">
@@ -507,6 +511,19 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
       font-weight: 500;
     }
 
+    .response-preview {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    .response-preview p {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     .card-meta {
       display: flex;
       gap: 16px;
@@ -693,6 +710,12 @@ export class VerificationResultsComponent {
       .split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
+  }
+
+  truncateResponse(response: string, maxLength = 300): string {
+    if (!response) return '';
+    if (response.length <= maxLength) return response;
+    return response.slice(0, maxLength).trim() + '...';
   }
 
   getConfidenceClass(confidence?: number): string {

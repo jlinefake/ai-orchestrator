@@ -74,6 +74,9 @@ export class InstanceStore implements OnDestroy {
   private outputThrottleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingOutputMessages = new Map<string, OutputMessage[]>();
 
+  // Message queue for when instance is busy (signal for reactivity)
+  private messageQueueSignal = signal(new Map<string, Array<{ message: string; files?: File[] }>>());
+
   // Private mutable state
   private state = signal<StoreState>({
     instances: new Map(),
@@ -159,6 +162,11 @@ export class InstanceStore implements OnDestroy {
   readonly instanceActivities = computed(() =>
     this.activityDebouncer.activities()
   );
+
+  /** Get queued message count for an instance (reactive) */
+  getQueuedMessageCount(instanceId: string): number {
+    return this.messageQueueSignal().get(instanceId)?.length || 0;
+  }
 
   constructor() {
     this.setupIpcListeners();
@@ -282,11 +290,15 @@ export class InstanceStore implements OnDestroy {
       const newMap = new Map(current.instances);
       newMap.set(instance.id, instance);
 
+      // Only auto-select if it's a root instance (not a child)
+      // Child instances should not steal focus from the parent
+      const shouldAutoSelect = !instance.parentId;
+
       return {
         ...current,
         instances: newMap,
         loading: false,
-        selectedInstanceId: instance.id, // Auto-select new instance
+        selectedInstanceId: shouldAutoSelect ? instance.id : current.selectedInstanceId,
       };
     });
   }
@@ -325,6 +337,11 @@ export class InstanceStore implements OnDestroy {
       this.flushInstanceOutput(update.instanceId);
     }
 
+    // Process queued messages when instance becomes idle or waiting_for_input
+    if (newStatus === 'idle' || newStatus === 'waiting_for_input') {
+      this.processMessageQueue(update.instanceId);
+    }
+
     this.state.update((current) => {
       const newMap = new Map(current.instances);
       const instance = newMap.get(update.instanceId);
@@ -349,6 +366,10 @@ export class InstanceStore implements OnDestroy {
       if (newStatus === 'idle' || newStatus === 'terminated') {
         this.activityDebouncer.clearActivity(update.instanceId);
         this.flushInstanceOutput(update.instanceId);
+      }
+      // Process queued messages when instance becomes idle or waiting_for_input
+      if (newStatus === 'idle' || newStatus === 'waiting_for_input') {
+        this.processMessageQueue(update.instanceId);
       }
     }
 
@@ -518,10 +539,32 @@ export class InstanceStore implements OnDestroy {
     });
   }
 
-  /** Send input to an instance */
+  /** Send input to an instance (queues if busy) */
   async sendInput(instanceId: string, message: string, files?: File[]): Promise<void> {
     console.log('InstanceStore: sendInput called', { instanceId, message, filesCount: files?.length });
 
+    const instance = this.getInstance(instanceId);
+    if (!instance) return;
+
+    // If instance is busy, queue the message instead of sending immediately
+    if (instance.status === 'busy') {
+      console.log('InstanceStore: Instance busy, queuing message');
+      this.messageQueueSignal.update(currentMap => {
+        const newMap = new Map(currentMap);
+        const queue = newMap.get(instanceId) || [];
+        queue.push({ message, files });
+        newMap.set(instanceId, queue);
+        return newMap;
+      });
+      return;
+    }
+
+    // Send the message immediately
+    await this.sendInputImmediate(instanceId, message, files);
+  }
+
+  /** Internal method to send input immediately (bypasses queue check) */
+  private async sendInputImmediate(instanceId: string, message: string, files?: File[]): Promise<void> {
     // Convert files to base64 for IPC
     const attachments = files && files.length > 0
       ? await Promise.all(files.map((f) => this.fileToAttachment(f)))
@@ -552,6 +595,45 @@ export class InstanceStore implements OnDestroy {
         return { ...current, instances: newMap };
       });
     }
+  }
+
+  /** Process queued messages for an instance */
+  private processMessageQueue(instanceId: string): void {
+    const currentMap = this.messageQueueSignal();
+    const queue = currentMap.get(instanceId);
+    if (!queue || queue.length === 0) return;
+
+    // Take the first message from the queue
+    const nextMessage = queue[0];
+    const remainingQueue = queue.slice(1);
+
+    // Update the signal with the new queue state
+    this.messageQueueSignal.update(map => {
+      const newMap = new Map(map);
+      if (remainingQueue.length === 0) {
+        newMap.delete(instanceId);
+      } else {
+        newMap.set(instanceId, remainingQueue);
+      }
+      return newMap;
+    });
+
+    if (nextMessage) {
+      console.log('InstanceStore: Processing queued message', { instanceId, queueRemaining: remainingQueue.length });
+      // Use setTimeout to avoid state update conflicts
+      setTimeout(() => {
+        this.sendInputImmediate(instanceId, nextMessage.message, nextMessage.files);
+      }, 100);
+    }
+  }
+
+  /** Clear the message queue for an instance */
+  clearMessageQueue(instanceId: string): void {
+    this.messageQueueSignal.update(map => {
+      const newMap = new Map(map);
+      newMap.delete(instanceId);
+      return newMap;
+    });
   }
 
   /** Terminate an instance */
@@ -651,6 +733,28 @@ export class InstanceStore implements OnDestroy {
       displayName,
       parentId: parentId || undefined,
       yoloMode: !yoloMode,
+    });
+  }
+
+  /** Change agent mode for an instance (requires restart) */
+  async changeAgentMode(instanceId: string, newAgentId: string): Promise<void> {
+    const instance = this.getInstance(instanceId);
+    if (!instance) return;
+
+    // Don't restart if already in same mode
+    if (instance.agentId === newAgentId) return;
+
+    // Terminate and recreate with new agent mode
+    const { displayName, parentId, workingDirectory, yoloMode } = instance;
+
+    await this.terminateInstance(instanceId);
+
+    await this.createInstance({
+      workingDirectory,
+      displayName,
+      parentId: parentId || undefined,
+      yoloMode,
+      agentId: newAgentId,
     });
   }
 

@@ -6,6 +6,18 @@ import { Injectable, NgZone, inject } from '@angular/core';
 import type { ElectronAPI } from '../../../../preload/preload';
 import type { TodoList } from '../../../../shared/types/todo.types';
 
+/** File entry from directory listing */
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  isSymlink: boolean;
+  size: number;
+  modifiedAt: number;
+  createdAt?: number;
+  extension?: string;
+}
+
 // Declare the electronAPI on window
 declare global {
   interface Window {
@@ -303,6 +315,28 @@ export class ElectronIpcService {
     if (!this.api) return null;
     const response = await this.api.selectFiles(options);
     return response.success ? (response.data as string[] | null) : null;
+  }
+
+  // ============================================
+  // File Operations
+  // ============================================
+
+  /**
+   * Read directory contents
+   */
+  async readDir(path: string, includeHidden?: boolean): Promise<FileEntry[] | null> {
+    if (!this.api) return null;
+    const response = await this.api.readDir(path, includeHidden);
+    return response.success ? (response.data as FileEntry[]) : null;
+  }
+
+  /**
+   * Get file stats
+   */
+  async getFileStats(path: string): Promise<FileEntry | null> {
+    if (!this.api) return null;
+    const response = await this.api.getFileStats(path);
+    return response.success ? (response.data as FileEntry) : null;
   }
 
   // ============================================

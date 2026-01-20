@@ -97,6 +97,8 @@ import type { AgentProfile } from '../../../../shared/types/agent.types';
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
+        height: 36px;
+        box-sizing: border-box;
         background: var(--bg-secondary);
         border: 1px solid;
         border-radius: 6px;

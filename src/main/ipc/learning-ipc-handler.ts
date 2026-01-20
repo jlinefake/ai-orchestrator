@@ -1,6 +1,6 @@
 /**
  * Learning IPC Handlers
- * Handles RLM Context Management, Self-Improvement/Learning, and Model Discovery
+ * Handles RLM Context Management, Self-Improvement/Learning, Model Discovery, and A/B Testing
  */
 
 import { ipcMain } from 'electron';
@@ -9,6 +9,7 @@ import { RLMContextManager } from '../rlm/context-manager';
 import { OutcomeTracker } from '../learning/outcome-tracker';
 import { StrategyLearner } from '../learning/strategy-learner';
 import { PromptEnhancer } from '../learning/prompt-enhancer';
+import { ABTestingEngine, type Experiment, type Variant, type ABTestingConfig } from '../learning/ab-testing';
 import type {
   ContextQuery,
   RLMConfig,
@@ -38,6 +39,7 @@ export function registerLearningHandlers(): void {
   registerRLMHandlers();
   registerSelfImprovementHandlers();
   registerModelDiscoveryHandlers();
+  registerABTestingHandlers();
 }
 
 // ============ RLM Context Management Handlers ============
@@ -402,5 +404,201 @@ function registerModelDiscoveryHandlers(): void {
   // Remove override - placeholder
   ipcMain.handle(IPC_CHANNELS.MODEL_REMOVE_OVERRIDE, async () => {
     return { success: true };
+  });
+}
+
+// ============ A/B Testing Handlers ============
+
+function registerABTestingHandlers(): void {
+  const abEngine = ABTestingEngine.getInstance();
+
+  // Create experiment
+  ipcMain.handle(
+    IPC_CHANNELS.AB_CREATE_EXPERIMENT,
+    (
+      _event,
+      payload: {
+        name: string;
+        description?: string;
+        taskType: string;
+        variants: Omit<Variant, 'id'>[];
+        minSamples?: number;
+        confidenceThreshold?: number;
+      }
+    ) => {
+      try {
+        const experiment = abEngine.createExperiment(payload);
+        return { success: true, data: experiment };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    }
+  );
+
+  // Update experiment
+  ipcMain.handle(
+    IPC_CHANNELS.AB_UPDATE_EXPERIMENT,
+    (
+      _event,
+      payload: {
+        experimentId: string;
+        updates: Partial<Pick<Experiment, 'name' | 'description' | 'minSamples' | 'confidenceThreshold'>>;
+      }
+    ) => {
+      try {
+        const experiment = abEngine.updateExperiment(payload.experimentId, payload.updates);
+        if (!experiment) {
+          return { success: false, error: 'Experiment not found or cannot be updated' };
+        }
+        return { success: true, data: experiment };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    }
+  );
+
+  // Delete experiment
+  ipcMain.handle(IPC_CHANNELS.AB_DELETE_EXPERIMENT, (_event, experimentId: string) => {
+    try {
+      const deleted = abEngine.deleteExperiment(experimentId);
+      return { success: deleted, error: deleted ? undefined : 'Experiment not found' };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Start experiment
+  ipcMain.handle(IPC_CHANNELS.AB_START_EXPERIMENT, (_event, experimentId: string) => {
+    try {
+      const started = abEngine.startExperiment(experimentId);
+      return { success: started, error: started ? undefined : 'Failed to start experiment' };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Pause experiment
+  ipcMain.handle(IPC_CHANNELS.AB_PAUSE_EXPERIMENT, (_event, experimentId: string) => {
+    try {
+      const paused = abEngine.pauseExperiment(experimentId);
+      return { success: paused, error: paused ? undefined : 'Failed to pause experiment' };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Complete experiment
+  ipcMain.handle(IPC_CHANNELS.AB_COMPLETE_EXPERIMENT, (_event, experimentId: string) => {
+    try {
+      const result = abEngine.completeExperiment(experimentId);
+      if (!result) {
+        return { success: false, error: 'Experiment not found' };
+      }
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Get experiment
+  ipcMain.handle(IPC_CHANNELS.AB_GET_EXPERIMENT, (_event, experimentId: string) => {
+    try {
+      const experiment = abEngine.getExperiment(experimentId);
+      if (!experiment) {
+        return { success: false, error: 'Experiment not found' };
+      }
+      return { success: true, data: experiment };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // List experiments
+  ipcMain.handle(
+    IPC_CHANNELS.AB_LIST_EXPERIMENTS,
+    (_event, filter?: { status?: Experiment['status']; taskType?: string }) => {
+      try {
+        const experiments = abEngine.listExperiments(filter);
+        return { success: true, data: experiments };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    }
+  );
+
+  // Get variant for task
+  ipcMain.handle(
+    IPC_CHANNELS.AB_GET_VARIANT,
+    (_event, payload: { taskType: string; sessionId?: string }) => {
+      try {
+        const result = abEngine.getVariant(payload.taskType, payload.sessionId);
+        if (!result) {
+          return { success: true, data: null }; // No experiment running for this task type
+        }
+        return { success: true, data: result };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    }
+  );
+
+  // Record outcome
+  ipcMain.handle(
+    IPC_CHANNELS.AB_RECORD_OUTCOME,
+    (
+      _event,
+      payload: {
+        experimentId: string;
+        variantId: string;
+        outcome: { success: boolean; duration?: number; tokens?: number; metadata?: Record<string, unknown> };
+      }
+    ) => {
+      try {
+        abEngine.recordOutcome(payload.experimentId, payload.variantId, payload.outcome);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    }
+  );
+
+  // Get results
+  ipcMain.handle(IPC_CHANNELS.AB_GET_RESULTS, (_event, experimentId: string) => {
+    try {
+      const results = abEngine.getResults(experimentId);
+      return { success: true, data: results };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Get winner
+  ipcMain.handle(IPC_CHANNELS.AB_GET_WINNER, (_event, experimentId: string) => {
+    try {
+      const winner = abEngine.getWinner(experimentId);
+      return { success: true, data: winner };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Get stats
+  ipcMain.handle(IPC_CHANNELS.AB_GET_STATS, () => {
+    try {
+      const stats = abEngine.getStats();
+      return { success: true, data: stats };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Configure
+  ipcMain.handle(IPC_CHANNELS.AB_CONFIGURE, (_event, config: Partial<ABTestingConfig>) => {
+    try {
+      abEngine.configure(config);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
   });
 }

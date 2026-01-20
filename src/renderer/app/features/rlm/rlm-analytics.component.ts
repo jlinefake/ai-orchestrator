@@ -2,10 +2,12 @@
  * RLM Analytics Component
  *
  * Dashboard for visualizing RLM effectiveness metrics:
- * - Token savings over time
+ * - Token savings over time (ECharts bar chart)
+ * - Token savings trend (ECharts line chart)
+ * - Storage breakdown by type (ECharts pie chart)
  * - Query performance statistics
- * - Storage utilization
  * - Learning insights
+ * - Export to CSV/JSON
  */
 
 import {
@@ -15,11 +17,18 @@ import {
   inject,
   signal,
   computed,
+  effect,
   ChangeDetectionStrategy,
+  ElementRef,
+  viewChild,
+  afterNextRender,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import * as echarts from 'echarts';
+import type { ECharts, EChartsOption } from 'echarts';
+import { saveAs } from 'file-saver';
 
 interface TokenSavingsData {
   date: string;
@@ -52,6 +61,19 @@ interface InsightData {
   createdAt: number;
 }
 
+interface ExportData {
+  exportDate: string;
+  timeRange: string;
+  tokenSavings: {
+    totalSavingsPercent: number;
+    totalTokensSaved: number;
+    history: TokenSavingsData[];
+  };
+  queryStats: QueryStats[];
+  storageStats: StorageStats | null;
+  insights: InsightData[];
+}
+
 @Component({
   selector: 'app-rlm-analytics',
   standalone: true,
@@ -66,9 +88,17 @@ interface InsightData {
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </select>
-          <button class="refresh-btn" (click)="loadData()">
+          <button class="action-btn" (click)="loadData()" title="Refresh data">
             ↻ Refresh
           </button>
+          <div class="export-buttons">
+            <button class="action-btn export" (click)="exportCSV()" title="Export as CSV">
+              📄 CSV
+            </button>
+            <button class="action-btn export" (click)="exportJSON()" title="Export as JSON">
+              📦 JSON
+            </button>
+          </div>
         </div>
       </header>
 
@@ -107,104 +137,79 @@ interface InsightData {
         </div>
       </section>
 
-      <!-- Token Savings Chart -->
-      <section class="chart-section">
-        <h3>Token Savings Over Time</h3>
-        @if (tokenSavingsHistory().length > 0) {
-          <div class="chart-container">
-            <div class="savings-chart">
-              @for (point of tokenSavingsHistory(); track point.date) {
-                <div class="chart-bar-group">
-                  <div
-                    class="chart-bar direct"
-                    [style.height.%]="getBarHeight(point.directTokens)"
-                    [title]="'Direct: ' + formatNumber(point.directTokens) + ' tokens'"
-                  ></div>
-                  <div
-                    class="chart-bar actual"
-                    [style.height.%]="getBarHeight(point.actualTokens)"
-                    [title]="'Actual: ' + formatNumber(point.actualTokens) + ' tokens'"
-                  ></div>
-                  <div class="chart-label">{{ formatDateShort(point.date) }}</div>
-                </div>
-              }
+      <!-- Charts Row -->
+      <section class="charts-row">
+        <!-- Token Savings Comparison (Bar Chart) -->
+        <div class="chart-card">
+          <h3>Token Usage Comparison</h3>
+          <div #tokenBarChart class="chart-area"></div>
+          @if (tokenSavingsHistory().length === 0) {
+            <div class="chart-empty-overlay">
+              <span class="empty-icon">📊</span>
+              <span>No data for selected range</span>
             </div>
-            <div class="chart-legend">
-              <span class="legend-item">
-                <span class="legend-color direct"></span>
-                Direct (without RLM)
-              </span>
-              <span class="legend-item">
-                <span class="legend-color actual"></span>
-                Actual (with RLM)
-              </span>
+          }
+        </div>
+
+        <!-- Savings Trend (Line Chart) -->
+        <div class="chart-card">
+          <h3>Savings Trend Over Time</h3>
+          <div #savingsTrendChart class="chart-area"></div>
+          @if (tokenSavingsHistory().length === 0) {
+            <div class="chart-empty-overlay">
+              <span class="empty-icon">📈</span>
+              <span>No data for selected range</span>
             </div>
-          </div>
-        } @else {
-          <div class="empty-chart">
-            <span class="empty-icon">📊</span>
-            <span>No data available for the selected time range</span>
-          </div>
-        }
+          }
+        </div>
       </section>
 
-      <!-- Query Statistics -->
-      <section class="stats-section">
-        <h3>Query Performance</h3>
-        @if (queryStats().length > 0) {
-          <div class="stats-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Query Type</th>
-                  <th>Count</th>
-                  <th>Avg Duration</th>
-                  <th>Avg Tokens</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (stat of queryStats(); track stat.type) {
+      <!-- Storage Chart and Query Stats Row -->
+      <section class="charts-row">
+        <!-- Storage Breakdown (Pie Chart) -->
+        <div class="chart-card narrow">
+          <h3>Storage by Section Type</h3>
+          <div #storagePieChart class="chart-area"></div>
+          @if ((storageStats()?.byType || []).length === 0) {
+            <div class="chart-empty-overlay">
+              <span class="empty-icon">🗂️</span>
+              <span>No storage data</span>
+            </div>
+          }
+        </div>
+
+        <!-- Query Statistics -->
+        <div class="chart-card wide">
+          <h3>Query Performance</h3>
+          @if (queryStats().length > 0) {
+            <div class="stats-table">
+              <table>
+                <thead>
                   <tr>
-                    <td>
-                      <span class="query-type-badge">{{ getQueryTypeIcon(stat.type) }} {{ stat.type }}</span>
-                    </td>
-                    <td>{{ stat.count }}</td>
-                    <td>{{ stat.avgDuration.toFixed(0) }}ms</td>
-                    <td>{{ stat.avgTokens.toFixed(0) }}</td>
+                    <th>Query Type</th>
+                    <th>Count</th>
+                    <th>Avg Duration</th>
+                    <th>Avg Tokens</th>
                   </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        } @else {
-          <div class="empty-state">No query statistics available</div>
-        }
-      </section>
-
-      <!-- Storage Breakdown -->
-      <section class="storage-section">
-        <h3>Storage by Type</h3>
-        @if ((storageStats()?.byType || []).length > 0) {
-          <div class="storage-breakdown">
-            @for (type of storageStats()?.byType || []; track type.type) {
-              <div class="storage-type">
-                <div class="type-header">
-                  <span class="type-name">{{ getSectionTypeIcon(type.type) }} {{ type.type }}</span>
-                  <span class="type-count">{{ type.count }} sections</span>
-                </div>
-                <div class="type-bar">
-                  <div
-                    class="type-fill"
-                    [style.width.%]="getStoragePercent(type.tokens)"
-                  ></div>
-                </div>
-                <div class="type-tokens">{{ formatNumber(type.tokens) }} tokens</div>
-              </div>
-            }
-          </div>
-        } @else {
-          <div class="empty-state">No storage data available</div>
-        }
+                </thead>
+                <tbody>
+                  @for (stat of queryStats(); track stat.type) {
+                    <tr>
+                      <td>
+                        <span class="query-type-badge">{{ getQueryTypeIcon(stat.type) }} {{ stat.type }}</span>
+                      </td>
+                      <td>{{ stat.count }}</td>
+                      <td>{{ stat.avgDuration.toFixed(0) }}ms</td>
+                      <td>{{ stat.avgTokens.toFixed(0) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <div class="empty-state">No query statistics available</div>
+          }
+        </div>
       </section>
 
       <!-- Insights -->
@@ -240,7 +245,7 @@ interface InsightData {
   styles: [`
     .analytics-dashboard {
       padding: 1.5rem;
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
       color: var(--text-primary);
     }
@@ -250,6 +255,8 @@ interface InsightData {
       justify-content: space-between;
       align-items: center;
       margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
 
       h2 {
         margin: 0;
@@ -260,6 +267,8 @@ interface InsightData {
       .header-actions {
         display: flex;
         gap: 0.5rem;
+        align-items: center;
+        flex-wrap: wrap;
       }
     }
 
@@ -278,7 +287,7 @@ interface InsightData {
       }
     }
 
-    .refresh-btn {
+    .action-btn {
       padding: 0.5rem 1rem;
       background: var(--bg-tertiary);
       border: 1px solid var(--border-color);
@@ -286,10 +295,26 @@ interface InsightData {
       color: var(--text-primary);
       font-size: 0.875rem;
       cursor: pointer;
+      transition: all 0.15s ease;
 
       &:hover {
         background: var(--bg-hover);
       }
+
+      &.export {
+        background: var(--bg-secondary);
+
+        &:hover {
+          background: var(--primary-color);
+          color: white;
+          border-color: var(--primary-color);
+        }
+      }
+    }
+
+    .export-buttons {
+      display: flex;
+      gap: 0.25rem;
     }
 
     .metrics-grid {
@@ -335,107 +360,60 @@ interface InsightData {
       }
     }
 
-    .chart-section,
-    .stats-section,
-    .storage-section,
-    .insights-section {
+    .charts-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+
+      @media (max-width: 900px) {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart-card {
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: var(--radius-md);
       padding: 1.25rem;
-      margin-bottom: 1.5rem;
+      position: relative;
+      min-height: 300px;
+      display: flex;
+      flex-direction: column;
+
+      &.narrow {
+        @media (min-width: 900px) {
+          max-width: 350px;
+        }
+      }
+
+      &.wide {
+        flex: 1;
+      }
 
       h3 {
         margin: 0 0 1rem 0;
         font-size: 1rem;
         font-weight: 600;
       }
-    }
 
-    .chart-container {
-      padding: 0.5rem 0;
-    }
-
-    .savings-chart {
-      display: flex;
-      align-items: flex-end;
-      height: 200px;
-      gap: 4px;
-      padding-bottom: 24px;
-    }
-
-    .chart-bar-group {
-      flex: 1;
-      display: flex;
-      gap: 2px;
-      align-items: flex-end;
-      position: relative;
-      min-width: 20px;
-
-      .chart-label {
-        position: absolute;
-        bottom: -20px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 0.625rem;
-        color: var(--text-muted);
-        white-space: nowrap;
+      .chart-area {
+        flex: 1;
+        min-height: 220px;
       }
     }
 
-    .chart-bar {
-      flex: 1;
-      border-radius: 2px 2px 0 0;
-      min-height: 4px;
-      transition: height 0.3s ease;
-
-      &.direct {
-        background: #ef4444;
-        opacity: 0.5;
-      }
-
-      &.actual {
-        background: #10b981;
-      }
-    }
-
-    .chart-legend {
-      display: flex;
-      justify-content: center;
-      gap: 1.5rem;
-      margin-top: 1rem;
-
-      .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-      }
-
-      .legend-color {
-        width: 12px;
-        height: 12px;
-        border-radius: 2px;
-
-        &.direct {
-          background: #ef4444;
-          opacity: 0.5;
-        }
-
-        &.actual {
-          background: #10b981;
-        }
-      }
-    }
-
-    .empty-chart {
+    .chart-empty-overlay {
+      position: absolute;
+      inset: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: 0.5rem;
-      padding: 3rem;
       color: var(--text-muted);
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
 
       .empty-icon {
         font-size: 2rem;
@@ -445,6 +423,7 @@ interface InsightData {
 
     .stats-table {
       overflow-x: auto;
+      flex: 1;
 
       table {
         width: 100%;
@@ -477,51 +456,22 @@ interface InsightData {
       font-size: 0.8125rem;
     }
 
-    .storage-breakdown {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
+    .insights-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
 
-    .storage-type {
-      .type-header {
-        display: flex;
-        justify-content: space-between;
-        font-size: 0.875rem;
-        margin-bottom: 0.25rem;
-      }
-
-      .type-name {
-        font-weight: 500;
-      }
-
-      .type-count {
-        color: var(--text-muted);
-      }
-
-      .type-bar {
-        height: 8px;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
-        overflow: hidden;
-
-        .type-fill {
-          height: 100%;
-          background: var(--primary-color);
-          transition: width 0.3s ease;
-        }
-      }
-
-      .type-tokens {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        margin-top: 0.25rem;
+      h3 {
+        margin: 0 0 1rem 0;
+        font-size: 1rem;
+        font-weight: 600;
       }
     }
 
     .insights-list {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: 0.75rem;
     }
 
@@ -599,6 +549,17 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
   readonly insights = signal<InsightData[]>([]);
   readonly isLoading = signal<boolean>(false);
 
+  // Chart container references
+  tokenBarChartEl = viewChild<ElementRef<HTMLDivElement>>('tokenBarChart');
+  savingsTrendChartEl = viewChild<ElementRef<HTMLDivElement>>('savingsTrendChart');
+  storagePieChartEl = viewChild<ElementRef<HTMLDivElement>>('storagePieChart');
+
+  // Chart instances
+  private tokenBarChart: ECharts | null = null;
+  private savingsTrendChart: ECharts | null = null;
+  private storagePieChart: ECharts | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+
   readonly totalSavingsPercent = computed(() => {
     const history = this.tokenSavingsHistory();
     if (history.length === 0) return 0;
@@ -631,13 +592,337 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
     this.insights().filter(i => i.confidence >= 0.8).length
   );
 
-  private maxTokensInHistory = 0;
+  constructor() {
+    afterNextRender(() => {
+      this.initCharts();
+    });
+
+    // Update charts when data changes
+    effect(() => {
+      const history = this.tokenSavingsHistory();
+      this.updateTokenBarChart(history);
+      this.updateSavingsTrendChart(history);
+    });
+
+    effect(() => {
+      const storage = this.storageStats();
+      this.updateStoragePieChart(storage);
+    });
+  }
 
   ngOnInit(): void {
     this.loadData();
   }
 
-  ngOnDestroy(): void {}
+  ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+    this.tokenBarChart?.dispose();
+    this.savingsTrendChart?.dispose();
+    this.storagePieChart?.dispose();
+  }
+
+  private initCharts(): void {
+    const tokenBarContainer = this.tokenBarChartEl()?.nativeElement;
+    const trendContainer = this.savingsTrendChartEl()?.nativeElement;
+    const pieContainer = this.storagePieChartEl()?.nativeElement;
+
+    if (tokenBarContainer) {
+      this.tokenBarChart = echarts.init(tokenBarContainer, 'dark', { renderer: 'canvas' });
+    }
+    if (trendContainer) {
+      this.savingsTrendChart = echarts.init(trendContainer, 'dark', { renderer: 'canvas' });
+    }
+    if (pieContainer) {
+      this.storagePieChart = echarts.init(pieContainer, 'dark', { renderer: 'canvas' });
+    }
+
+    // Setup resize observer for responsive charts
+    this.resizeObserver = new ResizeObserver(() => {
+      this.tokenBarChart?.resize();
+      this.savingsTrendChart?.resize();
+      this.storagePieChart?.resize();
+    });
+
+    if (tokenBarContainer) this.resizeObserver.observe(tokenBarContainer);
+    if (trendContainer) this.resizeObserver.observe(trendContainer);
+    if (pieContainer) this.resizeObserver.observe(pieContainer);
+
+    // Initial chart updates
+    this.updateTokenBarChart(this.tokenSavingsHistory());
+    this.updateSavingsTrendChart(this.tokenSavingsHistory());
+    this.updateStoragePieChart(this.storageStats());
+  }
+
+  private updateTokenBarChart(data: TokenSavingsData[]): void {
+    if (!this.tokenBarChart || data.length === 0) return;
+
+    const dates = data.map(d => this.formatDateShort(d.date));
+    const directTokens = data.map(d => d.directTokens);
+    const actualTokens = data.map(d => d.actualTokens);
+
+    const option: EChartsOption = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(30, 30, 30, 0.95)',
+        borderColor: 'var(--border-color)',
+        textStyle: { color: '#fff', fontSize: 11 },
+        formatter: (params: any) => {
+          const date = params[0].axisValue;
+          const direct = params[0]?.value || 0;
+          const actual = params[1]?.value || 0;
+          const saved = direct - actual;
+          const percent = direct > 0 ? ((saved / direct) * 100).toFixed(1) : '0';
+          return `
+            <div style="font-size: 11px;">
+              <div style="font-weight: 600; margin-bottom: 6px;">${date}</div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 10px; height: 10px; background: #ef4444; border-radius: 2px;"></span>
+                Without RLM: <strong>${this.formatNumber(direct)}</strong>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 10px; height: 10px; background: #10b981; border-radius: 2px;"></span>
+                With RLM: <strong>${this.formatNumber(actual)}</strong>
+              </div>
+              <div style="border-top: 1px solid #444; padding-top: 4px; margin-top: 4px; color: #10b981;">
+                Saved: ${this.formatNumber(saved)} tokens (${percent}%)
+              </div>
+            </div>
+          `;
+        },
+      },
+      legend: {
+        data: ['Without RLM', 'With RLM'],
+        bottom: 0,
+        textStyle: { color: '#888', fontSize: 10 },
+        itemWidth: 12,
+        itemHeight: 12,
+      },
+      grid: {
+        left: 50,
+        right: 20,
+        top: 20,
+        bottom: 50,
+      },
+      xAxis: {
+        type: 'category',
+        data: dates,
+        axisLabel: { color: '#888', fontSize: 9, rotate: data.length > 10 ? 45 : 0 },
+        axisLine: { lineStyle: { color: '#333' } },
+      },
+      yAxis: {
+        type: 'value',
+        name: 'Tokens',
+        nameTextStyle: { color: '#888', fontSize: 10 },
+        axisLabel: {
+          color: '#888',
+          fontSize: 9,
+          formatter: (value: number) => this.formatNumber(value),
+        },
+        axisLine: { lineStyle: { color: '#333' } },
+        splitLine: { lineStyle: { color: '#222' } },
+      },
+      series: [
+        {
+          name: 'Without RLM',
+          type: 'bar',
+          data: directTokens,
+          itemStyle: { color: 'rgba(239, 68, 68, 0.7)' },
+          barGap: '10%',
+        },
+        {
+          name: 'With RLM',
+          type: 'bar',
+          data: actualTokens,
+          itemStyle: { color: '#10b981' },
+        },
+      ],
+    };
+
+    this.tokenBarChart.setOption(option, { notMerge: true });
+  }
+
+  private updateSavingsTrendChart(data: TokenSavingsData[]): void {
+    if (!this.savingsTrendChart || data.length === 0) return;
+
+    const dates = data.map(d => this.formatDateShort(d.date));
+    const savingsPercent = data.map(d => d.savingsPercent);
+    const cumulativeSavings = data.reduce<number[]>((acc, d, i) => {
+      const prev = i > 0 ? acc[i - 1] : 0;
+      acc.push(prev + (d.directTokens - d.actualTokens));
+      return acc;
+    }, []);
+
+    const option: EChartsOption = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(30, 30, 30, 0.95)',
+        borderColor: 'var(--border-color)',
+        textStyle: { color: '#fff', fontSize: 11 },
+        formatter: (params: any) => {
+          const date = params[0].axisValue;
+          const percent = params[0]?.value || 0;
+          const cumulative = params[1]?.value || 0;
+          return `
+            <div style="font-size: 11px;">
+              <div style="font-weight: 600; margin-bottom: 6px;">${date}</div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 10px; height: 10px; background: #6366f1; border-radius: 2px;"></span>
+                Daily Savings: <strong>${percent.toFixed(1)}%</strong>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="display: inline-block; width: 10px; height: 10px; background: #10b981; border-radius: 2px;"></span>
+                Cumulative: <strong>${this.formatNumber(cumulative)}</strong> tokens
+              </div>
+            </div>
+          `;
+        },
+      },
+      legend: {
+        data: ['Savings %', 'Cumulative Tokens Saved'],
+        bottom: 0,
+        textStyle: { color: '#888', fontSize: 10 },
+        itemWidth: 12,
+        itemHeight: 12,
+      },
+      grid: {
+        left: 50,
+        right: 60,
+        top: 20,
+        bottom: 50,
+      },
+      xAxis: {
+        type: 'category',
+        data: dates,
+        axisLabel: { color: '#888', fontSize: 9, rotate: data.length > 10 ? 45 : 0 },
+        axisLine: { lineStyle: { color: '#333' } },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: 'Savings %',
+          min: 0,
+          max: 100,
+          nameTextStyle: { color: '#888', fontSize: 10 },
+          axisLabel: {
+            color: '#888',
+            fontSize: 9,
+            formatter: (value: number) => `${value}%`,
+          },
+          axisLine: { lineStyle: { color: '#333' } },
+          splitLine: { lineStyle: { color: '#222' } },
+        },
+        {
+          type: 'value',
+          name: 'Tokens',
+          nameTextStyle: { color: '#888', fontSize: 10 },
+          axisLabel: {
+            color: '#888',
+            fontSize: 9,
+            formatter: (value: number) => this.formatNumber(value),
+          },
+          axisLine: { lineStyle: { color: '#333' } },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: 'Savings %',
+          type: 'line',
+          data: savingsPercent,
+          smooth: true,
+          lineStyle: { width: 2, color: '#6366f1' },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(99, 102, 241, 0.3)' },
+              { offset: 1, color: 'rgba(99, 102, 241, 0.05)' },
+            ]),
+          },
+          symbol: 'circle',
+          symbolSize: 6,
+          itemStyle: { color: '#6366f1' },
+        },
+        {
+          name: 'Cumulative Tokens Saved',
+          type: 'line',
+          yAxisIndex: 1,
+          data: cumulativeSavings,
+          smooth: true,
+          lineStyle: { width: 2, color: '#10b981' },
+          symbol: 'circle',
+          symbolSize: 6,
+          itemStyle: { color: '#10b981' },
+        },
+      ],
+    };
+
+    this.savingsTrendChart.setOption(option, { notMerge: true });
+  }
+
+  private updateStoragePieChart(storage: StorageStats | null): void {
+    if (!this.storagePieChart || !storage || storage.byType.length === 0) return;
+
+    const colors: Record<string, string> = {
+      file: '#3b82f6',
+      conversation: '#10b981',
+      tool_output: '#f59e0b',
+      external: '#8b5cf6',
+      summary: '#ef4444',
+    };
+
+    const data = storage.byType.map(t => ({
+      name: this.formatSectionType(t.type),
+      value: t.tokens,
+      itemStyle: { color: colors[t.type] || '#888' },
+    }));
+
+    const option: EChartsOption = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: 'rgba(30, 30, 30, 0.95)',
+        borderColor: 'var(--border-color)',
+        textStyle: { color: '#fff', fontSize: 11 },
+        formatter: (params: any) => {
+          const item = storage.byType.find(t => this.formatSectionType(t.type) === params.name);
+          return `
+            <div style="font-size: 11px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">${params.name}</div>
+              <div>${this.formatNumber(params.value)} tokens (${params.percent}%)</div>
+              <div style="color: #888;">${item?.count || 0} sections</div>
+            </div>
+          `;
+        },
+      },
+      legend: {
+        orient: 'vertical',
+        right: 10,
+        top: 'center',
+        textStyle: { color: '#888', fontSize: 9 },
+        itemWidth: 10,
+        itemHeight: 10,
+      },
+      series: [{
+        type: 'pie',
+        radius: ['45%', '75%'],
+        center: ['35%', '50%'],
+        avoidLabelOverlap: false,
+        label: { show: false },
+        labelLine: { show: false },
+        emphasis: {
+          label: {
+            show: true,
+            fontSize: 11,
+            fontWeight: 'bold',
+          },
+        },
+        data,
+      }],
+    };
+
+    this.storagePieChart.setOption(option, { notMerge: true });
+  }
 
   async loadData(): Promise<void> {
     this.isLoading.set(true);
@@ -659,12 +944,7 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
         range: this.timeRange,
       });
       if (response.success && response.data) {
-        const data = response.data as TokenSavingsData[];
-        this.tokenSavingsHistory.set(data);
-        this.maxTokensInHistory = Math.max(
-          1, // Avoid division by zero
-          ...data.flatMap((d: TokenSavingsData) => [d.directTokens, d.actualTokens])
-        );
+        this.tokenSavingsHistory.set(response.data as TokenSavingsData[]);
       }
     } catch (error) {
       console.error('[RLM Analytics] Failed to load token savings:', error);
@@ -706,15 +986,110 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
     }
   }
 
-  getBarHeight(tokens: number): number {
-    return this.maxTokensInHistory > 0
-      ? (tokens / this.maxTokensInHistory) * 100
-      : 0;
+  exportCSV(): void {
+    const data = this.buildExportData();
+    const sections: string[] = [];
+
+    // Header
+    sections.push(`# RLM Analytics Export`);
+    sections.push(`# Date Range: ${this.getTimeRangeLabel()}`);
+    sections.push(`# Export Date: ${data.exportDate}`);
+    sections.push('');
+
+    // Summary
+    sections.push('# Summary');
+    sections.push('Metric,Value');
+    sections.push(`Total Savings Percent,${data.tokenSavings.totalSavingsPercent.toFixed(2)}%`);
+    sections.push(`Total Tokens Saved,${data.tokenSavings.totalTokensSaved}`);
+    sections.push('');
+
+    // Token Savings History
+    if (data.tokenSavings.history.length > 0) {
+      sections.push('# Token Savings History');
+      sections.push('Date,Direct Tokens,Actual Tokens,Savings Percent');
+      for (const h of data.tokenSavings.history) {
+        sections.push(`${h.date},${h.directTokens},${h.actualTokens},${h.savingsPercent.toFixed(2)}%`);
+      }
+      sections.push('');
+    }
+
+    // Query Stats
+    if (data.queryStats.length > 0) {
+      sections.push('# Query Statistics');
+      sections.push('Type,Count,Avg Duration (ms),Avg Tokens');
+      for (const q of data.queryStats) {
+        sections.push(`${q.type},${q.count},${q.avgDuration.toFixed(2)},${q.avgTokens.toFixed(2)}`);
+      }
+      sections.push('');
+    }
+
+    // Storage Stats
+    if (data.storageStats) {
+      sections.push('# Storage Statistics');
+      sections.push(`Total Stores,${data.storageStats.totalStores}`);
+      sections.push(`Total Sections,${data.storageStats.totalSections}`);
+      sections.push(`Total Tokens,${data.storageStats.totalTokens}`);
+      sections.push(`Total Size (bytes),${data.storageStats.totalSizeBytes}`);
+      sections.push('');
+
+      if (data.storageStats.byType.length > 0) {
+        sections.push('# Storage by Type');
+        sections.push('Type,Count,Tokens');
+        for (const t of data.storageStats.byType) {
+          sections.push(`${t.type},${t.count},${t.tokens}`);
+        }
+        sections.push('');
+      }
+    }
+
+    // Insights
+    if (data.insights.length > 0) {
+      sections.push('# Insights');
+      sections.push('ID,Type,Title,Description,Confidence,Created At');
+      for (const i of data.insights) {
+        const desc = i.description ? `"${i.description.replace(/"/g, '""')}"` : '';
+        sections.push(`${i.id},${i.type},"${i.title.replace(/"/g, '""')}",${desc},${(i.confidence * 100).toFixed(0)}%,${new Date(i.createdAt).toISOString()}`);
+      }
+    }
+
+    const csv = sections.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    saveAs(blob, `rlm-analytics-${this.timeRange}-${this.getTimestamp()}.csv`);
   }
 
-  getStoragePercent(tokens: number): number {
-    const total = this.storageStats()?.totalTokens || 0;
-    return total > 0 ? (tokens / total) * 100 : 0;
+  exportJSON(): void {
+    const data = this.buildExportData();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    saveAs(blob, `rlm-analytics-${this.timeRange}-${this.getTimestamp()}.json`);
+  }
+
+  private buildExportData(): ExportData {
+    return {
+      exportDate: new Date().toISOString(),
+      timeRange: this.getTimeRangeLabel(),
+      tokenSavings: {
+        totalSavingsPercent: this.totalSavingsPercent(),
+        totalTokensSaved: this.totalTokensSaved(),
+        history: this.tokenSavingsHistory(),
+      },
+      queryStats: this.queryStats(),
+      storageStats: this.storageStats(),
+      insights: this.insights(),
+    };
+  }
+
+  private getTimeRangeLabel(): string {
+    switch (this.timeRange) {
+      case '7d': return 'Last 7 days';
+      case '30d': return 'Last 30 days';
+      case '90d': return 'Last 90 days';
+      default: return this.timeRange;
+    }
+  }
+
+  private getTimestamp(): string {
+    return new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
   }
 
   formatNumber(n: number): string {
@@ -741,6 +1116,17 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  formatSectionType(type: string): string {
+    switch (type) {
+      case 'file': return 'Files';
+      case 'conversation': return 'Conversations';
+      case 'tool_output': return 'Tool Output';
+      case 'external': return 'External';
+      case 'summary': return 'Summaries';
+      default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
   }
 
   getQueryTypeIcon(type: string): string {

@@ -138,3 +138,17 @@ export interface VectorRow {
   metadata_json: string | null;
   created_at: number;
 }
+
+// Migration types
+export interface MigrationRow {
+  id: number;
+  name: string;
+  applied_at: number;
+  checksum: string;
+}
+
+export interface Migration {
+  name: string;
+  up: string;
+  down?: string;
+}

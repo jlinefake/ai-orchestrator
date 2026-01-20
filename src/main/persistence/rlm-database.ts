@@ -20,7 +20,10 @@ import {
   ExperienceRow,
   InsightRow,
   VectorRow,
+  MigrationRow,
+  Migration,
 } from './rlm-database.types';
+import * as crypto from 'crypto';
 
 export interface RLMDatabaseConfig {
   dbPath?: string;
@@ -38,6 +41,63 @@ export class RLMDatabase extends EventEmitter {
 
   // Threshold for inline vs file storage (in bytes)
   private readonly INLINE_THRESHOLD = 4096; // 4KB
+
+  // Current schema version
+  private static readonly SCHEMA_VERSION = 1;
+
+  // Migrations to be applied in order
+  private static readonly MIGRATIONS: Migration[] = [
+    // Migration 001: Add optimized indices for common query patterns
+    {
+      name: '001_add_optimized_indices',
+      up: `
+        -- Composite index for filtering outcomes by task type and success
+        CREATE INDEX IF NOT EXISTS idx_outcomes_task_success
+          ON outcomes(task_type, success);
+
+        -- Index for model-specific outcome queries
+        CREATE INDEX IF NOT EXISTS idx_outcomes_model
+          ON outcomes(model);
+
+        -- Index for cleaning up expired insights
+        CREATE INDEX IF NOT EXISTS idx_insights_expires
+          ON insights(expires_at);
+
+        -- Index for time-based session queries
+        CREATE INDEX IF NOT EXISTS idx_sessions_started
+          ON rlm_sessions(started_at);
+
+        -- Index for section checksum lookups (deduplication)
+        CREATE INDEX IF NOT EXISTS idx_sections_checksum
+          ON context_sections(checksum);
+
+        -- Index for file path lookups in sections
+        CREATE INDEX IF NOT EXISTS idx_sections_filepath
+          ON context_sections(file_path);
+
+        -- Composite index for section name lookups within a store
+        CREATE INDEX IF NOT EXISTS idx_sections_store_name
+          ON context_sections(store_id, name);
+      `,
+      down: `
+        DROP INDEX IF EXISTS idx_outcomes_task_success;
+        DROP INDEX IF EXISTS idx_outcomes_model;
+        DROP INDEX IF EXISTS idx_insights_expires;
+        DROP INDEX IF EXISTS idx_sessions_started;
+        DROP INDEX IF EXISTS idx_sections_checksum;
+        DROP INDEX IF EXISTS idx_sections_filepath;
+        DROP INDEX IF EXISTS idx_sections_store_name;
+      `
+    },
+    // Example migration for future use:
+    // {
+    //   name: '002_add_tags_to_sections',
+    //   up: `ALTER TABLE context_sections ADD COLUMN tags_json TEXT;
+    //        CREATE INDEX IF NOT EXISTS idx_sections_tags ON context_sections(tags_json);`,
+    //   down: `DROP INDEX IF EXISTS idx_sections_tags;
+    //          -- Note: SQLite doesn't support DROP COLUMN, would need to recreate table`
+    // }
+  ];
 
   private constructor(config: RLMDatabaseConfig = {}) {
     super();
@@ -94,6 +154,8 @@ export class RLMDatabase extends EventEmitter {
     db.pragma('foreign_keys = ON');
 
     this.createTables(db);
+    this.createMigrationsTable(db);
+    this.runMigrations(db);
     this.emit('database:initialized', { path: this.config.dbPath });
     return db;
   }
@@ -298,6 +360,104 @@ export class RLMDatabase extends EventEmitter {
       CREATE INDEX IF NOT EXISTS idx_vectors_section
         ON vectors(section_id);
     `);
+  }
+
+  // ============================================
+  // Migration System
+  // ============================================
+
+  private createMigrationsTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS _migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
+    `);
+  }
+
+  private computeMigrationChecksum(migration: Migration): string {
+    return crypto.createHash('sha256').update(migration.up).digest('hex').substring(0, 16);
+  }
+
+  private getAppliedMigrations(db: Database.Database): MigrationRow[] {
+    const stmt = db.prepare(`SELECT * FROM _migrations ORDER BY id ASC`);
+    return stmt.all() as MigrationRow[];
+  }
+
+  private runMigrations(db: Database.Database): void {
+    const appliedMigrations = this.getAppliedMigrations(db);
+    const appliedNames = new Set(appliedMigrations.map(m => m.name));
+
+    // Verify checksums of applied migrations haven't changed
+    for (const applied of appliedMigrations) {
+      const migration = RLMDatabase.MIGRATIONS.find(m => m.name === applied.name);
+      if (migration) {
+        const expectedChecksum = this.computeMigrationChecksum(migration);
+        if (applied.checksum !== expectedChecksum) {
+          throw new Error(
+            `Migration checksum mismatch for "${applied.name}". ` +
+            `Expected ${expectedChecksum}, got ${applied.checksum}. ` +
+            `Migration files should not be modified after being applied.`
+          );
+        }
+      }
+    }
+
+    // Apply pending migrations in a transaction
+    const pendingMigrations = RLMDatabase.MIGRATIONS.filter(m => !appliedNames.has(m.name));
+
+    if (pendingMigrations.length === 0) {
+      return;
+    }
+
+    const applyMigrations = db.transaction(() => {
+      for (const migration of pendingMigrations) {
+        try {
+          db.exec(migration.up);
+
+          const checksum = this.computeMigrationChecksum(migration);
+          const insertStmt = db.prepare(`
+            INSERT INTO _migrations (name, applied_at, checksum)
+            VALUES (?, ?, ?)
+          `);
+          insertStmt.run(migration.name, Date.now(), checksum);
+
+          this.emit('migration:applied', { name: migration.name });
+        } catch (error) {
+          throw new Error(
+            `Failed to apply migration "${migration.name}": ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+    });
+
+    applyMigrations();
+    this.emit('migrations:complete', { applied: pendingMigrations.length });
+  }
+
+  /**
+   * Get the current schema version and migration status
+   */
+  getSchemaInfo(): {
+    version: number;
+    appliedMigrations: MigrationRow[];
+    pendingMigrations: string[];
+  } {
+    const applied = this.getAppliedMigrations(this.db);
+    const appliedNames = new Set(applied.map(m => m.name));
+    const pending = RLMDatabase.MIGRATIONS
+      .filter(m => !appliedNames.has(m.name))
+      .map(m => m.name);
+
+    return {
+      version: RLMDatabase.SCHEMA_VERSION,
+      appliedMigrations: applied,
+      pendingMigrations: pending,
+    };
   }
 
   // ============================================
@@ -1117,6 +1277,169 @@ export class RLMDatabase extends EventEmitter {
   vacuum(): void {
     this.db.exec('VACUUM');
     this.emit('database:vacuumed');
+  }
+
+  // ============================================
+  // Backup and Restore
+  // ============================================
+
+  /**
+   * Create a backup of the database to the specified path.
+   * Uses SQLite's backup API for WAL-safe consistent backups.
+   * Also backs up the content directory if includeContent is true.
+   */
+  backupDatabase(targetPath: string, options?: { includeContent?: boolean }): {
+    dbBackupPath: string;
+    contentBackupPath?: string;
+    dbSizeBytes: number;
+    contentSizeBytes?: number;
+  } {
+    const includeContent = options?.includeContent ?? true;
+
+    // Ensure target directory exists
+    const targetDir = path.dirname(targetPath);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    // Use SQLite's backup API via better-sqlite3's backup method
+    // This is WAL-safe and creates a consistent snapshot
+    this.db.backup(targetPath);
+
+    const dbStats = fs.statSync(targetPath);
+    const result: {
+      dbBackupPath: string;
+      contentBackupPath?: string;
+      dbSizeBytes: number;
+      contentSizeBytes?: number;
+    } = {
+      dbBackupPath: targetPath,
+      dbSizeBytes: dbStats.size,
+    };
+
+    // Optionally backup content directory
+    if (includeContent && fs.existsSync(this.contentDir)) {
+      const contentBackupPath = targetPath.replace(/\.db$/, '') + '_content';
+      this.copyDirectoryRecursive(this.contentDir, contentBackupPath);
+      result.contentBackupPath = contentBackupPath;
+      result.contentSizeBytes = this.getDirectorySize(contentBackupPath);
+    }
+
+    this.emit('database:backed_up', {
+      targetPath,
+      dbSizeBytes: result.dbSizeBytes,
+      contentSizeBytes: result.contentSizeBytes,
+    });
+
+    return result;
+  }
+
+  /**
+   * Restore the database from a backup file.
+   * This will close the current database, replace it with the backup,
+   * and reinitialize. The content directory is also restored if present.
+   */
+  restoreDatabase(sourcePath: string, options?: { includeContent?: boolean }): void {
+    const includeContent = options?.includeContent ?? true;
+
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Backup file not found: ${sourcePath}`);
+    }
+
+    // Verify backup is a valid SQLite database
+    try {
+      const testDb = new Database(sourcePath, { readonly: true });
+      testDb.pragma('integrity_check');
+      testDb.close();
+    } catch (error) {
+      throw new Error(
+        `Invalid backup file: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    const dbPath = this.config.dbPath!;
+
+    // Close current database
+    this.db.close();
+
+    // In WAL mode, we need to checkpoint and remove WAL files
+    const walPath = dbPath + '-wal';
+    const shmPath = dbPath + '-shm';
+
+    // Remove existing database files
+    if (fs.existsSync(dbPath)) {
+      fs.unlinkSync(dbPath);
+    }
+    if (fs.existsSync(walPath)) {
+      fs.unlinkSync(walPath);
+    }
+    if (fs.existsSync(shmPath)) {
+      fs.unlinkSync(shmPath);
+    }
+
+    // Copy backup to database location
+    fs.copyFileSync(sourcePath, dbPath);
+
+    // Restore content directory if present
+    if (includeContent) {
+      const contentBackupPath = sourcePath.replace(/\.db$/, '') + '_content';
+      if (fs.existsSync(contentBackupPath)) {
+        // Remove existing content directory
+        if (fs.existsSync(this.contentDir)) {
+          fs.rmSync(this.contentDir, { recursive: true, force: true });
+        }
+        this.copyDirectoryRecursive(contentBackupPath, this.contentDir);
+      }
+    }
+
+    // Reinitialize database connection
+    this.db = this.initializeDatabase();
+
+    this.emit('database:restored', { sourcePath });
+  }
+
+  /**
+   * Create a checkpoint in WAL mode to ensure all changes are written to the main db file.
+   * Useful before taking filesystem-level backups.
+   */
+  checkpoint(): void {
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
+    this.emit('database:checkpoint');
+  }
+
+  private copyDirectoryRecursive(source: string, target: string): void {
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+    }
+
+    const entries = fs.readdirSync(source, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const srcPath = path.join(source, entry.name);
+      const destPath = path.join(target, entry.name);
+
+      if (entry.isDirectory()) {
+        this.copyDirectoryRecursive(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+
+  private getDirectorySize(dirPath: string): number {
+    let size = 0;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const entryPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        size += this.getDirectorySize(entryPath);
+      } else {
+        size += fs.statSync(entryPath).size;
+      }
+    }
+
+    return size;
   }
 
   close(): void {

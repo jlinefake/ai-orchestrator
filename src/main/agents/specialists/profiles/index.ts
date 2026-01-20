@@ -11,3 +11,6 @@ export { devopsSpecialist } from './devops-specialist';
 export { performanceSpecialist } from './performance-specialist';
 export { accessibilitySpecialist } from './accessibility-specialist';
 export { documentationSpecialist } from './documentation-specialist';
+export { visualDesignSpecialist } from './visual-design-specialist';
+export { uxSpecialist } from './ux-specialist';
+export { visualTestingSpecialist } from './visual-testing-specialist';

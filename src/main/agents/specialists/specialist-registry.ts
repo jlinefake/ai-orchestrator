@@ -23,6 +23,9 @@ import { devopsSpecialist } from './profiles/devops-specialist';
 import { performanceSpecialist } from './profiles/performance-specialist';
 import { accessibilitySpecialist } from './profiles/accessibility-specialist';
 import { documentationSpecialist } from './profiles/documentation-specialist';
+import { visualDesignSpecialist } from './profiles/visual-design-specialist';
+import { uxSpecialist } from './profiles/ux-specialist';
+import { visualTestingSpecialist } from './profiles/visual-testing-specialist';
 
 export class SpecialistRegistryManager extends EventEmitter {
   private static instance: SpecialistRegistryManager;
@@ -52,6 +55,9 @@ export class SpecialistRegistryManager extends EventEmitter {
       securitySpecialist,
       testingSpecialist,
       designSpecialist,
+      visualDesignSpecialist,
+      uxSpecialist,
+      visualTestingSpecialist,
       reviewSpecialist,
       devopsSpecialist,
       performanceSpecialist,
@@ -174,6 +180,9 @@ export class SpecialistRegistryManager extends EventEmitter {
       security: ['security', 'vulnerability', 'auth', 'injection', 'xss', 'csrf', 'secret', 'password', 'encrypt'],
       testing: ['test', 'coverage', 'unit', 'integration', 'e2e', 'mock', 'assert', 'spec'],
       design: ['architecture', 'design', 'pattern', 'api', 'interface', 'refactor', 'structure'],
+      visual: ['ui', 'visual', 'color', 'typography', 'spacing', 'animation', 'style', 'css', 'scss', 'theme', 'palette'],
+      ux: ['ux', 'user experience', 'usability', 'interaction', 'flow', 'journey', 'state', 'hover', 'focus', 'disabled', 'loading', 'empty'],
+      'visual-testing': ['visual test', 'screenshot', 'snapshot', 'playwright', 'regression', 'visual regression', 'e2e visual', 'component test'],
       review: ['review', 'quality', 'best practice', 'clean code', 'improve', 'feedback'],
       devops: ['deploy', 'ci', 'cd', 'docker', 'kubernetes', 'pipeline', 'infrastructure'],
       performance: ['performance', 'optimize', 'speed', 'memory', 'cache', 'profile', 'benchmark'],
@@ -188,6 +197,9 @@ export class SpecialistRegistryManager extends EventEmitter {
       security: ['.ts', '.js', '.py', '.go', '.java', '.env', '.yml', '.yaml'],
       testing: ['.spec.ts', '.test.ts', '.spec.js', '.test.js', '_test.go', '_test.py'],
       design: ['.ts', '.js', '.py', '.go', '.java', '.md'],
+      visual: ['.css', '.scss', '.sass', '.less', '.tsx', '.jsx', '.vue', '.svelte', '.html'],
+      ux: ['.tsx', '.jsx', '.vue', '.svelte', '.html', '.ts', '.js', '.css', '.scss'],
+      'visual-testing': ['.spec.ts', '.test.ts', '.e2e.ts', '.spec.js', '.test.js', 'playwright.config.ts'],
       review: ['.ts', '.js', '.py', '.go', '.java', '.tsx', '.jsx'],
       devops: ['.yml', '.yaml', '.dockerfile', '.tf', '.sh', '.json'],
       performance: ['.ts', '.js', '.py', '.go', '.java', '.sql'],

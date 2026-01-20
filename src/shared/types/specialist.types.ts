@@ -28,6 +28,9 @@ export type SpecialistCategory =
   | 'security'
   | 'testing'
   | 'design'
+  | 'visual'
+  | 'ux'
+  | 'visual-testing'
   | 'review'
   | 'devops'
   | 'documentation'
@@ -127,6 +130,9 @@ export const BUILT_IN_SPECIALISTS = {
   SECURITY: 'specialist-security',
   TESTING: 'specialist-testing',
   DESIGN: 'specialist-design',
+  VISUAL_DESIGN: 'specialist-visual-design',
+  UX: 'specialist-ux',
+  VISUAL_TESTING: 'specialist-visual-testing',
   REVIEW: 'specialist-review',
   DEVOPS: 'specialist-devops',
   PERFORMANCE: 'specialist-performance',

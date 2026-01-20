@@ -1,5 +1,6 @@
 /**
  * Instance List Component - Hierarchical tree view with collapsible children
+ * Supports drag-and-drop reordering of root instance groups
  */
 
 import {
@@ -10,6 +11,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { ScrollingModule } from '@angular/cdk/scrolling';
+import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { InstanceStore, Instance } from '../../core/state/instance.store';
 import { InstanceRowComponent } from './instance-row.component';
 
@@ -26,7 +28,7 @@ export interface HierarchicalInstance {
 @Component({
   selector: 'app-instance-list',
   standalone: true,
-  imports: [ScrollingModule, InstanceRowComponent],
+  imports: [ScrollingModule, InstanceRowComponent, DragDropModule],
   template: `
     <div class="instance-list-container">
       <!-- Filter bar -->
@@ -51,25 +53,46 @@ export interface HierarchicalInstance {
         </select>
       </div>
 
-      <!-- Instance list with virtual scroll -->
-      <cdk-virtual-scroll-viewport
-        itemSize="72"
+      <!-- Instance list with drag-drop reordering -->
+      <div
         class="instance-viewport"
+        cdkDropList
+        [cdkDropListData]="hierarchicalInstances()"
+        (cdkDropListDropped)="onDrop($event)"
       >
         @for (item of hierarchicalInstances(); track item.instance.id) {
-          <app-instance-row
-            [instance]="item.instance"
-            [depth]="item.depth"
-            [hasChildren]="item.hasChildren"
-            [isExpanded]="item.isExpanded"
-            [isLastChild]="item.isLastChild"
-            [parentChain]="item.parentChain"
-            [isSelected]="selectedId() === item.instance.id"
-            (select)="onSelectInstance($event)"
-            (terminate)="onTerminateInstance($event)"
-            (restart)="onRestartInstance($event)"
-            (toggleExpand)="onToggleExpand($event)"
-          />
+          <div
+            class="drag-wrapper"
+            [class.is-root]="item.depth === 0"
+            [cdkDragDisabled]="item.depth > 0 || isDragDisabled()"
+            cdkDrag
+            [cdkDragData]="item"
+          >
+            <!-- Custom drag preview -->
+            <div class="drag-preview" *cdkDragPreview>
+              <span class="drag-preview-name">{{ item.instance.displayName }}</span>
+              @if (item.hasChildren) {
+                <span class="drag-preview-children">+{{ item.instance.childrenIds.length }}</span>
+              }
+            </div>
+            <!-- Placeholder shown while dragging -->
+            <div class="drag-placeholder" *cdkDragPlaceholder></div>
+
+            <app-instance-row
+              [instance]="item.instance"
+              [depth]="item.depth"
+              [hasChildren]="item.hasChildren"
+              [isExpanded]="item.isExpanded"
+              [isLastChild]="item.isLastChild"
+              [parentChain]="item.parentChain"
+              [isSelected]="selectedId() === item.instance.id"
+              [isDraggable]="item.depth === 0"
+              (select)="onSelectInstance($event)"
+              (terminate)="onTerminateInstance($event)"
+              (restart)="onRestartInstance($event)"
+              (toggleExpand)="onToggleExpand($event)"
+            />
+          </div>
         } @empty {
           <div class="empty-state">
             @if (filterText() || statusFilter() !== 'all') {
@@ -80,7 +103,7 @@ export interface HierarchicalInstance {
             }
           </div>
         }
-      </cdk-virtual-scroll-viewport>
+      </div>
     </div>
   `,
   styles: [`
@@ -90,11 +113,6 @@ export interface HierarchicalInstance {
       min-height: 0;
     }
 
-    /* Fix horizontal scrollbar from CDK virtual scroll */
-    :host ::ng-deep .cdk-virtual-scroll-content-wrapper {
-      position: relative;
-    }
-
     .instance-list-container {
       display: flex;
       flex-direction: column;
@@ -102,54 +120,189 @@ export interface HierarchicalInstance {
       min-height: 0;
     }
 
+    /* Filter Bar - Refined search interface */
     .filter-bar {
       display: flex;
       gap: var(--spacing-sm);
       padding: var(--spacing-sm) var(--spacing-md);
       border-bottom: 1px solid var(--border-color);
+      background: var(--bg-tertiary);
     }
 
     .filter-input {
       flex: 1;
       min-width: 0;
-      padding: var(--spacing-xs) var(--spacing-sm);
-      font-size: 13px;
+      padding: var(--spacing-sm) var(--spacing-md);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      transition: all var(--transition-fast);
+
+      &::placeholder {
+        color: var(--text-muted);
+      }
+
+      &:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
+      }
     }
 
     .status-filter {
-      padding: var(--spacing-xs) var(--spacing-sm);
-      font-size: 13px;
-      min-width: 80px;
+      padding: var(--spacing-sm) var(--spacing-md);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      min-width: 90px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+
+      &:focus {
+        outline: none;
+        border-color: var(--primary-color);
+      }
+
+      &:hover {
+        border-color: var(--border-color);
+      }
     }
 
+    /* Instance Viewport - Scrollable area */
     .instance-viewport {
       flex: 1;
       width: 100%;
       min-height: 200px;
-      height: 100%;
+      overflow-y: auto;
+      padding: var(--spacing-xs) 0;
     }
 
+    /* Custom scrollbar */
+    .instance-viewport::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .instance-viewport::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .instance-viewport::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
+
+      &:hover {
+        background: var(--border-strong);
+      }
+    }
+
+    /* Empty State - Refined messaging */
     .empty-state {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 200px;
-      color: var(--text-secondary);
+      color: var(--text-muted);
       text-align: center;
-      padding: var(--spacing-md);
+      padding: var(--spacing-xl);
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .empty-state p {
+      font-family: var(--font-display);
+      font-size: 14px;
+      margin: 0;
     }
 
     .empty-state .hint {
-      font-size: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
       color: var(--text-muted);
-      margin-top: var(--spacing-xs);
+      margin-top: var(--spacing-sm);
+      opacity: 0.7;
+      letter-spacing: 0.03em;
+    }
+
+    /* Drag-drop styling - Enhanced feedback */
+    .drag-wrapper {
+      transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+    }
+
+    .drag-wrapper.is-root {
+      cursor: grab;
+    }
+
+    .drag-wrapper.is-root:active {
+      cursor: grabbing;
+    }
+
+    .drag-wrapper.cdk-drag-dragging {
+      opacity: 0.4;
+    }
+
+    .drag-placeholder {
+      background: rgba(var(--primary-rgb), 0.1);
+      border: 2px dashed var(--primary-color);
+      border-radius: var(--radius-md);
+      height: 72px;
+      margin: var(--spacing-xs) var(--spacing-sm);
+      transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+      box-shadow: inset 0 0 20px rgba(var(--primary-rgb), 0.1);
+    }
+
+    .drag-preview {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--primary-color);
+      border-radius: var(--radius-md);
+      box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(var(--primary-rgb), 0.3);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
+    .drag-preview-name {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .drag-preview-children {
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      color: var(--bg-primary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 10px;
+      letter-spacing: 0.02em;
+    }
+
+    /* Animate items moving when dragging */
+    .cdk-drop-list-dragging .drag-wrapper:not(.cdk-drag-placeholder) {
+      transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
     }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class InstanceListComponent {
   private store = inject(InstanceStore);
+  private readonly ORDER_STORAGE_KEY = 'instance-list-order';
 
   // Local UI state
   filterText = signal('');
@@ -159,8 +312,16 @@ export class InstanceListComponent {
   // Using collapsed set means new parents are automatically expanded
   collapsedIds = signal<Set<string>>(new Set());
 
+  // Track custom ordering of root instances (array of instance IDs)
+  rootInstanceOrder = signal<string[]>(this.loadOrder());
+
   // Selected instance ID from store
   selectedId = this.store.selectedInstanceId;
+
+  // Disable drag when filtering
+  isDragDisabled = computed(() => {
+    return this.filterText().length > 0 || this.statusFilter() !== 'all';
+  });
 
   // Build hierarchical view of instances
   hierarchicalInstances = computed(() => {
@@ -261,12 +422,27 @@ export class InstanceListComponent {
       }
     };
 
-    // Sort root instances by creation time
-    rootInstances
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .forEach((instance, index) => {
-        addInstance(instance, 0, [], index === rootInstances.length - 1);
-      });
+    // Sort root instances by custom order, then by creation time for new ones
+    const customOrder = this.rootInstanceOrder();
+    const sortedRoots = rootInstances.sort((a, b) => {
+      const aIndex = customOrder.indexOf(a.id);
+      const bIndex = customOrder.indexOf(b.id);
+
+      // Both have custom order
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex;
+      }
+      // Only a has custom order (a comes first)
+      if (aIndex !== -1) return -1;
+      // Only b has custom order (b comes first)
+      if (bIndex !== -1) return 1;
+      // Neither has custom order - sort by creation time
+      return a.createdAt - b.createdAt;
+    });
+
+    sortedRoots.forEach((instance, index) => {
+      addInstance(instance, 0, [], index === sortedRoots.length - 1);
+    });
 
     return result;
   });
@@ -309,5 +485,79 @@ export class InstanceListComponent {
 
   trackInstance(index: number, item: HierarchicalInstance): string {
     return item.instance.id;
+  }
+
+  /**
+   * Handle drag-drop reordering of root instances
+   */
+  onDrop(event: CdkDragDrop<HierarchicalInstance[]>): void {
+    const draggedItem = event.item.data as HierarchicalInstance;
+
+    // Only allow reordering root instances
+    if (draggedItem.depth > 0) return;
+
+    // Get current root instance IDs in display order
+    const currentRoots = this.hierarchicalInstances()
+      .filter(h => h.depth === 0)
+      .map(h => h.instance.id);
+
+    // Find source and target positions within root instances only
+    const fromRootIndex = currentRoots.indexOf(draggedItem.instance.id);
+    if (fromRootIndex === -1) return;
+
+    // Calculate target root index from flat list positions
+    // We need to map from flat list index to root index
+    const flatList = this.hierarchicalInstances();
+    let targetRootIndex = 0;
+
+    // Find which root instance position we're dropping at
+    for (let i = 0; i <= event.currentIndex && i < flatList.length; i++) {
+      if (flatList[i].depth === 0 && flatList[i].instance.id !== draggedItem.instance.id) {
+        if (i < event.currentIndex) {
+          targetRootIndex++;
+        }
+      }
+    }
+
+    // If dropping after the dragged item's original position, adjust
+    if (event.currentIndex > event.previousIndex) {
+      targetRootIndex++;
+    }
+
+    // Clamp to valid range
+    targetRootIndex = Math.min(targetRootIndex, currentRoots.length - 1);
+
+    if (fromRootIndex === targetRootIndex) return;
+
+    // Reorder the array
+    const newOrder = [...currentRoots];
+    moveItemInArray(newOrder, fromRootIndex, targetRootIndex);
+
+    // Update and persist
+    this.rootInstanceOrder.set(newOrder);
+    this.saveOrder(newOrder);
+  }
+
+  /**
+   * Load saved order from localStorage
+   */
+  private loadOrder(): string[] {
+    try {
+      const saved = localStorage.getItem(this.ORDER_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Save order to localStorage
+   */
+  private saveOrder(order: string[]): void {
+    try {
+      localStorage.setItem(this.ORDER_STORAGE_KEY, JSON.stringify(order));
+    } catch {
+      // Ignore storage errors
+    }
   }
 }

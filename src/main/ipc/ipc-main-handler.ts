@@ -124,6 +124,7 @@ import { registerLearningHandlers } from './learning-ipc-handler';
 import { registerMemoryHandlers } from './memory-ipc-handler';
 import { registerSpecialistHandlers } from './specialist-ipc-handler';
 import { registerTrainingHandlers } from './training-ipc-handler';
+import { registerLLMHandlers } from './llm-ipc-handler';
 import {
   detectSecretsInContent,
   detectSecretsInEnvContent,
@@ -325,6 +326,9 @@ export class IpcMainHandler {
 
     // Training handlers (GRPO Dashboard)
     registerTrainingHandlers();
+
+    // LLM handlers (streaming and token counting)
+    registerLLMHandlers();
 
     // Set up memory event forwarding to renderer
     this.setupMemoryEventForwarding();
@@ -691,6 +695,113 @@ export class IpcMainHandler {
             success: false,
             error: {
               code: 'DIALOG_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+
+    // Read directory contents
+    ipcMain.handle(
+      IPC_CHANNELS.FILE_READ_DIR,
+      async (
+        _event: IpcMainInvokeEvent,
+        payload: { path: string; includeHidden?: boolean }
+      ): Promise<IpcResponse> => {
+        try {
+          const fs = await import('fs/promises');
+          const path = await import('path');
+
+          const entries = await fs.readdir(payload.path, { withFileTypes: true });
+          const results = await Promise.all(
+            entries
+              .filter((entry) => {
+                // Filter hidden files unless explicitly included
+                if (!payload.includeHidden && entry.name.startsWith('.')) {
+                  return false;
+                }
+                return true;
+              })
+              .map(async (entry) => {
+                const fullPath = path.join(payload.path, entry.name);
+                let stats;
+                try {
+                  stats = await fs.stat(fullPath);
+                } catch {
+                  // Skip files we can't stat
+                  return null;
+                }
+
+                return {
+                  name: entry.name,
+                  path: fullPath,
+                  isDirectory: entry.isDirectory(),
+                  isSymlink: entry.isSymbolicLink(),
+                  size: stats.size,
+                  modifiedAt: stats.mtimeMs,
+                  extension: entry.isFile() ? path.extname(entry.name).slice(1) : undefined,
+                };
+              })
+          );
+
+          // Filter out nulls and sort: directories first, then alphabetically
+          const filtered = results.filter((r) => r !== null);
+          filtered.sort((a, b) => {
+            if (a!.isDirectory && !b!.isDirectory) return -1;
+            if (!a!.isDirectory && b!.isDirectory) return 1;
+            return a!.name.localeCompare(b!.name);
+          });
+
+          return {
+            success: true,
+            data: filtered,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'FILE_READ_DIR_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now(),
+            },
+          };
+        }
+      }
+    );
+
+    // Get file stats
+    ipcMain.handle(
+      IPC_CHANNELS.FILE_GET_STATS,
+      async (
+        _event: IpcMainInvokeEvent,
+        payload: { path: string }
+      ): Promise<IpcResponse> => {
+        try {
+          const fs = await import('fs/promises');
+          const path = await import('path');
+
+          const stats = await fs.stat(payload.path);
+
+          return {
+            success: true,
+            data: {
+              name: path.basename(payload.path),
+              path: payload.path,
+              isDirectory: stats.isDirectory(),
+              isSymlink: stats.isSymbolicLink(),
+              size: stats.size,
+              modifiedAt: stats.mtimeMs,
+              createdAt: stats.birthtimeMs,
+              extension: stats.isFile() ? path.extname(payload.path).slice(1) : undefined,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'FILE_GET_STATS_FAILED',
               message: (error as Error).message,
               timestamp: Date.now(),
             },

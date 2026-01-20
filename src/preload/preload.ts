@@ -42,6 +42,10 @@ const IPC_CHANNELS = {
   DIALOG_SELECT_FOLDER: 'dialog:select-folder',
   DIALOG_SELECT_FILES: 'dialog:select-files',
 
+  // File operations
+  FILE_READ_DIR: 'file:read-dir',
+  FILE_GET_STATS: 'file:get-stats',
+
   // Settings
   SETTINGS_GET_ALL: 'settings:get-all',
   SETTINGS_GET: 'settings:get',
@@ -617,6 +621,24 @@ const electronAPI = {
    */
   selectFiles: (options?: { multiple?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILES, options);
+  },
+
+  // ============================================
+  // File Operations
+  // ============================================
+
+  /**
+   * Read directory contents
+   */
+  readDir: (path: string, includeHidden?: boolean): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_DIR, { path, includeHidden });
+  },
+
+  /**
+   * Get file stats
+   */
+  getFileStats: (path: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.FILE_GET_STATS, { path });
   },
 
   // ============================================
