@@ -3,17 +3,28 @@
  */
 
 import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import { ClaudeCliAdapter } from '../cli/claude-cli-adapter';
 import { OrchestrationHandler } from '../orchestration/orchestration-handler';
 import { generateChildPrompt } from '../orchestration/orchestration-protocol';
-import { getOutputStorageManager, getMemoryMonitor, getUnifiedMemory } from '../memory';
+import {
+  getOutputStorageManager,
+  getMemoryMonitor,
+  getUnifiedMemory
+} from '../memory';
 import { getSettingsManager } from '../settings/settings-manager';
 import { getHistoryManager } from '../history';
 import { RLMContextManager } from '../rlm/context-manager';
 import { OutcomeTracker } from '../learning/outcome-tracker';
+import { StrategyLearner } from '../learning/strategy-learner';
 import { getTaskManager } from '../orchestration/task-manager';
 import { getModelRouter, type RoutingDecision } from '../routing';
-import type { SpawnChildCommand, MessageChildCommand, TerminateChildCommand, GetChildOutputCommand } from '../orchestration/orchestration-protocol';
+import type {
+  SpawnChildCommand,
+  MessageChildCommand,
+  TerminateChildCommand,
+  GetChildOutputCommand
+} from '../orchestration/orchestration-protocol';
 import type {
   Instance,
   InstanceCreateConfig,
@@ -23,19 +34,26 @@ import type {
   ExportedSession,
   ForkConfig,
   createInstance,
-  serializeInstance,
+  serializeInstance
 } from '../../shared/types/instance.types';
 import type {
   InstanceStateUpdatePayload,
   InstanceOutputPayload,
-  BatchUpdatePayload,
+  BatchUpdatePayload
 } from '../../shared/types/ipc.types';
 import { generateId } from '../../shared/utils/id-generator';
 import { LIMITS } from '../../shared/constants/limits';
 import { getAgentById, getDefaultAgent } from '../../shared/types/agent.types';
 import { getDisallowedTools } from '../../shared/utils/permission-mapper';
-import type { ContextQuery, ContextSection, ContextStore } from '../../shared/types/rlm.types';
-import type { MemoryType, UnifiedRetrievalResult } from '../../shared/types/unified-memory.types';
+import type {
+  ContextQuery,
+  ContextSection,
+  ContextStore
+} from '../../shared/types/rlm.types';
+import type {
+  MemoryType,
+  UnifiedRetrievalResult
+} from '../../shared/types/unified-memory.types';
 import type { TaskExecution } from '../../shared/types/task.types';
 import type { ToolUsageRecord } from '../../shared/types/self-improvement.types';
 
@@ -69,6 +87,16 @@ type UnifiedMemoryContextInfo = {
   durationMs: number;
 };
 
+type FastPathResult = {
+  mode: 'grep' | 'files';
+  command: string;
+  args: string[];
+  totalMatches: number;
+  lines: string[];
+  rawOutput: string;
+  cwd: string;
+};
+
 export class InstanceManager extends EventEmitter {
   private instances: Map<string, Instance> = new Map();
   private adapters: Map<string, ClaudeCliAdapter> = new Map();
@@ -85,6 +113,7 @@ export class InstanceManager extends EventEmitter {
   private settings = getSettingsManager();
   private unifiedMemory = getUnifiedMemory();
   private outcomeTracker = OutcomeTracker.getInstance();
+  private strategyLearner = StrategyLearner.getInstance();
 
   // RLM Context Management
   private rlm: RLMContextManager;
@@ -92,24 +121,24 @@ export class InstanceManager extends EventEmitter {
   private instanceRlmSessions: Map<string, string> = new Map(); // instanceId -> sessionId
 
   // RLM Context Configuration - tuned to prevent prompt overflow
-  private readonly rlmContextMinChars = 100;        // Increased: skip short messages
-  private readonly rlmContextMaxTokens = 300;       // Reduced from 600: less context injection
-  private readonly rlmContextTopK = 2;              // Reduced from 4: fewer matches
-  private readonly rlmContextMinSimilarity = 0.7;   // Increased from 0.6: higher quality matches
-  private readonly rlmQueryTimeoutMs = 500;         // Reduced from 900: faster timeout
-  private readonly contextBudgetMinTokens = 150;    // Reduced from 300
-  private readonly contextBudgetMaxTokens = 600;    // Reduced from 1200: half the max budget
+  private readonly rlmContextMinChars = 100; // Increased: skip short messages
+  private readonly rlmContextMaxTokens = 300; // Reduced from 600: less context injection
+  private readonly rlmContextTopK = 2; // Reduced from 4: fewer matches
+  private readonly rlmContextMinSimilarity = 0.7; // Increased from 0.6: higher quality matches
+  private readonly rlmQueryTimeoutMs = 500; // Reduced from 900: faster timeout
+  private readonly contextBudgetMinTokens = 150; // Reduced from 300
+  private readonly contextBudgetMaxTokens = 600; // Reduced from 1200: half the max budget
   private readonly rlmHybridSemanticWeight = 0.7;
   private readonly rlmHybridLexicalWeight = 0.3;
   private readonly rlmHybridOverlapBoost = 0.15;
   private readonly rlmSectionSummaryMinTokens = 600;
   private readonly rlmSectionMinTokens = 120;
-  private readonly rlmSectionMaxCount = 3;          // Reduced from 6: fewer sections
+  private readonly rlmSectionMaxCount = 3; // Reduced from 6: fewer sections
   private readonly toolOutputSummaryMinTokens = 800;
-  private readonly unifiedMemoryMinChars = 50;      // Increased from 30
+  private readonly unifiedMemoryMinChars = 50; // Increased from 30
   private readonly unifiedMemoryContextMinChars = 80; // Increased from 60
   private readonly unifiedMemoryContextMaxTokens = 250; // Reduced from 500
-  private readonly unifiedMemoryQueryTimeoutMs = 400;   // Reduced from 700
+  private readonly unifiedMemoryQueryTimeoutMs = 400; // Reduced from 700
 
   constructor() {
     super();
@@ -136,12 +165,12 @@ export class InstanceManager extends EventEmitter {
     // Configure memory monitor
     this.memoryMonitor.configure({
       warningThresholdMB: settings.memoryWarningThresholdMB,
-      criticalThresholdMB: settings.memoryWarningThresholdMB * 1.5, // 50% above warning
+      criticalThresholdMB: settings.memoryWarningThresholdMB * 1.5 // 50% above warning
     });
 
     // Configure output storage
     this.outputStorage.configure({
-      maxDiskStorageMB: settings.maxDiskStorageMB,
+      maxDiskStorageMB: settings.maxDiskStorageMB
     });
   }
 
@@ -199,8 +228,13 @@ export class InstanceManager extends EventEmitter {
       if (!instance.parentId) continue;
 
       // Check if idle
-      if (instance.status === 'idle' && (now - instance.lastActivity) > idleThreshold) {
-        console.log(`Auto-terminating idle instance ${instance.id} (${instance.displayName})`);
+      if (
+        instance.status === 'idle' &&
+        now - instance.lastActivity > idleThreshold
+      ) {
+        console.log(
+          `Auto-terminating idle instance ${instance.id} (${instance.displayName})`
+        );
         this.terminateInstance(instance.id, true);
       }
     }
@@ -212,13 +246,15 @@ export class InstanceManager extends EventEmitter {
   private terminateIdleInstances(): void {
     // Sort by last activity (oldest first)
     const idleInstances = Array.from(this.instances.values())
-      .filter(i => i.status === 'idle' && i.parentId) // Only child instances
+      .filter((i) => i.status === 'idle' && i.parentId) // Only child instances
       .sort((a, b) => a.lastActivity - b.lastActivity);
 
     // Terminate up to half of idle instances
     const toTerminate = Math.ceil(idleInstances.length / 2);
     for (let i = 0; i < toTerminate && i < idleInstances.length; i++) {
-      console.log(`Terminating idle instance ${idleInstances[i].id} due to memory pressure`);
+      console.log(
+        `Terminating idle instance ${idleInstances[i].id} due to memory pressure`
+      );
       this.terminateInstance(idleInstances[i].id, true);
     }
   }
@@ -230,7 +266,7 @@ export class InstanceManager extends EventEmitter {
     return {
       process: this.memoryMonitor.getStats(),
       storage: this.outputStorage.getTotalStats(),
-      pressureLevel: this.memoryMonitor.getPressureLevel(),
+      pressureLevel: this.memoryMonitor.getPressureLevel()
     };
   }
 
@@ -239,218 +275,306 @@ export class InstanceManager extends EventEmitter {
    */
   private setupOrchestrationHandlers(): void {
     // Handle spawn child requests
-    this.orchestration.on('spawn-child', async (parentId: string, command: SpawnChildCommand) => {
-      const parent = this.instances.get(parentId);
-      if (!parent) return;
+    this.orchestration.on(
+      'spawn-child',
+      async (parentId: string, command: SpawnChildCommand) => {
+        const parent = this.instances.get(parentId);
+        if (!parent) return;
 
-      const settings = this.settings.getAll();
+        const settings = this.settings.getAll();
 
-      // Check max total instances limit
-      if (settings.maxTotalInstances > 0 && this.instances.size >= settings.maxTotalInstances) {
-        console.log(`Cannot spawn child: max total instances (${settings.maxTotalInstances}) reached`);
-        this.orchestration.notifyError(parentId, `Cannot spawn child: maximum total instances (${settings.maxTotalInstances}) reached`);
-        return;
-      }
-
-      // Check max children per parent limit
-      if (settings.maxChildrenPerParent > 0 && parent.childrenIds.length >= settings.maxChildrenPerParent) {
-        console.log(`Cannot spawn child: max children per parent (${settings.maxChildrenPerParent}) reached`);
-        this.orchestration.notifyError(parentId, `Cannot spawn child: maximum children per parent (${settings.maxChildrenPerParent}) reached`);
-        return;
-      }
-
-      try {
-        // Generate a temporary ID for the child prompt (actual ID assigned in createInstance)
-        const tempChildId = generateId();
-
-        // Create the child with the child-specific prompt prepended to the task
-        const childPrompt = generateChildPrompt(tempChildId, parentId, command.task);
-        const childAgentId = this.resolveChildAgentId(command);
-
-        // Use intelligent model routing if no explicit model specified
-        const routingDecision = this.routeChildModel(command.task, command.model, childAgentId);
-        const selectedModel = routingDecision.model;
-
-        console.log(`[ModelRouting] Child task routed to ${selectedModel} (${routingDecision.complexity}, ${routingDecision.confidence.toFixed(2)} confidence): ${routingDecision.reason}`);
-        if (routingDecision.estimatedSavingsPercent && routingDecision.estimatedSavingsPercent > 0) {
-          console.log(`[ModelRouting] Estimated cost savings: ${routingDecision.estimatedSavingsPercent}%`);
+        // Check max total instances limit
+        if (
+          settings.maxTotalInstances > 0 &&
+          this.instances.size >= settings.maxTotalInstances
+        ) {
+          console.log(
+            `Cannot spawn child: max total instances (${settings.maxTotalInstances}) reached`
+          );
+          this.orchestration.notifyError(
+            parentId,
+            `Cannot spawn child: maximum total instances (${settings.maxTotalInstances}) reached`
+          );
+          return;
         }
 
-        const child = await this.createInstance({
-          workingDirectory: command.workingDirectory || parent.workingDirectory,
-          displayName: command.name || `Child of ${parent.displayName}`,
-          parentId: parentId,
-          initialPrompt: childPrompt,
-          yoloMode: parent.yoloMode,
-          agentId: childAgentId,
-          modelOverride: selectedModel,
-        });
+        // Check max children per parent limit
+        if (
+          settings.maxChildrenPerParent > 0 &&
+          parent.childrenIds.length >= settings.maxChildrenPerParent
+        ) {
+          console.log(
+            `Cannot spawn child: max children per parent (${settings.maxChildrenPerParent}) reached`
+          );
+          this.orchestration.notifyError(
+            parentId,
+            `Cannot spawn child: maximum children per parent (${settings.maxChildrenPerParent}) reached`
+          );
+          return;
+        }
 
-        // Mark this child as already having received its first message (the child prompt)
-        this.hasReceivedFirstMessage.add(child.id);
+        try {
+          // Generate a temporary ID for the child prompt (actual ID assigned in createInstance)
+          const tempChildId = generateId();
 
-        this.orchestration.notifyChildSpawned(parentId, child.id, child.displayName, routingDecision);
-      } catch (error) {
-        console.error('Failed to spawn child:', error);
-        this.orchestration.notifyError(parentId, `Failed to spawn child: ${error}`);
+          // Create the child with the child-specific prompt prepended to the task
+          const childPrompt = generateChildPrompt(
+            tempChildId,
+            parentId,
+            command.task
+          );
+          const childAgentId = this.resolveChildAgentId(command);
+
+          // Fast-path retrieval: skip spawning a child for simple lookup tasks
+          if (await this.tryFastPathRetrieval(parent, command)) {
+            return;
+          }
+
+          // Use intelligent model routing if no explicit model specified
+          const routingDecision = this.routeChildModel(
+            command.task,
+            command.model,
+            childAgentId
+          );
+          const selectedModel = routingDecision.model;
+
+          console.log(
+            `[ModelRouting] Child task routed to ${selectedModel} (${routingDecision.complexity}, ${routingDecision.confidence.toFixed(2)} confidence): ${routingDecision.reason}`
+          );
+          if (
+            routingDecision.estimatedSavingsPercent &&
+            routingDecision.estimatedSavingsPercent > 0
+          ) {
+            console.log(
+              `[ModelRouting] Estimated cost savings: ${routingDecision.estimatedSavingsPercent}%`
+            );
+          }
+
+          const child = await this.createInstance({
+            workingDirectory:
+              command.workingDirectory || parent.workingDirectory,
+            displayName: command.name || `Child of ${parent.displayName}`,
+            parentId: parentId,
+            initialPrompt: childPrompt,
+            yoloMode: parent.yoloMode,
+            agentId: childAgentId,
+            modelOverride: selectedModel
+          });
+
+          // Mark this child as already having received its first message (the child prompt)
+          this.hasReceivedFirstMessage.add(child.id);
+
+          this.orchestration.notifyChildSpawned(
+            parentId,
+            child.id,
+            child.displayName,
+            routingDecision
+          );
+        } catch (error) {
+          console.error('Failed to spawn child:', error);
+          this.orchestration.notifyError(
+            parentId,
+            `Failed to spawn child: ${error}`
+          );
+        }
       }
-    });
+    );
 
     // Handle message child requests
-    this.orchestration.on('message-child', async (parentId: string, command: MessageChildCommand) => {
-      try {
-        await this.sendInput(command.childId, command.message);
-        this.orchestration.notifyMessageSent(parentId, command.childId);
-      } catch (error) {
-        console.error('Failed to message child:', error);
+    this.orchestration.on(
+      'message-child',
+      async (parentId: string, command: MessageChildCommand) => {
+        try {
+          await this.sendInput(command.childId, command.message);
+          this.orchestration.notifyMessageSent(parentId, command.childId);
+        } catch (error) {
+          console.error('Failed to message child:', error);
+        }
       }
-    });
+    );
 
     // Handle get children requests
-    this.orchestration.on('get-children', (parentId: string, callback: (children: any[]) => void) => {
-      const parent = this.instances.get(parentId);
-      if (!parent) {
-        callback([]);
-        return;
+    this.orchestration.on(
+      'get-children',
+      (parentId: string, callback: (children: any[]) => void) => {
+        const parent = this.instances.get(parentId);
+        if (!parent) {
+          callback([]);
+          return;
+        }
+
+        const children = parent.childrenIds
+          .map((childId) => {
+            const child = this.instances.get(childId);
+            return child
+              ? {
+                  id: child.id,
+                  name: child.displayName,
+                  status: child.status,
+                  createdAt: child.createdAt
+                }
+              : null;
+          })
+          .filter(Boolean);
+
+        callback(children);
       }
-
-      const children = parent.childrenIds.map((childId) => {
-        const child = this.instances.get(childId);
-        return child
-          ? {
-              id: child.id,
-              name: child.displayName,
-              status: child.status,
-              createdAt: child.createdAt,
-            }
-          : null;
-      }).filter(Boolean);
-
-      callback(children);
-    });
+    );
 
     // Handle terminate child requests
-    this.orchestration.on('terminate-child', async (parentId: string, command: TerminateChildCommand) => {
-      try {
-        await this.terminateInstance(command.childId, true);
-        this.orchestration.notifyChildTerminated(parentId, command.childId);
-      } catch (error) {
-        console.error('Failed to terminate child:', error);
+    this.orchestration.on(
+      'terminate-child',
+      async (parentId: string, command: TerminateChildCommand) => {
+        try {
+          await this.terminateInstance(command.childId, true);
+          this.orchestration.notifyChildTerminated(parentId, command.childId);
+        } catch (error) {
+          console.error('Failed to terminate child:', error);
+        }
       }
-    });
+    );
 
     // Handle get child output requests
-    this.orchestration.on('get-child-output', (parentId: string, command: GetChildOutputCommand, callback: (output: string[]) => void) => {
-      const child = this.instances.get(command.childId);
-      if (!child) {
-        callback([]);
-        return;
+    this.orchestration.on(
+      'get-child-output',
+      (
+        parentId: string,
+        command: GetChildOutputCommand,
+        callback: (output: string[]) => void
+      ) => {
+        const child = this.instances.get(command.childId);
+        if (!child) {
+          callback([]);
+          return;
+        }
+
+        const lastN = command.lastN || 10;
+        const messages = child.outputBuffer.slice(-lastN).map((msg) => {
+          return `[${msg.type}] ${msg.content}`;
+        });
+
+        callback(messages);
       }
+    );
 
-      const lastN = command.lastN || 10;
-      const messages = child.outputBuffer.slice(-lastN).map((msg) => {
-        return `[${msg.type}] ${msg.content}`;
-      });
+    this.orchestration.on(
+      'task-complete',
+      (parentId: string, childId: string, task: TaskExecution) => {
+        this.recordOrchestrationOutcome(parentId, childId, task, true);
+      }
+    );
 
-      callback(messages);
-    });
-
-    this.orchestration.on('task-complete', (parentId: string, childId: string, task: TaskExecution) => {
-      this.recordOrchestrationOutcome(parentId, childId, task, true);
-    });
-
-    this.orchestration.on('task-error', (parentId: string, childId: string, error: { code: string; message: string }) => {
-      const task = this.findTaskForChild(parentId, childId);
-      this.recordOrchestrationOutcome(parentId, childId, task, false, error);
-    });
+    this.orchestration.on(
+      'task-error',
+      (
+        parentId: string,
+        childId: string,
+        error: { code: string; message: string }
+      ) => {
+        const task = this.findTaskForChild(parentId, childId);
+        this.recordOrchestrationOutcome(parentId, childId, task, false, error);
+      }
+    );
 
     // Handle response injection
-    this.orchestration.on('inject-response', async (instanceId: string, response: string) => {
-      const adapter = this.adapters.get(instanceId);
-      const instance = this.instances.get(instanceId);
+    this.orchestration.on(
+      'inject-response',
+      async (instanceId: string, response: string) => {
+        const adapter = this.adapters.get(instanceId);
+        const instance = this.instances.get(instanceId);
 
-      if (adapter && instance) {
-        // Parse the orchestration response to create a user-friendly message
-        // The response format is: [Orchestrator Response]\nAction: xxx\nStatus: xxx\n{json}\n[/Orchestrator Response]
-        const actionMatch = response.match(/Action:\s*(\w+)/);
-        const statusMatch = response.match(/Status:\s*(\w+)/);
-        const action = actionMatch ? actionMatch[1] : 'unknown';
-        const status = statusMatch ? statusMatch[1] : 'unknown';
+        if (adapter && instance) {
+          // Parse the orchestration response to create a user-friendly message
+          // The response format is: [Orchestrator Response]\nAction: xxx\nStatus: xxx\n{json}\n[/Orchestrator Response]
+          const actionMatch = response.match(/Action:\s*(\w+)/);
+          const statusMatch = response.match(/Status:\s*(\w+)/);
+          const action = actionMatch ? actionMatch[1] : 'unknown';
+          const status = statusMatch ? statusMatch[1] : 'unknown';
 
-        // Extract the JSON data
-        let data: any = {};
-        try {
-          const jsonMatch = response.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            data = JSON.parse(jsonMatch[0]);
+          // Extract the JSON data
+          let data: any = {};
+          try {
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              data = JSON.parse(jsonMatch[0]);
+            }
+          } catch (e) {
+            // Ignore parse errors
           }
-        } catch (e) {
-          // Ignore parse errors
+
+          // Create a user-friendly message based on the action
+          let friendlyContent = '';
+          switch (action) {
+            case 'spawn_child':
+              if (status === 'SUCCESS') {
+                friendlyContent = `**Child Spawned:** ${data.name || 'Child instance'}\n\nID: \`${data.childId}\``;
+              } else {
+                friendlyContent = `**Failed to spawn child:** ${data.error || 'Unknown error'}`;
+              }
+              break;
+            case 'message_child':
+              friendlyContent =
+                status === 'SUCCESS'
+                  ? `**Message sent** to child \`${data.childId}\``
+                  : `**Failed to send message:** ${data.error || 'Unknown error'}`;
+              break;
+            case 'terminate_child':
+              friendlyContent =
+                status === 'SUCCESS'
+                  ? `**Child terminated:** \`${data.childId}\``
+                  : `**Failed to terminate child:** ${data.error || 'Unknown error'}`;
+              break;
+            case 'task_complete':
+              friendlyContent = `**Task completed** by child \`${data.childId}\`\n\n${data.result?.summary || data.message || 'No summary'}`;
+              break;
+            case 'task_progress':
+              friendlyContent = `**Progress update** from child \`${data.childId}\`: ${data.progress?.percentage || 0}% - ${data.progress?.currentStep || 'Working...'}`;
+              break;
+            case 'task_error':
+              friendlyContent = `**Error** from child \`${data.childId}\`:\n\n${data.error?.message || data.message || 'Unknown error'}`;
+              break;
+            case 'get_children':
+              if (data.children && data.children.length > 0) {
+                const childList = data.children
+                  .map(
+                    (c: any) => `- **${c.name}** (\`${c.id}\`) - ${c.status}`
+                  )
+                  .join('\n');
+                friendlyContent = `**Active children:**\n\n${childList}`;
+              } else {
+                friendlyContent = `**No active children**`;
+              }
+              break;
+            case 'get_child_output':
+              if (data.output && data.output.length > 0) {
+                friendlyContent = `**Output from child \`${data.childId}\`:**\n\n\`\`\`\n${data.output.join('\n')}\n\`\`\``;
+              } else {
+                friendlyContent = `**No output from child** \`${data.childId}\``;
+              }
+              break;
+            default:
+              friendlyContent = `**Orchestration:** ${action} - ${status}`;
+          }
+
+          // Add the user-friendly orchestration message to the output buffer
+          const orchestrationMessage = {
+            id: generateId(),
+            timestamp: Date.now(),
+            type: 'system' as const,
+            content: friendlyContent,
+            metadata: { source: 'orchestration', action, status, rawData: data }
+          };
+          this.addToOutputBuffer(instance, orchestrationMessage);
+          this.emit('instance:output', {
+            instanceId,
+            message: orchestrationMessage
+          });
+
+          // Send the original orchestrator response to the Claude CLI (it expects the structured format)
+          await adapter.sendInput(response);
         }
-
-        // Create a user-friendly message based on the action
-        let friendlyContent = '';
-        switch (action) {
-          case 'spawn_child':
-            if (status === 'SUCCESS') {
-              friendlyContent = `**Child Spawned:** ${data.name || 'Child instance'}\n\nID: \`${data.childId}\``;
-            } else {
-              friendlyContent = `**Failed to spawn child:** ${data.error || 'Unknown error'}`;
-            }
-            break;
-          case 'message_child':
-            friendlyContent = status === 'SUCCESS'
-              ? `**Message sent** to child \`${data.childId}\``
-              : `**Failed to send message:** ${data.error || 'Unknown error'}`;
-            break;
-          case 'terminate_child':
-            friendlyContent = status === 'SUCCESS'
-              ? `**Child terminated:** \`${data.childId}\``
-              : `**Failed to terminate child:** ${data.error || 'Unknown error'}`;
-            break;
-          case 'task_complete':
-            friendlyContent = `**Task completed** by child \`${data.childId}\`\n\n${data.result?.summary || data.message || 'No summary'}`;
-            break;
-          case 'task_progress':
-            friendlyContent = `**Progress update** from child \`${data.childId}\`: ${data.progress?.percentage || 0}% - ${data.progress?.currentStep || 'Working...'}`;
-            break;
-          case 'task_error':
-            friendlyContent = `**Error** from child \`${data.childId}\`:\n\n${data.error?.message || data.message || 'Unknown error'}`;
-            break;
-          case 'get_children':
-            if (data.children && data.children.length > 0) {
-              const childList = data.children.map((c: any) => `- **${c.name}** (\`${c.id}\`) - ${c.status}`).join('\n');
-              friendlyContent = `**Active children:**\n\n${childList}`;
-            } else {
-              friendlyContent = `**No active children**`;
-            }
-            break;
-          case 'get_child_output':
-            if (data.output && data.output.length > 0) {
-              friendlyContent = `**Output from child \`${data.childId}\`:**\n\n\`\`\`\n${data.output.join('\n')}\n\`\`\``;
-            } else {
-              friendlyContent = `**No output from child** \`${data.childId}\``;
-            }
-            break;
-          default:
-            friendlyContent = `**Orchestration:** ${action} - ${status}`;
-        }
-
-        // Add the user-friendly orchestration message to the output buffer
-        const orchestrationMessage = {
-          id: generateId(),
-          timestamp: Date.now(),
-          type: 'system' as const,
-          content: friendlyContent,
-          metadata: { source: 'orchestration', action, status, rawData: data },
-        };
-        this.addToOutputBuffer(instance, orchestrationMessage);
-        this.emit('instance:output', { instanceId, message: orchestrationMessage });
-
-        // Send the original orchestrator response to the Claude CLI (it expects the structured format)
-        await adapter.sendInput(response);
       }
-    });
+    );
   }
 
   /**
@@ -460,7 +584,9 @@ export class InstanceManager extends EventEmitter {
     console.log('InstanceManager: Creating instance with config:', config);
 
     // Resolve agent profile
-    const agent = config.agentId ? getAgentById(config.agentId) : getDefaultAgent();
+    const agent = config.agentId
+      ? getAgentById(config.agentId)
+      : getDefaultAgent();
     const resolvedAgent = agent || getDefaultAgent();
 
     // Create instance object
@@ -478,17 +604,21 @@ export class InstanceManager extends EventEmitter {
 
       planMode: {
         enabled: false,
-        state: 'off',
+        state: 'off'
       },
 
       status: 'initializing',
-      contextUsage: { used: 0, total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS, percentage: 0 },
+      contextUsage: {
+        used: 0,
+        total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS,
+        percentage: 0
+      },
       lastActivity: Date.now(),
 
       processId: null,
       sessionId: config.sessionId || generateId(),
       workingDirectory: config.workingDirectory,
-      yoloMode: config.yoloMode ?? true,  // Default to YOLO mode
+      yoloMode: config.yoloMode ?? true, // Default to YOLO mode
 
       outputBuffer: config.initialOutputBuffer || [],
       outputBufferMaxSize: LIMITS.OUTPUT_BUFFER_MAX_SIZE,
@@ -499,7 +629,7 @@ export class InstanceManager extends EventEmitter {
       totalTokensUsed: 0,
       requestCount: 0,
       errorCount: 0,
-      restartCount: 0,
+      restartCount: 0
     };
 
     // Store instance
@@ -517,12 +647,16 @@ export class InstanceManager extends EventEmitter {
     try {
       const rlmStore = this.rlm.createStore(instance.id);
       this.instanceRlmStores.set(instance.id, rlmStore.id);
-      console.log(`[RLM] Created store ${rlmStore.id} for instance ${instance.id}`);
+      console.log(
+        `[RLM] Created store ${rlmStore.id} for instance ${instance.id}`
+      );
 
       // Start an RLM session for this instance
       const rlmSession = await this.rlm.startSession(rlmStore.id, instance.id);
       this.instanceRlmSessions.set(instance.id, rlmSession.id);
-      console.log(`[RLM] Started session ${rlmSession.id} for instance ${instance.id}`);
+      console.log(
+        `[RLM] Started session ${rlmSession.id} for instance ${instance.id}`
+      );
     } catch (error) {
       console.error('[RLM] Failed to initialize RLM for instance:', error);
       // Non-fatal - instance can still work without RLM
@@ -536,11 +670,11 @@ export class InstanceManager extends EventEmitter {
     const adapter = new ClaudeCliAdapter({
       workingDirectory: config.workingDirectory,
       sessionId: instance.sessionId,
-      resume: config.resume,  // Resume previous session if restoring from history
+      resume: config.resume, // Resume previous session if restoring from history
       yoloMode: instance.yoloMode,
       systemPrompt: resolvedAgent.systemPrompt,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      model: modelOverride,
+      model: modelOverride
     });
 
     // Set up adapter events
@@ -566,12 +700,12 @@ export class InstanceManager extends EventEmitter {
           timestamp: Date.now(),
           type: 'user' as const,
           content: config.initialPrompt,
-          attachments: config.attachments?.map(a => ({
+          attachments: config.attachments?.map((a) => ({
             name: a.name,
             type: a.type,
             size: a.size,
-            data: a.data,
-          })),
+            data: a.data
+          }))
         };
         this.addToOutputBuffer(instance, userMessage);
 
@@ -621,12 +755,21 @@ export class InstanceManager extends EventEmitter {
   /**
    * Send input to an instance
    */
-  async sendInput(instanceId: string, message: string, attachments?: any[]): Promise<void> {
+  async sendInput(
+    instanceId: string,
+    message: string,
+    attachments?: any[]
+  ): Promise<void> {
     console.log('InstanceManager: sendInput called', {
       instanceId,
       message: message.substring(0, 50),
       attachmentsCount: attachments?.length ?? 0,
-      attachments: attachments?.map(a => ({ name: a.name, type: a.type, size: a.size, hasData: !!a.data }))
+      attachments: attachments?.map((a) => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+        hasData: !!a.data
+      }))
     });
 
     const adapter = this.adapters.get(instanceId);
@@ -645,8 +788,18 @@ export class InstanceManager extends EventEmitter {
       const budgets = this.calculateContextBudget(instance, message);
 
       [rlmContext, unifiedMemoryContext] = await Promise.all([
-        this.buildRlmContext(instanceId, message, budgets.rlmMaxTokens, budgets.rlmTopK),
-        this.buildUnifiedMemoryContext(instance, message, userMessageId, budgets.unifiedMaxTokens),
+        this.buildRlmContext(
+          instanceId,
+          message,
+          budgets.rlmMaxTokens,
+          budgets.rlmTopK
+        ),
+        this.buildUnifiedMemoryContext(
+          instance,
+          message,
+          userMessageId,
+          budgets.unifiedMaxTokens
+        )
       ]);
 
       if (rlmContext) {
@@ -668,7 +821,7 @@ export class InstanceManager extends EventEmitter {
           tokens: rlmContext.tokens,
           sectionsAccessed: rlmContext.sectionsAccessed,
           durationMs: rlmContext.durationMs,
-          source: rlmContext.source,
+          source: rlmContext.source
         };
       }
       if (unifiedMemoryContext) {
@@ -677,7 +830,7 @@ export class InstanceManager extends EventEmitter {
           tokens: unifiedMemoryContext.tokens,
           longTermCount: unifiedMemoryContext.longTermCount,
           proceduralCount: unifiedMemoryContext.proceduralCount,
-          durationMs: unifiedMemoryContext.durationMs,
+          durationMs: unifiedMemoryContext.durationMs
         };
       }
 
@@ -689,12 +842,12 @@ export class InstanceManager extends EventEmitter {
         content: message,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
         // Include attachment metadata for display (but not the full data to save memory)
-        attachments: attachments?.map(a => ({
+        attachments: attachments?.map((a) => ({
           name: a.name,
           type: a.type,
           size: a.size,
-          data: a.data, // Keep data for image thumbnails
-        })),
+          data: a.data // Keep data for image thumbnails
+        }))
       };
       this.addToOutputBuffer(instance, userMessage);
 
@@ -705,13 +858,15 @@ export class InstanceManager extends EventEmitter {
     // Prepend orchestration prompt to first message
     const contextBlocks = [
       this.formatUnifiedMemoryContextBlock(unifiedMemoryContext),
-      this.formatRlmContextBlock(rlmContext),
+      this.formatRlmContextBlock(rlmContext)
     ].filter(Boolean) as string[];
-    const contextBlock = contextBlocks.length > 0 ? contextBlocks.join('\n\n') : null;
+    const contextBlock =
+      contextBlocks.length > 0 ? contextBlocks.join('\n\n') : null;
     let finalMessage = contextBlock ? `${contextBlock}\n\n${message}` : message;
     if (!this.hasReceivedFirstMessage.has(instanceId)) {
       this.hasReceivedFirstMessage.add(instanceId);
-      const orchestrationPrompt = this.orchestration.getOrchestrationPrompt(instanceId);
+      const orchestrationPrompt =
+        this.orchestration.getOrchestrationPrompt(instanceId);
       finalMessage = `${orchestrationPrompt}\n\n---\n\n${finalMessage}`;
       console.log('InstanceManager: Injected orchestration prompt');
     }
@@ -724,7 +879,10 @@ export class InstanceManager extends EventEmitter {
   /**
    * Terminate an instance
    */
-  async terminateInstance(instanceId: string, graceful: boolean = true): Promise<void> {
+  async terminateInstance(
+    instanceId: string,
+    graceful: boolean = true
+  ): Promise<void> {
     const adapter = this.adapters.get(instanceId);
     const instance = this.instances.get(instanceId);
 
@@ -741,7 +899,10 @@ export class InstanceManager extends EventEmitter {
           const status = instance.status === 'error' ? 'error' : 'completed';
           await history.archiveInstance(instance, status);
         } catch (error) {
-          console.error(`Failed to archive instance ${instanceId} to history:`, error);
+          console.error(
+            `Failed to archive instance ${instanceId} to history:`,
+            error
+          );
         }
       }
 
@@ -752,7 +913,9 @@ export class InstanceManager extends EventEmitter {
       if (instance.parentId) {
         const parent = this.instances.get(instance.parentId);
         if (parent) {
-          parent.childrenIds = parent.childrenIds.filter((id) => id !== instanceId);
+          parent.childrenIds = parent.childrenIds.filter(
+            (id) => id !== instanceId
+          );
         }
       }
 
@@ -770,9 +933,14 @@ export class InstanceManager extends EventEmitter {
       if (rlmSessionId) {
         try {
           this.rlm.endSession(rlmSessionId);
-          console.log(`[RLM] Ended session ${rlmSessionId} for instance ${instanceId}`);
+          console.log(
+            `[RLM] Ended session ${rlmSessionId} for instance ${instanceId}`
+          );
         } catch (error) {
-          console.error(`[RLM] Failed to end session for ${instanceId}:`, error);
+          console.error(
+            `[RLM] Failed to end session for ${instanceId}:`,
+            error
+          );
         }
         this.instanceRlmSessions.delete(instanceId);
       }
@@ -811,7 +979,11 @@ export class InstanceManager extends EventEmitter {
     instance.outputBuffer = [];
 
     // Reset context usage/token counts on restart
-    instance.contextUsage = { used: 0, total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS, percentage: 0 };
+    instance.contextUsage = {
+      used: 0,
+      total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS,
+      percentage: 0
+    };
     instance.totalTokensUsed = 0;
 
     // Reset first message tracking so orchestration prompt gets injected again
@@ -821,7 +993,7 @@ export class InstanceManager extends EventEmitter {
     const adapter = new ClaudeCliAdapter({
       workingDirectory: instance.workingDirectory,
       sessionId: newSessionId,
-      yoloMode: instance.yoloMode,
+      yoloMode: instance.yoloMode
     });
 
     this.setupAdapterEvents(instanceId, adapter);
@@ -889,7 +1061,9 @@ export class InstanceManager extends EventEmitter {
     }
 
     if (instance.status !== 'busy') {
-      console.warn(`Cannot interrupt instance ${instanceId}: not busy (status: ${instance.status})`);
+      console.warn(
+        `Cannot interrupt instance ${instanceId}: not busy (status: ${instance.status})`
+      );
       return false;
     }
 
@@ -903,7 +1077,7 @@ export class InstanceManager extends EventEmitter {
         id: generateId(),
         type: 'system' as const,
         content: '⚠️ Interrupted by user - resuming session...',
-        timestamp: Date.now(),
+        timestamp: Date.now()
       };
       this.addToOutputBuffer(instance, message);
       this.emit('instance:output', { instanceId, message });
@@ -949,7 +1123,7 @@ export class InstanceManager extends EventEmitter {
       sessionId: sessionId, // Original session to resume from
       yoloMode: instance.yoloMode,
       resume: true,
-      forkSession: true, // Creates new session ID while preserving history
+      forkSession: true // Creates new session ID while preserving history
     });
 
     this.setupAdapterEvents(instanceId, adapter);
@@ -970,7 +1144,7 @@ export class InstanceManager extends EventEmitter {
         id: generateId(),
         type: 'system' as const,
         content: '✓ Session resumed - ready for input',
-        timestamp: Date.now(),
+        timestamp: Date.now()
       };
       this.addToOutputBuffer(instance, message);
       this.emit('instance:output', { instanceId, message });
@@ -989,7 +1163,10 @@ export class InstanceManager extends EventEmitter {
   /**
    * Set up event handlers for a CLI adapter
    */
-  private setupAdapterEvents(instanceId: string, adapter: ClaudeCliAdapter): void {
+  private setupAdapterEvents(
+    instanceId: string,
+    adapter: ClaudeCliAdapter
+  ): void {
     adapter.on('output', (message: OutputMessage) => {
       const instance = this.instances.get(instanceId);
       if (instance) {
@@ -1032,18 +1209,25 @@ export class InstanceManager extends EventEmitter {
     });
 
     adapter.on('exit', (code: number | null, signal: string | null) => {
-      console.log(`Adapter exit event for instance ${instanceId}: code=${code}, signal=${signal}`);
+      console.log(
+        `Adapter exit event for instance ${instanceId}: code=${code}, signal=${signal}`
+      );
 
       const instance = this.instances.get(instanceId);
       if (!instance) return;
 
       // Check if this was an interrupted instance that needs respawning
       if (this.interruptedInstances.has(instanceId)) {
-        console.log(`Instance ${instanceId} was interrupted, will respawn with --resume`);
+        console.log(
+          `Instance ${instanceId} was interrupted, will respawn with --resume`
+        );
         this.interruptedInstances.delete(instanceId);
         // Respawn the process with --resume to continue the session
         this.respawnAfterInterrupt(instanceId).catch((err) => {
-          console.error(`Failed to respawn instance ${instanceId} after interrupt:`, err);
+          console.error(
+            `Failed to respawn instance ${instanceId} after interrupt:`,
+            err
+          );
           instance.status = 'error';
           instance.processId = null;
           this.queueUpdate(instanceId, 'error');
@@ -1053,7 +1237,9 @@ export class InstanceManager extends EventEmitter {
 
       if (instance.status !== 'terminated') {
         // Unexpected exit - mark as error or terminated
-        console.log(`Instance ${instanceId} exited unexpectedly, marking as ${code === 0 ? 'terminated' : 'error'}`);
+        console.log(
+          `Instance ${instanceId} exited unexpectedly, marking as ${code === 0 ? 'terminated' : 'error'}`
+        );
         instance.status = code === 0 ? 'terminated' : 'error';
         instance.processId = null;
         this.queueUpdate(instanceId, instance.status);
@@ -1074,9 +1260,15 @@ export class InstanceManager extends EventEmitter {
     if (instance.outputBuffer.length > bufferSize) {
       // If disk storage is enabled, save overflow to disk
       if (settings.enableDiskStorage) {
-        const overflow = instance.outputBuffer.slice(0, instance.outputBuffer.length - bufferSize);
+        const overflow = instance.outputBuffer.slice(
+          0,
+          instance.outputBuffer.length - bufferSize
+        );
         this.outputStorage.storeMessages(instance.id, overflow).catch((err) => {
-          console.error(`Failed to store output to disk for ${instance.id}:`, err);
+          console.error(
+            `Failed to store output to disk for ${instance.id}:`,
+            err
+          );
         });
       }
 
@@ -1104,7 +1296,12 @@ export class InstanceManager extends EventEmitter {
 
     try {
       // Map message type to RLM section type
-      let sectionType: 'conversation' | 'tool_output' | 'file' | 'external' | 'summary';
+      let sectionType:
+        | 'conversation'
+        | 'tool_output'
+        | 'file'
+        | 'external'
+        | 'summary';
       let sectionName: string;
 
       switch (message.type) {
@@ -1149,26 +1346,33 @@ export class InstanceManager extends EventEmitter {
         {
           // Additional metadata for better retrieval
           filePath: message.metadata?.['filePath'] as string | undefined,
-          language: message.metadata?.['language'] as string | undefined,
+          language: message.metadata?.['language'] as string | undefined
         }
       );
 
       if (sectionType === 'tool_output') {
-        const newSections = store && startOffset !== null
-          ? store.sections.filter((entry) => entry.startOffset >= startOffset)
-          : [section];
+        const newSections =
+          store && startOffset !== null
+            ? store.sections.filter((entry) => entry.startOffset >= startOffset)
+            : [section];
         this.maybeSummarizeToolOutput(instanceId, store, newSections);
       }
     } catch (error) {
       // Log but don't fail - RLM ingestion is non-critical
-      console.error(`[RLM] Failed to ingest message for instance ${instanceId}:`, error);
+      console.error(
+        `[RLM] Failed to ingest message for instance ${instanceId}:`,
+        error
+      );
     }
   }
 
   /**
    * Ingest a message into unified memory (short/long/procedural)
    */
-  private ingestToUnifiedMemory(instance: Instance, message: OutputMessage): void {
+  private ingestToUnifiedMemory(
+    instance: Instance,
+    message: OutputMessage
+  ): void {
     // Skip empty content
     if (!message.content || message.content.trim().length === 0) return;
 
@@ -1183,18 +1387,31 @@ export class InstanceManager extends EventEmitter {
     this.unifiedMemory
       .processInput(taggedContent, instance.sessionId, message.id)
       .catch((error) => {
-        console.error(`[UnifiedMemory] Failed to ingest message for instance ${instance.id}:`, error);
+        console.error(
+          `[UnifiedMemory] Failed to ingest message for instance ${instance.id}:`,
+          error
+        );
       });
   }
 
-  private calculateContextBudget(instance: Instance, message: string): ContextBudget {
+  private calculateContextBudget(
+    instance: Instance,
+    message: string
+  ): ContextBudget {
     const usagePct = instance.contextUsage?.percentage ?? 0;
 
     // Skip context injection entirely when context is critically high
     // This prevents "Prompt is too long" errors
     if (usagePct >= 90) {
-      console.log(`[ContextBudget] Skipping context injection: usage at ${usagePct}%`);
-      return { totalTokens: 0, rlmMaxTokens: 0, unifiedMaxTokens: 0, rlmTopK: 0 };
+      console.log(
+        `[ContextBudget] Skipping context injection: usage at ${usagePct}%`
+      );
+      return {
+        totalTokens: 0,
+        rlmMaxTokens: 0,
+        unifiedMaxTokens: 0,
+        rlmTopK: 0
+      };
     }
 
     const messageTokens = this.estimateTokens(message);
@@ -1207,11 +1424,15 @@ export class InstanceManager extends EventEmitter {
 
     // More aggressive scaling as context fills up
     const usageMultiplier =
-      usagePct >= 80 ? 0.25 :  // Very aggressive at 80%+
-      usagePct >= 70 ? 0.4 :   // Aggressive at 70%+
-      usagePct >= 60 ? 0.6 :   // Moderate at 60%+
-      usagePct >= 50 ? 0.8 :   // Light reduction at 50%+
-      1;
+      usagePct >= 80
+        ? 0.25 // Very aggressive at 80%+
+        : usagePct >= 70
+          ? 0.4 // Aggressive at 70%+
+          : usagePct >= 60
+            ? 0.6 // Moderate at 60%+
+            : usagePct >= 50
+              ? 0.8 // Light reduction at 50%+
+              : 1;
 
     const totalTokens = Math.max(
       usagePct >= 75 ? 0 : this.contextBudgetMinTokens, // Allow 0 at high usage
@@ -1220,18 +1441,30 @@ export class InstanceManager extends EventEmitter {
 
     // If budget is too small, skip entirely
     if (totalTokens < 100) {
-      return { totalTokens: 0, rlmMaxTokens: 0, unifiedMaxTokens: 0, rlmTopK: 0 };
+      return {
+        totalTokens: 0,
+        rlmMaxTokens: 0,
+        unifiedMaxTokens: 0,
+        rlmTopK: 0
+      };
     }
 
-    const rlmShare = messageTokens > 350 ? 0.45 : messageTokens > 150 ? 0.55 : 0.65;
-    let rlmMaxTokens = Math.min(this.rlmContextMaxTokens, Math.round(totalTokens * rlmShare));
+    const rlmShare =
+      messageTokens > 350 ? 0.45 : messageTokens > 150 ? 0.55 : 0.65;
+    let rlmMaxTokens = Math.min(
+      this.rlmContextMaxTokens,
+      Math.round(totalTokens * rlmShare)
+    );
     let unifiedMaxTokens = Math.min(
       this.unifiedMemoryContextMaxTokens,
       Math.max(0, totalTokens - rlmMaxTokens)
     );
 
     if (unifiedMaxTokens < this.rlmSectionMinTokens) {
-      rlmMaxTokens = Math.min(this.rlmContextMaxTokens, rlmMaxTokens + unifiedMaxTokens);
+      rlmMaxTokens = Math.min(
+        this.rlmContextMaxTokens,
+        rlmMaxTokens + unifiedMaxTokens
+      );
       unifiedMaxTokens = 0;
     }
 
@@ -1244,7 +1477,7 @@ export class InstanceManager extends EventEmitter {
       totalTokens,
       rlmMaxTokens,
       unifiedMaxTokens,
-      rlmTopK,
+      rlmTopK
     };
   }
 
@@ -1268,19 +1501,20 @@ export class InstanceManager extends EventEmitter {
       params: {
         query: message,
         topK,
-        minSimilarity: this.rlmContextMinSimilarity,
-      },
+        minSimilarity: this.rlmContextMinSimilarity
+      }
     };
 
     const terms = this.extractQueryTerms(message);
-    const lexicalPattern = terms.length > 0 ? this.buildLexicalPattern(terms) : '';
+    const lexicalPattern =
+      terms.length > 0 ? this.buildLexicalPattern(terms) : '';
     const lexicalQuery: ContextQuery | null = lexicalPattern
       ? {
           type: 'grep',
           params: {
             pattern: lexicalPattern,
-            maxResults: Math.max(2, topK),
-          },
+            maxResults: Math.max(2, topK)
+          }
         }
       : null;
 
@@ -1288,10 +1522,16 @@ export class InstanceManager extends EventEmitter {
 
     try {
       const [semanticResult, lexicalResult] = await Promise.all([
-        this.withTimeout(this.rlm.executeQuery(sessionId, semanticQuery), this.rlmQueryTimeoutMs),
+        this.withTimeout(
+          this.rlm.executeQuery(sessionId, semanticQuery),
+          this.rlmQueryTimeoutMs
+        ),
         lexicalQuery
-          ? this.withTimeout(this.rlm.executeQuery(sessionId, lexicalQuery), this.rlmQueryTimeoutMs)
-          : Promise.resolve(null),
+          ? this.withTimeout(
+              this.rlm.executeQuery(sessionId, lexicalQuery),
+              this.rlmQueryTimeoutMs
+            )
+          : Promise.resolve(null)
       ]);
 
       const semanticIds = semanticResult?.sectionsAccessed ?? [];
@@ -1302,7 +1542,13 @@ export class InstanceManager extends EventEmitter {
         return null;
       }
 
-      const ranked = this.rankRlmSections(store, candidateIds, semanticIds, lexicalIds, topK);
+      const ranked = this.rankRlmSections(
+        store,
+        candidateIds,
+        semanticIds,
+        lexicalIds,
+        topK
+      );
       const payload = this.buildRlmContextPayload(
         ranked,
         store,
@@ -1316,14 +1562,18 @@ export class InstanceManager extends EventEmitter {
         tokens: this.estimateTokens(payload.context),
         sectionsAccessed: payload.sectionIds,
         durationMs: Date.now() - startTime,
-        source: semanticIds.length > 0 && lexicalIds.length > 0
-          ? 'hybrid'
-          : semanticIds.length > 0
-            ? 'semantic'
-            : 'lexical',
+        source:
+          semanticIds.length > 0 && lexicalIds.length > 0
+            ? 'hybrid'
+            : semanticIds.length > 0
+              ? 'semantic'
+              : 'lexical'
       };
     } catch (error) {
-      console.error(`[RLM] Failed to retrieve context for instance ${instanceId}:`, error);
+      console.error(
+        `[RLM] Failed to retrieve context for instance ${instanceId}:`,
+        error
+      );
       return null;
     }
   }
@@ -1342,7 +1592,7 @@ export class InstanceManager extends EventEmitter {
       '[Retrieved Context]',
       `Source: ${sourceLabel}`,
       context.context,
-      '[End Retrieved Context]',
+      '[End Retrieved Context]'
     ].join('\n');
   }
 
@@ -1354,7 +1604,10 @@ export class InstanceManager extends EventEmitter {
   ): Promise<UnifiedMemoryContextInfo | null> {
     if (message.trim().length < this.unifiedMemoryContextMinChars) return null;
 
-    const effectiveMaxTokens = Math.min(this.unifiedMemoryContextMaxTokens, maxTokens);
+    const effectiveMaxTokens = Math.min(
+      this.unifiedMemoryContextMaxTokens,
+      maxTokens
+    );
     if (effectiveMaxTokens <= 0) return null;
 
     const types: MemoryType[] = ['procedural', 'long_term'];
@@ -1366,7 +1619,7 @@ export class InstanceManager extends EventEmitter {
           types,
           maxTokens: effectiveMaxTokens,
           sessionId: instance.sessionId,
-          instanceId: instance.id,
+          instanceId: instance.id
         }),
         this.unifiedMemoryQueryTimeoutMs
       );
@@ -1384,25 +1637,30 @@ export class InstanceManager extends EventEmitter {
         tokens: this.estimateTokens(trimmed),
         longTermCount: result.longTerm.length,
         proceduralCount: result.procedural.length,
-        durationMs: Date.now() - startTime,
+        durationMs: Date.now() - startTime
       };
     } catch (error) {
-      console.error(`[UnifiedMemory] Failed to retrieve context for instance ${instance.id}:`, error);
+      console.error(
+        `[UnifiedMemory] Failed to retrieve context for instance ${instance.id}:`,
+        error
+      );
       return null;
     }
   }
 
-  private formatUnifiedMemoryPayload(result: UnifiedRetrievalResult): string | null {
+  private formatUnifiedMemoryPayload(
+    result: UnifiedRetrievalResult
+  ): string | null {
     const sections: string[] = [];
 
     if (result.procedural.length > 0) {
       sections.push('Procedural Memory:');
-      sections.push(...result.procedural.map(item => `- ${item}`));
+      sections.push(...result.procedural.map((item) => `- ${item}`));
     }
 
     if (result.longTerm.length > 0) {
       sections.push('Long-term Memory:');
-      sections.push(...result.longTerm.map(item => `- ${item}`));
+      sections.push(...result.longTerm.map((item) => `- ${item}`));
     }
 
     if (sections.length === 0) return null;
@@ -1411,7 +1669,9 @@ export class InstanceManager extends EventEmitter {
 
   private extractQueryTerms(message: string): string[] {
     const matches = message.toLowerCase().match(/[a-z0-9_]{3,}/g) || [];
-    const unique = Array.from(new Set(matches.filter((term) => term.length >= 4)));
+    const unique = Array.from(
+      new Set(matches.filter((term) => term.length >= 4))
+    );
     return unique.slice(0, 12);
   }
 
@@ -1421,7 +1681,10 @@ export class InstanceManager extends EventEmitter {
       .join('|');
   }
 
-  private buildRankMap(sectionIds: string[], topK: number): Map<string, number> {
+  private buildRankMap(
+    sectionIds: string[],
+    topK: number
+  ): Map<string, number> {
     const rankMap = new Map<string, number>();
     const denom = Math.max(sectionIds.length, topK, 1);
 
@@ -1482,9 +1745,15 @@ export class InstanceManager extends EventEmitter {
 
     const targetCount = Math.min(
       ranked.length,
-      Math.max(1, Math.min(this.rlmSectionMaxCount, Math.round(maxTokens / 220)))
+      Math.max(
+        1,
+        Math.min(this.rlmSectionMaxCount, Math.round(maxTokens / 220))
+      )
     );
-    const sectionBudget = Math.max(this.rlmSectionMinTokens, Math.floor(maxTokens / targetCount));
+    const sectionBudget = Math.max(
+      this.rlmSectionMinTokens,
+      Math.floor(maxTokens / targetCount)
+    );
     const parts: string[] = [];
     const sectionIds: string[] = [];
     let usedTokens = 0;
@@ -1495,10 +1764,16 @@ export class InstanceManager extends EventEmitter {
       const entry = ranked[index];
       if (!entry) break;
 
-      const { content, usedSummary } = this.selectRlmSectionContent(store, entry.section, sectionBudget);
+      const { content, usedSummary } = this.selectRlmSectionContent(
+        store,
+        entry.section,
+        sectionBudget
+      );
       if (!content) continue;
 
-      const label = usedSummary ? `${entry.section.type} summary` : entry.section.type;
+      const label = usedSummary
+        ? `${entry.section.type} summary`
+        : entry.section.type;
       const source = entry.section.filePath || entry.section.sourceUrl;
       const header = `[Match ${index + 1}] ${entry.section.name}${source ? ` - ${source}` : ''} (${label})`;
       const block = `${header}\n${content}`;
@@ -1519,7 +1794,7 @@ export class InstanceManager extends EventEmitter {
 
     return {
       context: this.trimToTokens(parts.join('\n\n---\n\n'), maxTokens),
-      sectionIds,
+      sectionIds
     };
   }
 
@@ -1537,7 +1812,8 @@ export class InstanceManager extends EventEmitter {
       if (
         summary &&
         summary.tokens < section.tokens &&
-        (section.tokens > this.rlmSectionSummaryMinTokens || section.tokens > maxTokens)
+        (section.tokens > this.rlmSectionSummaryMinTokens ||
+          section.tokens > maxTokens)
       ) {
         selected = summary;
         usedSummary = true;
@@ -1546,7 +1822,7 @@ export class InstanceManager extends EventEmitter {
 
     return {
       content: this.trimToTokens(selected.content, maxTokens),
-      usedSummary,
+      usedSummary
     };
   }
 
@@ -1557,37 +1833,48 @@ export class InstanceManager extends EventEmitter {
   ): void {
     if (!store || newSections.length === 0) return;
 
-    const totalTokens = newSections.reduce((sum, section) => sum + section.tokens, 0);
+    const totalTokens = newSections.reduce(
+      (sum, section) => sum + section.tokens,
+      0
+    );
     if (totalTokens < this.toolOutputSummaryMinTokens) return;
 
     const sessionId = this.instanceRlmSessions.get(instanceId);
     if (!sessionId) return;
 
     const summaryIndex = store.summaryIndex?.sectionToSummary;
-    if (summaryIndex && newSections.every((section) => summaryIndex.has(section.id))) {
+    if (
+      summaryIndex &&
+      newSections.every((section) => summaryIndex.has(section.id))
+    ) {
       return;
     }
 
     const query: ContextQuery = {
       type: 'summarize',
       params: {
-        sectionIds: newSections.map((section) => section.id),
-      },
+        sectionIds: newSections.map((section) => section.id)
+      }
     };
 
     this.rlm.executeQuery(sessionId, query).catch((error) => {
-      console.error(`[RLM] Failed to summarize tool output for instance ${instanceId}:`, error);
+      console.error(
+        `[RLM] Failed to summarize tool output for instance ${instanceId}:`,
+        error
+      );
     });
   }
 
-  private formatUnifiedMemoryContextBlock(context: UnifiedMemoryContextInfo | null): string | null {
+  private formatUnifiedMemoryContextBlock(
+    context: UnifiedMemoryContextInfo | null
+  ): string | null {
     if (!context) return null;
 
     return [
       '[Unified Memory Context]',
       'Source: Unified Memory',
       context.context,
-      '[End Unified Memory Context]',
+      '[End Unified Memory Context]'
     ].join('\n');
   }
 
@@ -1602,7 +1889,10 @@ export class InstanceManager extends EventEmitter {
     return Math.ceil(text.length / 4);
   }
 
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number
+  ): Promise<T | null> {
     type TimeoutResult =
       | { type: 'timeout' }
       | { type: 'value'; value: T }
@@ -1615,8 +1905,8 @@ export class InstanceManager extends EventEmitter {
     });
 
     const guarded: Promise<TimeoutResult> = promise
-      .then((value) => ({ type: 'value', value } as const))
-      .catch((error) => ({ type: 'error', error } as const));
+      .then((value) => ({ type: 'value', value }) as const)
+      .catch((error) => ({ type: 'error', error }) as const);
 
     const result = await Promise.race([guarded, timeout]);
 
@@ -1643,7 +1933,10 @@ export class InstanceManager extends EventEmitter {
     error?: { code: string; message: string }
   ): void {
     const child = this.instances.get(childId);
-    const duration = task?.startedAt && task?.completedAt ? task.completedAt - task.startedAt : 0;
+    const duration =
+      task?.startedAt && task?.completedAt
+        ? task.completedAt - task.startedAt
+        : 0;
 
     try {
       this.outcomeTracker.recordOutcome({
@@ -1661,19 +1954,29 @@ export class InstanceManager extends EventEmitter {
         success,
         completionScore: success ? 1 : 0,
         errorType: success ? undefined : error?.code,
-        errorMessage: success ? undefined : error?.message,
+        errorMessage: success ? undefined : error?.message
       });
     } catch (recordError) {
-      console.error(`[Learning] Failed to record outcome for task ${task?.taskId || 'unknown'}:`, recordError);
+      console.error(
+        `[Learning] Failed to record outcome for task ${task?.taskId || 'unknown'}:`,
+        recordError
+      );
     }
 
-    this.unifiedMemory.recordTaskOutcome(task?.taskId || `${parentId}:${childId}`, success, success ? 1 : 0);
+    this.unifiedMemory.recordTaskOutcome(
+      task?.taskId || `${parentId}:${childId}`,
+      success,
+      success ? 1 : 0
+    );
   }
 
-  private findTaskForChild(parentId: string, childId: string): TaskExecution | undefined {
+  private findTaskForChild(
+    parentId: string,
+    childId: string
+  ): TaskExecution | undefined {
     const taskManager = getTaskManager();
     const history = taskManager.getTaskHistory(parentId);
-    return history.recentTasks.find(task => task.childId === childId);
+    return history.recentTasks.find((task) => task.childId === childId);
   }
 
   private buildToolUsage(instance?: Instance): ToolUsageRecord[] {
@@ -1684,9 +1987,10 @@ export class InstanceManager extends EventEmitter {
     for (const message of instance.outputBuffer) {
       if (message.type !== 'tool_use') continue;
 
-      const toolName = typeof message.metadata?.['name'] === 'string'
-        ? (message.metadata?.['name'] as string)
-        : 'unknown';
+      const toolName =
+        typeof message.metadata?.['name'] === 'string'
+          ? (message.metadata?.['name'] as string)
+          : 'unknown';
       const entry = counts.get(toolName) || { count: 0 };
       entry.count += 1;
       counts.set(toolName, entry);
@@ -1696,7 +2000,7 @@ export class InstanceManager extends EventEmitter {
       tool,
       count: entry.count,
       avgDuration: 0,
-      errorCount: 0,
+      errorCount: 0
     }));
   }
 
@@ -1704,13 +2008,25 @@ export class InstanceManager extends EventEmitter {
     if (command.agentId) {
       const resolved = getAgentById(command.agentId);
       if (resolved) return command.agentId;
-      console.warn(`[Orchestration] Unknown agentId "${command.agentId}", using default agent.`);
+      console.warn(
+        `[Orchestration] Unknown agentId "${command.agentId}", using default agent.`
+      );
       return undefined;
     }
 
     if (this.isRetrievalTask(command.task)) {
       const retriever = getAgentById('retriever');
       if (retriever) return retriever.id;
+    }
+
+    const recommendation = this.getOutcomeRecommendation(command.task);
+    if (recommendation && recommendation.confidence >= 0.6) {
+      const recommendedAgentId = this.normalizeRecommendedAgentId(
+        recommendation.recommendedAgent
+      );
+      if (recommendedAgentId) {
+        return recommendedAgentId;
+      }
     }
 
     return undefined;
@@ -1741,7 +2057,7 @@ export class InstanceManager extends EventEmitter {
       'file path',
       'files containing',
       'open file',
-      'read file',
+      'read file'
     ];
     const changeHints = [
       'implement',
@@ -1756,7 +2072,7 @@ export class InstanceManager extends EventEmitter {
       'build',
       'update',
       'delete',
-      'rename',
+      'rename'
     ];
 
     if (changeHints.some((hint) => text.includes(hint))) {
@@ -1764,6 +2080,304 @@ export class InstanceManager extends EventEmitter {
     }
 
     return retrievalHints.some((hint) => text.includes(hint));
+  }
+
+  private isListFilesTask(task: string): boolean {
+    const text = task.toLowerCase();
+    return (
+      text.includes('list files') ||
+      text.includes('file list') ||
+      text.includes('show files') ||
+      text.includes('files in') ||
+      text.includes('list directories')
+    );
+  }
+
+  private classifyTaskType(task: string): string {
+    const text = task.toLowerCase();
+
+    if (this.isRetrievalTask(task)) return 'retrieval';
+    if (text.includes('security') || text.includes('vulnerability'))
+      return 'security-review';
+    if (text.includes('review')) return 'review';
+    if (text.includes('refactor')) return 'refactor';
+    if (text.includes('test') || text.includes('testing')) return 'testing';
+    if (text.includes('bug') || text.includes('fix')) return 'bug-fix';
+    if (
+      text.includes('feature') ||
+      text.includes('implement') ||
+      text.includes('add')
+    )
+      return 'feature-development';
+    return 'general';
+  }
+
+  private getOutcomeRecommendation(task: string) {
+    const taskType = this.classifyTaskType(task);
+    const recommendation = this.strategyLearner.getRecommendation(
+      taskType,
+      task
+    );
+    return { ...recommendation, taskType };
+  }
+
+  private normalizeRecommendedAgentId(
+    agentId: string | undefined
+  ): string | undefined {
+    if (!agentId) return undefined;
+    if (agentId === 'default') return getDefaultAgent().id;
+    const resolved = getAgentById(agentId);
+    return resolved ? resolved.id : undefined;
+  }
+
+  private shouldUseFastPath(command: SpawnChildCommand): boolean {
+    if (command.model || command.agentId) return false;
+    if (!this.isRetrievalTask(command.task)) return false;
+    return command.task.trim().length <= 220;
+  }
+
+  private async tryFastPathRetrieval(
+    parent: Instance,
+    command: SpawnChildCommand
+  ): Promise<boolean> {
+    if (!this.shouldUseFastPath(command)) return false;
+
+    const cwd = command.workingDirectory || parent.workingDirectory;
+    try {
+      const result = await this.runFastPathSearch(command.task, cwd);
+      if (!result) return false;
+
+      const summary = this.buildFastPathSummary(command.task, result);
+      this.orchestration.notifyFastPathResult(parent.id, {
+        summary,
+        task: command.task,
+        mode: result.mode,
+        command: result.command,
+        args: result.args,
+        totalMatches: result.totalMatches,
+        lines: result.lines,
+        cwd: result.cwd
+      });
+      return true;
+    } catch (error) {
+      console.warn(
+        '[FastPath] Retrieval failed, falling back to child instance:',
+        error
+      );
+      return false;
+    }
+  }
+
+  private async runFastPathSearch(
+    task: string,
+    cwd: string
+  ): Promise<FastPathResult | null> {
+    const terms = this.extractQueryTerms(task);
+    const pattern = terms.length > 0 ? this.buildLexicalPattern(terms) : '';
+    const lineLimit = 40;
+
+    if (this.isListFilesTask(task) || !pattern) {
+      const fileList = await this.runFastPathFileList(cwd);
+      if (!fileList) return null;
+      const filtered =
+        terms.length > 0
+          ? fileList.files.filter((file) =>
+              terms.some((term) => file.toLowerCase().includes(term))
+            )
+          : fileList.files;
+      const lines = filtered.slice(0, lineLimit);
+      return {
+        mode: 'files',
+        command: fileList.command,
+        args: fileList.args,
+        totalMatches: filtered.length,
+        lines,
+        rawOutput: filtered.join('\n'),
+        cwd
+      };
+    }
+
+    const result = await this.runFastPathGrep(pattern, cwd);
+    if (!result) return null;
+
+    const lines = result.rawOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, lineLimit);
+
+    return {
+      mode: 'grep',
+      command: result.command,
+      args: result.args,
+      totalMatches: result.totalMatches,
+      lines,
+      rawOutput: result.rawOutput,
+      cwd
+    };
+  }
+
+  private async runFastPathFileList(
+    cwd: string
+  ): Promise<{ files: string[]; command: string; args: string[] } | null> {
+    const gitArgs = ['ls-files'];
+    const gitResult = await this.runFastPathCommand('git', gitArgs, cwd, 4000);
+    if (gitResult && gitResult.exitCode === 0) {
+      const files = gitResult.stdout.split('\n').filter(Boolean);
+      return { files, command: 'git', args: gitArgs };
+    }
+
+    const findArgs = [
+      '.',
+      '-maxdepth',
+      '3',
+      '-type',
+      'f',
+      '-not',
+      '-path',
+      '*/node_modules/*',
+      '-not',
+      '-path',
+      '*/.git/*'
+    ];
+    const findResult = await this.runFastPathCommand(
+      'find',
+      findArgs,
+      cwd,
+      5000
+    );
+    if (findResult && findResult.exitCode === 0) {
+      const files = findResult.stdout.split('\n').filter(Boolean);
+      return { files, command: 'find', args: findArgs };
+    }
+
+    return null;
+  }
+
+  private async runFastPathGrep(
+    pattern: string,
+    cwd: string
+  ): Promise<{
+    command: string;
+    args: string[];
+    rawOutput: string;
+    totalMatches: number;
+  } | null> {
+    const rgArgs = ['-n', '--no-heading', '-S', pattern, '.'];
+    const rgResult = await this.runFastPathCommand('rg', rgArgs, cwd, 5000);
+    if (rgResult && (rgResult.exitCode === 0 || rgResult.exitCode === 1)) {
+      const output = rgResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'rg',
+        args: rgArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    const gitArgs = ['grep', '-n', '-e', pattern];
+    const gitResult = await this.runFastPathCommand('git', gitArgs, cwd, 5000);
+    if (gitResult && (gitResult.exitCode === 0 || gitResult.exitCode === 1)) {
+      const output = gitResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'git',
+        args: gitArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    const grepArgs = [
+      '-RIn',
+      '--exclude-dir=node_modules',
+      '--exclude-dir=.git',
+      '-e',
+      pattern,
+      '.'
+    ];
+    const grepResult = await this.runFastPathCommand(
+      'grep',
+      grepArgs,
+      cwd,
+      5000
+    );
+    if (
+      grepResult &&
+      (grepResult.exitCode === 0 || grepResult.exitCode === 1)
+    ) {
+      const output = grepResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'grep',
+        args: grepArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    return null;
+  }
+
+  private async runFastPathCommand(
+    command: string,
+    args: string[],
+    cwd: string,
+    timeoutMs: number
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+  } | null> {
+    return new Promise((resolve) => {
+      const proc = spawn(command, args, { cwd });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
+        settled = true;
+        resolve({ stdout, stderr, exitCode });
+      };
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+      proc.on('error', () => finish(null));
+      proc.on('close', (code) => finish(code));
+
+      const timer = setTimeout(() => {
+        proc.kill('SIGTERM');
+        finish(proc.exitCode ?? null);
+      }, timeoutMs);
+
+      proc.on('close', () => clearTimeout(timer));
+    });
+  }
+
+  private buildFastPathSummary(task: string, result: FastPathResult): string {
+    const matchLabel = result.mode === 'files' ? 'files' : 'matches';
+    const shown = result.lines.length;
+    const total = result.totalMatches;
+    const header = `Fast-path retrieval complete (${matchLabel}: ${total}, showing ${shown}).`;
+    const commandLine =
+      `Command: ${result.command} ${result.args.join(' ')}`.trim();
+    const lines =
+      result.lines.length > 0 ? result.lines.join('\n') : 'No matches found.';
+
+    return [
+      '[Fast Retrieval]',
+      header,
+      `Task: ${task}`,
+      commandLine,
+      lines,
+      '[End Fast Retrieval]'
+    ].join('\n');
   }
 
   /**
@@ -1776,8 +2390,16 @@ export class InstanceManager extends EventEmitter {
    *
    * This can achieve 40-85% cost savings by routing simple tasks to cheaper models.
    */
-  private routeChildModel(task: string, explicitModel?: string, agentId?: string): RoutingDecision {
+  private routeChildModel(
+    task: string,
+    explicitModel?: string,
+    agentId?: string
+  ): RoutingDecision {
     const router = getModelRouter();
+
+    if (explicitModel) {
+      return router.route(task, explicitModel);
+    }
 
     // If agent has a model override, use that (e.g., retriever uses Haiku)
     if (agentId) {
@@ -1788,9 +2410,24 @@ export class InstanceManager extends EventEmitter {
           complexity: 'simple',
           tier: router.getModelTier(agent.modelOverride),
           confidence: 1.0,
-          reason: `Agent "${agent.name}" has model override configured`,
+          reason: `Agent "${agent.name}" has model override configured`
         };
       }
+    }
+
+    const recommendation = this.getOutcomeRecommendation(task);
+    if (
+      recommendation &&
+      recommendation.confidence >= 0.6 &&
+      recommendation.recommendedModel
+    ) {
+      return {
+        model: recommendation.recommendedModel,
+        complexity: 'moderate',
+        tier: router.getModelTier(recommendation.recommendedModel),
+        confidence: recommendation.confidence,
+        reason: `Outcome-driven routing for "${recommendation.taskType}"`
+      };
     }
 
     // Use the model router for intelligent selection
@@ -1800,7 +2437,10 @@ export class InstanceManager extends EventEmitter {
   /**
    * Load historical output from disk for an instance
    */
-  async loadHistoricalOutput(instanceId: string, limit?: number): Promise<OutputMessage[]> {
+  async loadHistoricalOutput(
+    instanceId: string,
+    limit?: number
+  ): Promise<OutputMessage[]> {
     return this.outputStorage.loadMessages(instanceId, { limit });
   }
 
@@ -1822,7 +2462,7 @@ export class InstanceManager extends EventEmitter {
     this.pendingUpdates.set(instanceId, {
       instanceId,
       status,
-      contextUsage,
+      contextUsage
     });
   }
 
@@ -1846,7 +2486,7 @@ export class InstanceManager extends EventEmitter {
 
     const batchPayload: BatchUpdatePayload = {
       updates,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     };
 
     this.emit('instance:batch-update', batchPayload);
@@ -1858,7 +2498,7 @@ export class InstanceManager extends EventEmitter {
   private serializeForIpc(instance: Instance): Record<string, unknown> {
     return {
       ...instance,
-      communicationTokens: Object.fromEntries(instance.communicationTokens),
+      communicationTokens: Object.fromEntries(instance.communicationTokens)
     };
   }
 
@@ -1872,9 +2512,10 @@ export class InstanceManager extends EventEmitter {
     }
 
     // Determine the message index to fork at
-    const forkIndex = config.atMessageIndex !== undefined
-      ? Math.min(config.atMessageIndex, sourceInstance.outputBuffer.length)
-      : sourceInstance.outputBuffer.length;
+    const forkIndex =
+      config.atMessageIndex !== undefined
+        ? Math.min(config.atMessageIndex, sourceInstance.outputBuffer.length)
+        : sourceInstance.outputBuffer.length;
 
     // Copy messages up to the fork point
     const forkedMessages = sourceInstance.outputBuffer.slice(0, forkIndex);
@@ -1882,13 +2523,16 @@ export class InstanceManager extends EventEmitter {
     // Create new instance with forked messages
     const forkedInstance = await this.createInstance({
       workingDirectory: sourceInstance.workingDirectory,
-      displayName: config.displayName || `Fork of ${sourceInstance.displayName}`,
+      displayName:
+        config.displayName || `Fork of ${sourceInstance.displayName}`,
       yoloMode: sourceInstance.yoloMode,
       agentId: sourceInstance.agentId,
-      initialOutputBuffer: forkedMessages,
+      initialOutputBuffer: forkedMessages
     });
 
-    console.log(`Forked instance ${sourceInstance.id} at message ${forkIndex} -> ${forkedInstance.id}`);
+    console.log(
+      `Forked instance ${sourceInstance.id} at message ${forkIndex} -> ${forkedInstance.id}`
+    );
 
     return forkedInstance;
   }
@@ -1912,9 +2556,9 @@ export class InstanceManager extends EventEmitter {
         agentId: instance.agentId,
         agentMode: instance.agentMode,
         totalMessages: instance.outputBuffer.length,
-        contextUsage: instance.contextUsage,
+        contextUsage: instance.contextUsage
       },
-      messages: instance.outputBuffer,
+      messages: instance.outputBuffer
     };
   }
 
@@ -1927,9 +2571,13 @@ export class InstanceManager extends EventEmitter {
 
     lines.push(`# ${session.metadata.displayName}`);
     lines.push('');
-    lines.push(`**Created:** ${new Date(session.metadata.createdAt).toLocaleString()}`);
+    lines.push(
+      `**Created:** ${new Date(session.metadata.createdAt).toLocaleString()}`
+    );
     lines.push(`**Working Directory:** ${session.metadata.workingDirectory}`);
-    lines.push(`**Agent:** ${session.metadata.agentId} (${session.metadata.agentMode})`);
+    lines.push(
+      `**Agent:** ${session.metadata.agentId} (${session.metadata.agentMode})`
+    );
     lines.push(`**Messages:** ${session.metadata.totalMessages}`);
     lines.push('');
     lines.push('---');
@@ -1937,12 +2585,18 @@ export class InstanceManager extends EventEmitter {
 
     for (const msg of session.messages) {
       const time = new Date(msg.timestamp).toLocaleTimeString();
-      const rolePrefix = msg.type === 'user' ? '**User**' :
-                         msg.type === 'assistant' ? '**Assistant**' :
-                         msg.type === 'system' ? '_System_' :
-                         msg.type === 'tool_use' ? '`Tool`' :
-                         msg.type === 'tool_result' ? '`Result`' :
-                         '**Error**';
+      const rolePrefix =
+        msg.type === 'user'
+          ? '**User**'
+          : msg.type === 'assistant'
+            ? '**Assistant**'
+            : msg.type === 'system'
+              ? '_System_'
+              : msg.type === 'tool_use'
+                ? '`Tool`'
+                : msg.type === 'tool_result'
+                  ? '`Result`'
+                  : '**Error**';
 
       lines.push(`### ${rolePrefix} (${time})`);
       lines.push('');
@@ -1951,7 +2605,9 @@ export class InstanceManager extends EventEmitter {
         lines.push(`Using tool: \`${msg.metadata['name'] || 'unknown'}\``);
       } else if (msg.type === 'tool_result') {
         lines.push('```');
-        lines.push(msg.content.slice(0, 500) + (msg.content.length > 500 ? '...' : ''));
+        lines.push(
+          msg.content.slice(0, 500) + (msg.content.length > 500 ? '...' : '')
+        );
         lines.push('```');
       } else {
         lines.push(msg.content);
@@ -1974,10 +2630,12 @@ export class InstanceManager extends EventEmitter {
       workingDirectory: workingDirectory || session.metadata.workingDirectory,
       displayName: `Imported: ${session.metadata.displayName}`,
       agentId: session.metadata.agentId,
-      initialOutputBuffer: session.messages,
+      initialOutputBuffer: session.messages
     });
 
-    console.log(`Imported session with ${session.messages.length} messages -> ${instance.id}`);
+    console.log(
+      `Imported session with ${session.messages.length} messages -> ${instance.id}`
+    );
 
     return instance;
   }
@@ -1999,13 +2657,13 @@ export class InstanceManager extends EventEmitter {
       enabled: true,
       state: 'planning',
       planContent: undefined,
-      approvedAt: undefined,
+      approvedAt: undefined
     };
 
     this.emit('instance:state-update', {
       instanceId,
       status: instance.status,
-      planMode: instance.planMode,
+      planMode: instance.planMode
     });
 
     console.log(`Entered plan mode for instance ${instanceId}`);
@@ -2034,13 +2692,13 @@ export class InstanceManager extends EventEmitter {
       enabled: false,
       state: 'off',
       planContent: undefined,
-      approvedAt: undefined,
+      approvedAt: undefined
     };
 
     this.emit('instance:state-update', {
       instanceId,
       status: instance.status,
-      planMode: instance.planMode,
+      planMode: instance.planMode
     });
 
     console.log(`Exited plan mode for instance ${instanceId}`);
@@ -2064,13 +2722,13 @@ export class InstanceManager extends EventEmitter {
       enabled: true,
       state: 'approved',
       planContent: planContent || instance.planMode.planContent,
-      approvedAt: Date.now(),
+      approvedAt: Date.now()
     };
 
     this.emit('instance:state-update', {
       instanceId,
       status: instance.status,
-      planMode: instance.planMode,
+      planMode: instance.planMode
     });
 
     console.log(`Approved plan for instance ${instanceId}`);
@@ -2095,7 +2753,7 @@ export class InstanceManager extends EventEmitter {
     this.emit('instance:state-update', {
       instanceId,
       status: instance.status,
-      planMode: instance.planMode,
+      planMode: instance.planMode
     });
 
     return instance;
@@ -2104,7 +2762,11 @@ export class InstanceManager extends EventEmitter {
   /**
    * Get plan mode state for an instance
    */
-  getPlanModeState(instanceId: string): { enabled: boolean; state: string; planContent?: string } {
+  getPlanModeState(instanceId: string): {
+    enabled: boolean;
+    state: string;
+    planContent?: string;
+  } {
     const instance = this.instances.get(instanceId);
     if (!instance) {
       throw new Error(`Instance ${instanceId} not found`);
@@ -2113,7 +2775,7 @@ export class InstanceManager extends EventEmitter {
     return {
       enabled: instance.planMode.enabled,
       state: instance.planMode.state,
-      planContent: instance.planMode.planContent,
+      planContent: instance.planMode.planContent
     };
   }
 

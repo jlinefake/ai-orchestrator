@@ -13,7 +13,7 @@ import {
   inject,
   signal,
   computed,
-  ChangeDetectionStrategy,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { VerificationStore } from '../../core/state/verification.store';
 import { ConsensusHeatmapComponent } from './consensus-heatmap.component';
@@ -90,8 +90,38 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
               <section class="section">
                 <div class="section-header">
                   <h3 class="section-title">Synthesized Result</h3>
-                  <div class="confidence-badge" [class]="getConfidenceClass(r.synthesisConfidence)">
-                    Confidence: {{ ((r.synthesisConfidence || 0) * 100).toFixed(0) }}%
+                  <div class="section-actions">
+                    <button
+                      class="copy-btn"
+                      [class.copied]="isCopied('summary')"
+                      [disabled]="!r.synthesizedResponse"
+                      title="Copy synthesized response"
+                      (click)="copyContent('summary', r.synthesizedResponse)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect
+                          x="9"
+                          y="9"
+                          width="13"
+                          height="13"
+                          rx="2"
+                          ry="2"
+                        ></rect>
+                        <path
+                          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                        ></path>
+                      </svg>
+                      <span>{{
+                        isCopied('summary') ? 'Copied' : 'Copy Summary'
+                      }}</span>
+                    </button>
+                    <div
+                      class="confidence-badge"
+                      [class]="getConfidenceClass(r.synthesisConfidence)"
+                    >
+                      Confidence:
+                      {{ ((r.synthesisConfidence || 0) * 100).toFixed(0) }}%
+                    </div>
                   </div>
                 </div>
 
@@ -113,15 +143,57 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
               <!-- Agreement Summary -->
               @if (r.analysis) {
                 <section class="section">
-                  <h3 class="section-title">Agreement Summary</h3>
+                  <div class="section-header">
+                    <h3 class="section-title">Agreement Summary</h3>
+                    <button
+                      class="copy-btn"
+                      [class.copied]="isCopied('agreements')"
+                      [disabled]="!r.analysis.agreements.length"
+                      title="Copy agreement summary"
+                      (click)="
+                        copyContent(
+                          'agreements',
+                          formatAgreementsText(r.analysis.agreements)
+                        )
+                      "
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect
+                          x="9"
+                          y="9"
+                          width="13"
+                          height="13"
+                          rx="2"
+                          ry="2"
+                        ></rect>
+                        <path
+                          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                        ></path>
+                      </svg>
+                      <span>{{
+                        isCopied('agreements') ? 'Copied' : 'Copy Agreements'
+                      }}</span>
+                    </button>
+                  </div>
 
-                  @if (r.analysis.agreements && r.analysis.agreements.length > 0) {
+                  @if (
+                    r.analysis.agreements && r.analysis.agreements.length > 0
+                  ) {
                     <div class="agreement-list">
-                      @for (agreement of r.analysis.agreements; track agreement.point) {
+                      @for (
+                        agreement of r.analysis.agreements;
+                        track agreement.point
+                      ) {
                         <div class="agreement-item">
-                          <span class="agreement-icon">{{ getAgreementIcon(agreement.strength) }}</span>
-                          <span class="agreement-text">{{ agreement.point }}</span>
-                          <span class="agreement-count">{{ agreement.agentIds.length }} agents</span>
+                          <span class="agreement-icon">{{
+                            getAgreementIcon(agreement.strength)
+                          }}</span>
+                          <span class="agreement-text">{{
+                            agreement.point
+                          }}</span>
+                          <span class="agreement-count"
+                            >{{ agreement.agentIds.length }} agents</span
+                          >
                         </div>
                       }
                     </div>
@@ -151,20 +223,60 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
                     <div class="comparison-card">
                       <div class="card-header">
                         <span class="agent-name">{{ response.model }}</span>
-                        <span class="agent-personality">({{ formatPersonality(response.personality) }})</span>
+                        <span class="agent-personality"
+                          >({{ formatPersonality(response.personality) }})</span
+                        >
+                        <button
+                          class="copy-btn compact"
+                          [class.copied]="
+                            isCopied('comparison-' + response.agentId)
+                          "
+                          [disabled]="!response.response"
+                          title="Copy full response"
+                          (click)="
+                            copyContent(
+                              'comparison-' + response.agentId,
+                              response.response
+                            )
+                          "
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect
+                              x="9"
+                              y="9"
+                              width="13"
+                              height="13"
+                              rx="2"
+                              ry="2"
+                            ></rect>
+                            <path
+                              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                            ></path>
+                          </svg>
+                          <span>{{
+                            isCopied('comparison-' + response.agentId)
+                              ? 'Copied'
+                              : 'Copy'
+                          }}</span>
+                        </button>
                       </div>
 
                       <div class="card-confidence">
-                        Confidence: {{ ((response.confidence || 0) * 100).toFixed(0) }}%
+                        Confidence:
+                        {{ ((response.confidence || 0) * 100).toFixed(0) }}%
                       </div>
 
-                      @if (response.keyPoints && response.keyPoints.length > 0) {
+                      @if (
+                        response.keyPoints && response.keyPoints.length > 0
+                      ) {
                         <div class="key-points">
                           <h4>Key Points</h4>
                           <ul>
                             @for (point of response.keyPoints; track point.id) {
                               <li>
-                                <span class="point-category">[{{ point.category }}]</span>
+                                <span class="point-category"
+                                  >[{{ point.category }}]</span
+                                >
                                 {{ point.content }}
                               </li>
                             }
@@ -179,7 +291,9 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
                       <div class="card-meta">
                         <span>{{ response.tokens || 0 }} tokens</span>
                         <span>{{ formatCost(response.cost || 0) }}</span>
-                        <span>{{ formatDuration(response.duration || 0) }}</span>
+                        <span>{{
+                          formatDuration(response.duration || 0)
+                        }}</span>
                       </div>
                     </div>
                   }
@@ -192,13 +306,18 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
               @if (r.debateRounds) {
                 <section class="section">
                   <div class="round-selector">
-                    @for (round of r.debateRounds; track round.roundNumber; let i = $index) {
+                    @for (
+                      round of r.debateRounds;
+                      track round.roundNumber;
+                      let i = $index
+                    ) {
                       <button
                         class="round-btn"
                         [class.active]="selectedRound() === i"
                         (click)="selectRound(i)"
                       >
-                        Round {{ round.roundNumber }}: {{ getRoundLabel(round.type) }}
+                        Round {{ round.roundNumber }}:
+                        {{ getRoundLabel(round.type) }}
                       </button>
                     }
                   </div>
@@ -206,23 +325,79 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
                   @if (currentRound(); as round) {
                     <div class="round-info">
                       <div class="round-meta">
-                        <span>Consensus: {{ ((round.consensusScore || 0) * 100).toFixed(0) }}%</span>
-                        <span>Duration: {{ formatDuration(round.durationMs) }}</span>
+                        <div class="round-meta-items">
+                          <span
+                            >Consensus:
+                            {{
+                              ((round.consensusScore || 0) * 100).toFixed(0)
+                            }}%</span
+                          >
+                          <span
+                            >Duration:
+                            {{ formatDuration(round.durationMs) }}</span
+                          >
+                        </div>
+                        <button
+                          class="copy-btn compact"
+                          [class.copied]="
+                            isCopied('round-' + round.roundNumber)
+                          "
+                          title="Copy round details"
+                          (click)="
+                            copyContent(
+                              'round-' + round.roundNumber,
+                              formatRoundText(round)
+                            )
+                          "
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect
+                              x="9"
+                              y="9"
+                              width="13"
+                              height="13"
+                              rx="2"
+                              ry="2"
+                            ></rect>
+                            <path
+                              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                            ></path>
+                          </svg>
+                          <span>{{
+                            isCopied('round-' + round.roundNumber)
+                              ? 'Copied'
+                              : 'Copy Round'
+                          }}</span>
+                        </button>
                       </div>
 
                       <div class="contributions">
-                        @for (contrib of round.contributions; track contrib.agentId) {
+                        @for (
+                          contrib of round.contributions;
+                          track contrib.agentId
+                        ) {
                           <div class="contribution-card">
                             <div class="contrib-header">
-                              <span class="agent-name">{{ contrib.agentId }}</span>
+                              <span class="agent-name">{{
+                                contrib.agentId
+                              }}</span>
                             </div>
-                            <div class="contrib-content">{{ contrib.content }}</div>
-                            @if (contrib.critiques && contrib.critiques.length > 0) {
+                            <div class="contrib-content">
+                              {{ contrib.content }}
+                            </div>
+                            @if (
+                              contrib.critiques && contrib.critiques.length > 0
+                            ) {
                               <div class="critiques">
                                 <h5>Critiques:</h5>
-                                @for (critique of contrib.critiques; track critique.targetAgentId) {
+                                @for (
+                                  critique of contrib.critiques;
+                                  track critique.targetAgentId
+                                ) {
                                   <div class="critique-item">
-                                    <span class="critique-target">Re: {{ critique.targetAgentId }}</span>
+                                    <span class="critique-target"
+                                      >Re: {{ critique.targetAgentId }}</span
+                                    >
                                     <p>{{ critique.issue }}</p>
                                   </div>
                                 }
@@ -246,7 +421,40 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
                   <div class="raw-response">
                     <div class="response-header">
                       <span class="agent-name">{{ response.model }}</span>
-                      <span class="agent-personality">({{ formatPersonality(response.personality) }})</span>
+                      <span class="agent-personality"
+                        >({{ formatPersonality(response.personality) }})</span
+                      >
+                      <button
+                        class="copy-btn compact"
+                        [class.copied]="isCopied('raw-' + response.agentId)"
+                        [disabled]="!response.response"
+                        title="Copy raw response"
+                        (click)="
+                          copyContent(
+                            'raw-' + response.agentId,
+                            response.response
+                          )
+                        "
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <rect
+                            x="9"
+                            y="9"
+                            width="13"
+                            height="13"
+                            rx="2"
+                            ry="2"
+                          ></rect>
+                          <path
+                            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                          ></path>
+                        </svg>
+                        <span>{{
+                          isCopied('raw-' + response.agentId)
+                            ? 'Copied'
+                            : 'Copy'
+                        }}</span>
+                      </button>
                     </div>
                     <pre class="response-content">{{ response.response }}</pre>
                   </div>
@@ -265,394 +473,463 @@ type ResultTab = 'summary' | 'comparison' | 'debate' | 'raw' | 'export';
       }
     </div>
   `,
-  styles: [`
-    .results-container {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+  styles: [
+    `
+      .results-container {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
 
-    .results-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      padding: 16px;
-      border: 1px solid var(--border-color);
-    }
+      .results-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        padding: 16px;
+        border: 1px solid var(--border-color);
+      }
 
-    .results-title {
-      font-size: 18px;
-      font-weight: 600;
-      margin: 0 0 8px 0;
-    }
+      .results-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 8px 0;
+      }
 
-    .results-meta {
-      display: flex;
-      gap: 20px;
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
+      .results-meta {
+        display: flex;
+        gap: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
 
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
 
-    .action-btn {
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-    }
+      .action-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+      }
 
-    .action-btn.primary {
-      background: var(--accent-color, #3b82f6);
-      color: white;
-    }
+      .action-btn.primary {
+        background: var(--accent-color, #3b82f6);
+        color: white;
+      }
 
-    .action-btn.primary:hover {
-      background: var(--accent-hover, #2563eb);
-    }
+      .action-btn.primary:hover {
+        background: var(--accent-hover, #2563eb);
+      }
 
-    .action-btn.secondary {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      border: 1px solid var(--border-color);
-    }
+      .action-btn.secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
 
-    .action-btn.secondary:hover {
-      background: var(--bg-hover);
-    }
+      .action-btn.secondary:hover {
+        background: var(--bg-hover);
+      }
 
-    .tab-navigation {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-secondary);
-      padding: 8px;
-      border-radius: 8px;
-      border: 1px solid var(--border-color);
-    }
+      .tab-navigation {
+        display: flex;
+        gap: 4px;
+        background: var(--bg-secondary);
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
 
-    .tab-btn {
-      padding: 8px 16px;
-      border: none;
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border-radius: 6px;
-    }
+      .tab-btn {
+        padding: 8px 16px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 6px;
+      }
 
-    .tab-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text-primary);
-    }
+      .tab-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text-primary);
+      }
 
-    .tab-btn.active {
-      background: var(--accent-color, #3b82f6);
-      color: white;
-    }
+      .tab-btn.active {
+        background: var(--accent-color, #3b82f6);
+        color: white;
+      }
 
-    .tab-content {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+      .tab-content {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
 
-    .section {
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      padding: 16px;
-      border: 1px solid var(--border-color);
-    }
+      .section {
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        padding: 16px;
+        border: 1px solid var(--border-color);
+      }
 
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
 
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-      margin: 0;
-    }
+      .section-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
 
-    .confidence-badge {
-      padding: 4px 12px;
-      border-radius: 16px;
-      font-size: 13px;
-      font-weight: 500;
-    }
+      .section-title {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0;
+      }
 
-    .confidence-badge.high {
-      background: rgba(34, 197, 94, 0.1);
-      color: #22c55e;
-    }
+      .confidence-badge {
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 13px;
+        font-weight: 500;
+      }
 
-    .confidence-badge.medium {
-      background: rgba(245, 158, 11, 0.1);
-      color: #f59e0b;
-    }
+      .copy-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 12px;
+        cursor: pointer;
+        transition:
+          background 0.15s ease,
+          color 0.15s ease,
+          border-color 0.15s ease;
+      }
 
-    .confidence-badge.low {
-      background: rgba(239, 68, 68, 0.1);
-      color: #ef4444;
-    }
+      .copy-btn.compact {
+        padding: 4px 8px;
+      }
 
-    .synthesis-info {
-      font-size: 13px;
-      margin-bottom: 12px;
-      color: var(--text-secondary);
-    }
+      .copy-btn svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        flex-shrink: 0;
+      }
 
-    .info-label {
-      font-weight: 500;
-    }
+      .copy-btn:hover:not(:disabled) {
+        background: var(--bg-hover);
+        color: var(--text-primary);
+      }
 
-    .synthesis-content {
-      font-size: 15px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-    }
+      .copy-btn.copied {
+        background: rgba(34, 197, 94, 0.12);
+        color: #16a34a;
+        border-color: rgba(34, 197, 94, 0.4);
+      }
 
-    .agreement-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+      .copy-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
 
-    .agreement-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      background: var(--bg-primary);
-      border-radius: 6px;
-    }
+      .confidence-badge.high {
+        background: rgba(34, 197, 94, 0.1);
+        color: #22c55e;
+      }
 
-    .agreement-icon {
-      font-size: 18px;
-    }
+      .confidence-badge.medium {
+        background: rgba(245, 158, 11, 0.1);
+        color: #f59e0b;
+      }
 
-    .agreement-text {
-      flex: 1;
-      font-size: 14px;
-    }
+      .confidence-badge.low {
+        background: rgba(239, 68, 68, 0.1);
+        color: #ef4444;
+      }
 
-    .agreement-count {
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
+      .synthesis-info {
+        font-size: 13px;
+        margin-bottom: 12px;
+        color: var(--text-secondary);
+      }
 
-    .comparison-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 16px;
-    }
+      .info-label {
+        font-weight: 500;
+      }
 
-    .comparison-card {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-    }
+      .synthesis-content {
+        font-size: 15px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+      }
 
-    .card-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
+      .agreement-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
 
-    .agent-name {
-      font-weight: 600;
-    }
+      .agreement-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: var(--bg-primary);
+        border-radius: 6px;
+      }
 
-    .agent-personality {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
+      .agreement-icon {
+        font-size: 18px;
+      }
 
-    .card-confidence {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-    }
+      .agreement-text {
+        flex: 1;
+        font-size: 14px;
+      }
 
-    .key-points {
-      margin-bottom: 12px;
-    }
+      .agreement-count {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
 
-    .key-points h4 {
-      font-size: 13px;
-      font-weight: 600;
-      margin: 0 0 8px 0;
-    }
+      .comparison-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 16px;
+      }
 
-    .key-points ul {
-      margin: 0;
-      padding-left: 20px;
-      font-size: 13px;
-    }
+      .comparison-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 16px;
+      }
 
-    .key-points li {
-      margin-bottom: 4px;
-    }
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
 
-    .point-category {
-      color: var(--accent-color, #3b82f6);
-      font-weight: 500;
-    }
+      .card-header .copy-btn {
+        margin-left: auto;
+      }
 
-    .response-preview {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-      margin-bottom: 12px;
-    }
+      .agent-name {
+        font-weight: 600;
+      }
 
-    .response-preview p {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
+      .agent-personality {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
 
-    .card-meta {
-      display: flex;
-      gap: 16px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      padding-top: 12px;
-      border-top: 1px solid var(--border-color);
-    }
+      .card-confidence {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+      }
 
-    .round-selector {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
+      .key-points {
+        margin-bottom: 12px;
+      }
 
-    .round-btn {
-      padding: 6px 12px;
-      border: 1px solid var(--border-color);
-      background: var(--bg-primary);
-      color: var(--text-secondary);
-      font-size: 13px;
-      border-radius: 4px;
-      cursor: pointer;
-    }
+      .key-points h4 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0 0 8px 0;
+      }
 
-    .round-btn:hover {
-      background: var(--bg-hover);
-    }
+      .key-points ul {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+      }
 
-    .round-btn.active {
-      background: var(--accent-color, #3b82f6);
-      color: white;
-      border-color: var(--accent-color, #3b82f6);
-    }
+      .key-points li {
+        margin-bottom: 4px;
+      }
 
-    .round-meta {
-      display: flex;
-      gap: 20px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-bottom: 16px;
-    }
+      .point-category {
+        color: var(--accent-color, #3b82f6);
+        font-weight: 500;
+      }
 
-    .contributions {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+      .response-preview {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        margin-bottom: 12px;
+      }
 
-    .contribution-card {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px;
-    }
+      .response-preview p {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
 
-    .contrib-header {
-      margin-bottom: 8px;
-    }
+      .card-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+      }
 
-    .contrib-content {
-      font-size: 14px;
-      line-height: 1.6;
-      margin-bottom: 12px;
-    }
+      .round-selector {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+      }
 
-    .critiques h5 {
-      font-size: 13px;
-      margin: 0 0 8px 0;
-    }
+      .round-btn {
+        padding: 6px 12px;
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font-size: 13px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
 
-    .critique-item {
-      background: var(--bg-secondary);
-      padding: 8px 12px;
-      border-radius: 4px;
-      margin-bottom: 8px;
-    }
+      .round-btn:hover {
+        background: var(--bg-hover);
+      }
 
-    .critique-target {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--accent-color, #3b82f6);
-    }
+      .round-btn.active {
+        background: var(--accent-color, #3b82f6);
+        color: white;
+        border-color: var(--accent-color, #3b82f6);
+      }
 
-    .critique-item p {
-      margin: 4px 0 0 0;
-      font-size: 13px;
-    }
+      .round-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+      }
 
-    .raw-response {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      margin-bottom: 16px;
-      overflow: hidden;
-    }
+      .round-meta-items {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+      }
 
-    .response-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px;
-      background: var(--bg-tertiary);
-      border-bottom: 1px solid var(--border-color);
-    }
+      .contributions {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
 
-    .response-content {
-      padding: 16px;
-      margin: 0;
-      font-size: 13px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-      max-height: 400px;
-      overflow-y: auto;
-    }
+      .contribution-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 16px;
+      }
 
-    .empty-state {
-      text-align: center;
-      padding: 48px;
-      color: var(--text-secondary);
-    }
+      .contrib-header {
+        margin-bottom: 8px;
+      }
 
-    .empty-text {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-  `],
+      .contrib-content {
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 12px;
+      }
+
+      .critiques h5 {
+        font-size: 13px;
+        margin: 0 0 8px 0;
+      }
+
+      .critique-item {
+        background: var(--bg-secondary);
+        padding: 8px 12px;
+        border-radius: 4px;
+        margin-bottom: 8px;
+      }
+
+      .critique-target {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--accent-color, #3b82f6);
+      }
+
+      .critique-item p {
+        margin: 4px 0 0 0;
+        font-size: 13px;
+      }
+
+      .raw-response {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+
+      .response-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .response-header .copy-btn {
+        margin-left: auto;
+      }
+
+      .response-content {
+        padding: 16px;
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 48px;
+        color: var(--text-secondary);
+      }
+
+      .empty-text {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+    `
+  ]
 })
 export class VerificationResultsComponent {
   store = inject(VerificationStore);
@@ -660,6 +937,7 @@ export class VerificationResultsComponent {
   // UI State
   selectedTab = signal<ResultTab>('summary');
   selectedRound = signal<number>(0);
+  copiedKey = signal<string | null>(null);
 
   // Computed
   result = computed(() => this.store.result());
@@ -708,7 +986,7 @@ export class VerificationResultsComponent {
     if (!personality) return 'Default';
     return personality
       .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
   }
 
@@ -737,9 +1015,101 @@ export class VerificationResultsComponent {
       independent: 'Independent',
       critique: 'Critique',
       defense: 'Defense',
-      synthesis: 'Synthesis',
+      synthesis: 'Synthesis'
     };
     return labels[type || ''] || type || 'Unknown';
+  }
+
+  formatAgreementsText(
+    agreements?: {
+      point: string;
+      category: string;
+      agentIds: string[];
+      strength: number;
+      combinedConfidence: number;
+    }[]
+  ): string {
+    if (!agreements || agreements.length === 0) return '';
+
+    return agreements
+      .map((agreement, index) => {
+        const strength = `${Math.round((agreement.strength || 0) * 100)}%`;
+        const confidence = `${Math.round((agreement.combinedConfidence || 0) * 100)}%`;
+        const agents = agreement.agentIds?.length
+          ? agreement.agentIds.join(', ')
+          : 'Unknown';
+        return [
+          `${index + 1}. [${agreement.category}] ${agreement.point}`,
+          `Strength: ${strength} | Confidence: ${confidence} | Agents: ${agents}`
+        ].join('\n');
+      })
+      .join('\n\n');
+  }
+
+  formatRoundText(round: {
+    roundNumber: number;
+    type?: string;
+    consensusScore?: number;
+    durationMs?: number;
+    contributions: Array<{
+      agentId: string;
+      content: string;
+      critiques?: Array<{
+        targetAgentId: string;
+        issue: string;
+        severity?: string;
+      }>;
+    }>;
+  }): string {
+    const header = [
+      `Round ${round.roundNumber}: ${this.getRoundLabel(round.type)}`,
+      `Consensus: ${Math.round((round.consensusScore || 0) * 100)}%`,
+      `Duration: ${this.formatDuration(round.durationMs)}`
+    ].join('\n');
+
+    const contributions = round.contributions
+      .map((contrib) => {
+        const crits =
+          contrib.critiques && contrib.critiques.length > 0
+            ? `Critiques:\n${contrib.critiques
+                .map((critique) => {
+                  const severity = critique.severity
+                    ? ` (${critique.severity})`
+                    : '';
+                  return `- Re: ${critique.targetAgentId}${severity}: ${critique.issue}`;
+                })
+                .join('\n')}`
+            : '';
+
+        return [`${contrib.agentId}:`, contrib.content, crits]
+          .filter(Boolean)
+          .join('\n');
+      })
+      .join('\n\n');
+
+    return `${header}\n\n${contributions}`.trim();
+  }
+
+  isCopied(key: string): boolean {
+    return this.copiedKey() === key;
+  }
+
+  copyContent(key: string, content?: string): void {
+    if (!content) return;
+
+    navigator.clipboard
+      .writeText(content)
+      .then(() => {
+        this.copiedKey.set(key);
+        setTimeout(() => {
+          if (this.copiedKey() === key) {
+            this.copiedKey.set(null);
+          }
+        }, 2000);
+      })
+      .catch((err) => {
+        console.error('Failed to copy content:', err);
+      });
   }
 
   // ============================================
@@ -749,9 +1119,9 @@ export class VerificationResultsComponent {
   getAgentNames(): { id: string; name: string }[] {
     const r = this.result();
     if (!r?.responses) return [];
-    return r.responses.map(response => ({
+    return r.responses.map((response) => ({
       id: response.agentId,
-      name: response.model.split(':').pop() || response.model,
+      name: response.model.split(':').pop() || response.model
     }));
   }
 
@@ -762,7 +1132,9 @@ export class VerificationResultsComponent {
     // Build a simple consensus matrix based on shared key points
     const agents = r.responses;
     const n = agents.length;
-    const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+    const matrix: number[][] = Array.from({ length: n }, () =>
+      Array(n).fill(0)
+    );
 
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
@@ -770,20 +1142,33 @@ export class VerificationResultsComponent {
           matrix[i][j] = 1;
         } else {
           // Calculate similarity based on confidence and key points overlap
-          const pointsI = new Set((agents[i].keyPoints || []).map(p => p.content?.toLowerCase() || ''));
-          const pointsJ = new Set((agents[j].keyPoints || []).map(p => p.content?.toLowerCase() || ''));
+          const pointsI = new Set(
+            (agents[i].keyPoints || []).map(
+              (p) => p.content?.toLowerCase() || ''
+            )
+          );
+          const pointsJ = new Set(
+            (agents[j].keyPoints || []).map(
+              (p) => p.content?.toLowerCase() || ''
+            )
+          );
 
           let overlap = 0;
-          pointsI.forEach(p => {
+          pointsI.forEach((p) => {
             if (pointsJ.has(p)) overlap++;
           });
 
-          const similarity = pointsI.size > 0 || pointsJ.size > 0
-            ? (overlap * 2) / (pointsI.size + pointsJ.size)
-            : 0.5;
+          const similarity =
+            pointsI.size > 0 || pointsJ.size > 0
+              ? (overlap * 2) / (pointsI.size + pointsJ.size)
+              : 0.5;
 
           // Factor in confidence
-          const confSim = 1 - Math.abs((agents[i].confidence || 0.5) - (agents[j].confidence || 0.5));
+          const confSim =
+            1 -
+            Math.abs(
+              (agents[i].confidence || 0.5) - (agents[j].confidence || 0.5)
+            );
 
           matrix[i][j] = (similarity + confSim) / 2;
         }
