@@ -10,14 +10,41 @@
  */
 
 import { EventEmitter } from 'events';
-import {
-  RLMSession,
-  ContextQueryResult,
-  RecursiveCall
-} from '../../shared/types/rlm.types';
+import { RLMSession, ContextQueryResult } from '../../shared/types/rlm.types';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
 import { LLMService, getLLMService } from './llm-service';
 import { getTokenCounter, TokenCounter } from './token-counter';
+
+// Database interface for raw SQL access
+interface SQLiteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): void;
+    all(...params: unknown[]): unknown[];
+  };
+}
+
+interface RLMDatabaseWithRaw {
+  db: SQLiteDatabase;
+}
+
+interface ArchivedTurnRow {
+  id: string;
+  session_id: string;
+  turn_index: number;
+  query_json: string;
+  archived_at: number;
+  summary_id: string | null;
+}
+
+interface CompactionSummaryRow {
+  id: string;
+  session_id: string;
+  turns_archived_json: string;
+  summary: string;
+  tokens: number;
+  created_at: number;
+}
 
 export interface SessionCompactorConfig {
   /** Maximum number of turns before compaction (default: 20) */
@@ -91,8 +118,8 @@ export class SessionCompactor extends EventEmitter {
   };
 
   // Track compaction summaries per session
-  private sessionSummaries: Map<string, CompactionSummary[]> = new Map();
-  private archivedTurns: Map<string, ArchivedTurn[]> = new Map();
+  private sessionSummaries = new Map<string, CompactionSummary[]>();
+  private archivedTurns = new Map<string, ArchivedTurn[]>();
 
   constructor(config: Partial<SessionCompactorConfig> = {}) {
     super();
@@ -122,7 +149,7 @@ export class SessionCompactor extends EventEmitter {
     if (!this.db) return;
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
 
       // Table for archived turns
       db.exec(`
@@ -342,7 +369,7 @@ ${turnContent}`,
   ): Promise<void> {
     if (!this.db) return;
 
-    const db = (this.db as any).db;
+    const db = (this.db as unknown as RLMDatabaseWithRaw).db;
     const stmt = db.prepare(`
       INSERT INTO session_archived_turns (id, session_id, turn_index, query_json, archived_at)
       VALUES (?, ?, ?, ?, ?)
@@ -382,7 +409,7 @@ ${turnContent}`,
     const timestamp = Date.now();
 
     if (this.db) {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       db.prepare(
         `
         INSERT INTO session_compaction_summaries 
@@ -437,7 +464,7 @@ ${turnContent}`,
     if (!this.db) return [];
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       const rows = db
         .prepare(
           `
@@ -447,15 +474,15 @@ ${turnContent}`,
         ORDER BY turn_index ASC
       `
         )
-        .all(sessionId);
+        .all(sessionId) as ArchivedTurnRow[];
 
-      const archived = rows.map((row: any) => ({
+      const archived = rows.map((row) => ({
         id: row.id,
         sessionId: row.session_id,
         turnIndex: row.turn_index,
         query: JSON.parse(row.query_json),
         archivedAt: row.archived_at,
-        summaryId: row.summary_id
+        summaryId: row.summary_id ?? undefined
       }));
 
       this.archivedTurns.set(sessionId, archived);
@@ -479,7 +506,7 @@ ${turnContent}`,
     if (!this.db) return [];
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       const rows = db
         .prepare(
           `
@@ -489,9 +516,9 @@ ${turnContent}`,
         ORDER BY created_at ASC
       `
         )
-        .all(sessionId);
+        .all(sessionId) as CompactionSummaryRow[];
 
-      const summaries = rows.map((row: any) => ({
+      const summaries = rows.map((row) => ({
         id: row.id,
         sessionId: row.session_id,
         turnsArchived: JSON.parse(row.turns_archived_json),

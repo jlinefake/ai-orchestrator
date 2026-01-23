@@ -217,6 +217,28 @@ import {
             (mousedown)="onResizeStart($event)"
             [class.dragging]="isResizing()"
           ></div>
+        } @else {
+          <!-- Sidebar toggle button when collapsed -->
+          <button
+            class="sidebar-toggle-btn"
+            (click)="showSidebar.set(true)"
+            title="Show sidebar (⌘B)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
         }
 
         <!-- Main content area -->
@@ -614,6 +636,38 @@ import {
         height: 100%;
         flex-shrink: 0;
         overflow: hidden;
+      }
+
+      /* Sidebar toggle button when collapsed */
+      .sidebar-toggle-btn {
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 24px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-left: none;
+        border-radius: 0 var(--radius-md) var(--radius-md) 0;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        z-index: 100;
+
+        &:hover {
+          background: var(--bg-tertiary);
+          color: var(--primary-color);
+          width: 28px;
+          box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+        }
+
+        svg {
+          flex-shrink: 0;
+        }
       }
     `
   ]

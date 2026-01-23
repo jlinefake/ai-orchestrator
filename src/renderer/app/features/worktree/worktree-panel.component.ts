@@ -76,6 +76,10 @@ interface WorktreeAction {
               [class]="'status-' + session.status"
               [class.selected]="selectedId() === session.id"
               (click)="selectWorktree(session)"
+              (keydown.enter)="selectWorktree(session)"
+              (keydown.space)="selectWorktree(session)"
+              tabindex="0"
+              role="button"
             >
               <!-- Status Indicator -->
               <div class="status-indicator" [title]="session.status">

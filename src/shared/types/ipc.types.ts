@@ -117,6 +117,12 @@ export const IPC_CHANNELS = {
   PLAN_MODE_UPDATE: 'plan:update',
   PLAN_MODE_GET_STATE: 'plan:get-state',
 
+  // User action requests (orchestrator -> user)
+  USER_ACTION_REQUEST: 'user-action:request',
+  USER_ACTION_RESPOND: 'user-action:respond',
+  USER_ACTION_LIST: 'user-action:list',
+  USER_ACTION_LIST_FOR_INSTANCE: 'user-action:list-for-instance',
+
   // VCS operations (Git)
   VCS_IS_REPO: 'vcs:is-repo',
   VCS_GET_STATUS: 'vcs:get-status',

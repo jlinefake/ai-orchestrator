@@ -13,6 +13,7 @@ import {
   ReportProgressCommand,
   ReportErrorCommand,
   GetTaskStatusCommand,
+  RequestUserActionCommand,
   parseOrchestratorCommands,
   formatCommandResponse,
   generateOrchestrationPrompt
@@ -31,6 +32,25 @@ export interface OrchestrationContext {
   workingDirectory: string;
   parentId: string | null;
   childrenIds: string[];
+}
+
+/**
+ * Pending user action request (forwarded to UI)
+ */
+export interface UserActionRequest {
+  id: string;
+  instanceId: string;
+  requestType: RequestUserActionCommand['requestType'];
+  title: string;
+  message: string;
+  targetMode?: 'build' | 'plan' | 'review';
+  options?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+  }>;
+  context?: Record<string, unknown>;
+  createdAt: number;
 }
 
 export interface OrchestrationEvents {
@@ -58,6 +78,7 @@ export interface OrchestrationEvents {
     progress: TaskProgress
   ) => void;
   'task-error': (parentId: string, childId: string, error: TaskError) => void;
+  'user-action-request': (request: UserActionRequest) => void;
 }
 
 export interface ChildInfo {
@@ -69,6 +90,7 @@ export interface ChildInfo {
 
 export class OrchestrationHandler extends EventEmitter {
   private contexts: Map<string, OrchestrationContext> = new Map();
+  private pendingUserActions: Map<string, UserActionRequest> = new Map();
 
   /**
    * Register an instance for orchestration
@@ -178,6 +200,10 @@ export class OrchestrationHandler extends EventEmitter {
 
       case 'get_task_status':
         this.handleGetTaskStatus(instanceId, command);
+        break;
+
+      case 'request_user_action':
+        this.handleRequestUserAction(instanceId, command);
         break;
     }
   }
@@ -386,6 +412,88 @@ export class OrchestrationHandler extends EventEmitter {
         history: taskManager.getTaskHistory(instanceId)
       });
     }
+  }
+
+  /**
+   * Handle user action request from Claude
+   */
+  private handleRequestUserAction(
+    instanceId: string,
+    command: RequestUserActionCommand
+  ): void {
+    const requestId = `uar-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    const request: UserActionRequest = {
+      id: requestId,
+      instanceId,
+      requestType: command.requestType,
+      title: command.title,
+      message: command.message,
+      targetMode: command.targetMode,
+      options: command.options,
+      context: command.context,
+      createdAt: Date.now()
+    };
+
+    // Store the pending request
+    this.pendingUserActions.set(requestId, request);
+
+    // Emit event for UI to display the request
+    this.emit('user-action-request', request);
+
+    // Send acknowledgment back to Claude that the request was sent
+    this.injectResponse(instanceId, 'request_user_action', true, {
+      requestId,
+      status: 'pending',
+      message: 'Request sent to user. Waiting for response...'
+    });
+
+    console.log(`Orchestrator: User action request ${requestId} created for instance ${instanceId}`);
+  }
+
+  /**
+   * Respond to a pending user action request
+   */
+  respondToUserAction(
+    requestId: string,
+    approved: boolean,
+    selectedOption?: string
+  ): void {
+    const request = this.pendingUserActions.get(requestId);
+    if (!request) {
+      console.warn(`No pending user action request found: ${requestId}`);
+      return;
+    }
+
+    // Remove from pending
+    this.pendingUserActions.delete(requestId);
+
+    // Send response back to the instance
+    this.injectResponse(request.instanceId, 'user_action_response', true, {
+      requestId,
+      approved,
+      selectedOption,
+      requestType: request.requestType,
+      targetMode: request.targetMode
+    });
+
+    console.log(`Orchestrator: User action ${requestId} ${approved ? 'approved' : 'rejected'}`);
+  }
+
+  /**
+   * Get all pending user action requests
+   */
+  getPendingUserActions(): UserActionRequest[] {
+    return Array.from(this.pendingUserActions.values());
+  }
+
+  /**
+   * Get pending user actions for a specific instance
+   */
+  getPendingUserActionsForInstance(instanceId: string): UserActionRequest[] {
+    return Array.from(this.pendingUserActions.values()).filter(
+      (r) => r.instanceId === instanceId
+    );
   }
 
   /**

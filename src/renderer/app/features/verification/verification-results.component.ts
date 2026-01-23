@@ -1051,15 +1051,15 @@ export class VerificationResultsComponent {
     type?: string;
     consensusScore?: number;
     durationMs?: number;
-    contributions: Array<{
+    contributions: {
       agentId: string;
       content: string;
-      critiques?: Array<{
+      critiques?: {
         targetAgentId: string;
         issue: string;
         severity?: string;
-      }>;
-    }>;
+      }[];
+    }[];
   }): string {
     const header = [
       `Round ${round.roundNumber}: ${this.getRoundLabel(round.type)}`,

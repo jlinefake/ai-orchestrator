@@ -86,8 +86,8 @@ export class EpisodicRLMStore extends EventEmitter {
   private config: EpisodicRLMStoreConfig;
   private db: RLMDatabase;
   private vectorStore: VectorStore;
-  private sessionCache: Map<string, SessionMemory> = new Map();
-  private patternCache: Map<string, LearnedPattern> = new Map();
+  private sessionCache = new Map<string, SessionMemory>();
+  private patternCache = new Map<string, LearnedPattern>();
   private initialized = false;
 
   private constructor(config: Partial<EpisodicRLMStoreConfig> = {}) {
@@ -294,7 +294,7 @@ export class EpisodicRLMStore extends EventEmitter {
 
   async getSimilarSessions(
     session: SessionMemory,
-    limit: number = 5
+    limit = 5
   ): Promise<SemanticSearchResult[]> {
     const results = await this.findSimilarSessions(session.summary, {
       limit: limit + 1

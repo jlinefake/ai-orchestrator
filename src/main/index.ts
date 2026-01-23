@@ -64,6 +64,13 @@ class ClaudeOrchestratorApp {
     this.instanceManager.on('instance:batch-update', (updates) => {
       this.windowManager.sendToRenderer('instance:batch-update', updates);
     });
+
+    // Forward user action requests from orchestrator to renderer
+    const orchestration = this.instanceManager.getOrchestrationHandler();
+    orchestration.on('user-action-request', (request) => {
+      console.log('Forwarding user action request to renderer:', request.id);
+      this.windowManager.sendToRenderer('user-action:request', request);
+    });
   }
 
   cleanup(): void {

@@ -795,6 +795,13 @@ export class InstanceManager extends EventEmitter {
   }
 
   /**
+   * Get the orchestration handler for event forwarding and user action requests
+   */
+  getOrchestrationHandler(): OrchestrationHandler {
+    return this.orchestration;
+  }
+
+  /**
    * Send input to an instance
    */
   async sendInput(

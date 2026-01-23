@@ -6,7 +6,7 @@
  * Also stores pending file attachments per context.
  */
 
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 
 // Special context keys for non-instance views
 export const VERIFICATION_DRAFT_KEY = '__verification__';

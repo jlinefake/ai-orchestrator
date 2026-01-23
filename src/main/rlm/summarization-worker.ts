@@ -12,9 +12,43 @@
  */
 
 import { EventEmitter } from 'events';
+import * as crypto from 'crypto';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
 import { LLMService, getLLMService } from './llm-service';
 import { getTokenCounter, TokenCounter } from './token-counter';
+
+// Database interface for raw SQL access
+interface SQLiteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): void;
+    all(...params: unknown[]): unknown[];
+  };
+  pragma(name: string): unknown[];
+}
+
+interface RLMDatabaseWithRaw {
+  db: SQLiteDatabase;
+}
+
+interface TableColumn {
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: unknown;
+  pk: number;
+}
+
+interface SectionRow {
+  id: string;
+  storeId: string;
+  name: string;
+  tokens: number;
+  type: string;
+  depth: number;
+  content: string;
+  content_file: string | null;
+}
 
 export interface SummarizationWorkerConfig {
   /** Interval between scans in milliseconds (default: 60000 = 1 minute) */
@@ -119,10 +153,12 @@ export class SummarizationWorker extends EventEmitter {
 
     try {
       // Check if column exists by attempting a query
-      const db = (this.db as any).db;
-      const tableInfo = db.pragma(`table_info(context_sections)`);
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
+      const tableInfo = db.pragma(
+        `table_info(context_sections)`
+      ) as TableColumn[];
       const hasPendingSummary = tableInfo.some(
-        (col: any) => col.name === 'pending_summary'
+        (col) => col.name === 'pending_summary'
       );
 
       if (!hasPendingSummary) {
@@ -236,7 +272,7 @@ export class SummarizationWorker extends EventEmitter {
     if (!this.db) return [];
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
 
       // Find large sections without summaries at depth 0
       // Priority: larger sections first, older sections first
@@ -265,14 +301,23 @@ export class SummarizationWorker extends EventEmitter {
       const rows = stmt.all(
         this.config.minTokensForSummary,
         this.config.batchSize * 2
-      );
+      ) as SectionRow[];
 
       // Load content from files if needed
       return rows
-        .map((row: any) => {
+        .map((row) => {
           let content = row.content;
           if (!content && row.content_file) {
-            content = this.db!.getSectionContent(row);
+            // Use a minimal type cast that satisfies getSectionContent
+            const sectionForContent = {
+              content_inline: row.content,
+              content_file: row.content_file
+            };
+            content = this.db!.getSectionContent(
+              sectionForContent as Parameters<
+                typeof this.db.getSectionContent
+              >[0]
+            );
           }
           return {
             id: row.id,
@@ -397,7 +442,7 @@ export class SummarizationWorker extends EventEmitter {
       });
 
       // Mark original as having a summary (update pending_summary to done)
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       db.prepare(
         `
         UPDATE context_sections 
@@ -422,7 +467,7 @@ export class SummarizationWorker extends EventEmitter {
     if (!this.db) return;
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       db.prepare(
         `
         UPDATE context_sections 
@@ -442,7 +487,6 @@ export class SummarizationWorker extends EventEmitter {
    * Compute checksum for content
    */
   private computeChecksum(content: string): string {
-    const crypto = require('crypto');
     return crypto.createHash('md5').update(content).digest('hex').slice(0, 16);
   }
 
@@ -499,7 +543,7 @@ export class SummarizationWorker extends EventEmitter {
     if (!this.db) return;
 
     try {
-      const db = (this.db as any).db;
+      const db = (this.db as unknown as RLMDatabaseWithRaw).db;
       db.prepare(
         `
         UPDATE context_sections 

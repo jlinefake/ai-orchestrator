@@ -93,7 +93,7 @@ export class InstanceStore implements OnDestroy {
 
   // Message queue for when instance is busy (signal for reactivity)
   private messageQueueSignal = signal(
-    new Map<string, Array<{ message: string; files?: File[] }>>()
+    new Map<string, { message: string; files?: File[] }[]>()
   );
 
   // Private mutable state

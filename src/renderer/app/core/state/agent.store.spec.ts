@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { AgentStore, AgentPreference } from './agent.store';
+import { AgentStore } from './agent.store';
 import { CLAUDE_MODELS } from '../../../../shared/types/provider.types';
 
 // Mock localStorage for testing
@@ -500,7 +500,7 @@ describe('AgentStore', () => {
 
       it('should handle corrupted localStorage gracefully', () => {
         // Suppress expected console.warn from loadStoredState BEFORE constructing the store
-        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
         localStorage.setItem('agent-store', 'invalid json data');
 

@@ -8,7 +8,7 @@
  * - Copy code button support
  */
 
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { marked, type Tokens } from 'marked';
 import hljs from 'highlight.js';
@@ -18,9 +18,10 @@ import DOMPurify from 'dompurify';
   providedIn: 'root',
 })
 export class MarkdownService {
+  private sanitizer = inject(DomSanitizer);
   private initialized = false;
 
-  constructor(private sanitizer: DomSanitizer) {
+  constructor() {
     this.initializeMarked();
   }
 

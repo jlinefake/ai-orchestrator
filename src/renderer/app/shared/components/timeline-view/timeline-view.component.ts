@@ -21,7 +21,6 @@ import type {
   TimelineEvent,
   TimelineEventType,
   TimelineConfig,
-  DEFAULT_TIMELINE_COLORS,
 } from '../../../../../shared/types/verification-ui.types';
 
 const COLORS: Record<TimelineEventType, string> = {
@@ -71,6 +70,12 @@ const TYPE_ICONS: Record<TimelineEventType, string> = {
               class="timeline-item"
               [class.expanded]="expandedId() === event.id"
               (click)="toggleExpand(event.id)"
+              (keydown.enter)="toggleExpand(event.id)"
+              (keydown.space)="toggleExpand(event.id)"
+              tabindex="0"
+              role="button"
+              [attr.aria-expanded]="expandedId() === event.id"
+              [attr.aria-label]="'Timeline event: ' + event.label"
             >
               <!-- Timeline Node -->
               <div class="timeline-node">

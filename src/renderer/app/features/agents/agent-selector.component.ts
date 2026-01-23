@@ -5,7 +5,7 @@
  * and allows switching between them for new instances.
  */
 
-import { Component, inject, output, signal, computed } from '@angular/core';
+import { Component, inject, output, signal } from '@angular/core';
 import { AgentStore } from '../../core/state/agent.store';
 import type { AgentProfile } from '../../../../shared/types/agent.types';
 
@@ -43,7 +43,14 @@ import type { AgentProfile } from '../../../../shared/types/agent.types';
       </button>
 
       @if (isOpen()) {
-        <div class="dropdown-menu" (click)="$event.stopPropagation()">
+        <div
+          class="dropdown-menu"
+          (click)="$event.stopPropagation()"
+          (keydown.enter)="$event.stopPropagation()"
+          (keydown.space)="$event.stopPropagation()"
+          role="menu"
+          tabindex="-1"
+        >
           @for (agent of allAgents(); track agent.id) {
             <button
               class="agent-option"
@@ -78,7 +85,15 @@ import type { AgentProfile } from '../../../../shared/types/agent.types';
     </div>
 
     @if (isOpen()) {
-      <div class="backdrop" (click)="closeDropdown()"></div>
+      <div
+        class="backdrop"
+        (click)="closeDropdown()"
+        (keydown.enter)="closeDropdown()"
+        (keydown.space)="closeDropdown()"
+        role="button"
+        tabindex="0"
+        aria-label="Close dropdown"
+      ></div>
     }
   `,
   styles: [

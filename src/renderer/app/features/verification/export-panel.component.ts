@@ -37,7 +37,7 @@ interface VerificationResultInput {
   synthesisConfidence?: number;
   synthesisMethod?: string;
   completedAt?: Date;
-  responses?: Array<{
+  responses?: {
     agentId: string;
     model: string;
     personality?: string;
@@ -45,16 +45,16 @@ interface VerificationResultInput {
     confidence?: number;
     tokens?: number;
     cost?: number;
-  }>;
-  debateRounds?: Array<{
+  }[];
+  debateRounds?: {
     round: number;
     type: string;
-    exchanges: Array<{
+    exchanges: {
       agent: string;
       target?: string;
       content: string;
-    }>;
-  }>;
+    }[];
+  }[];
   consensusMatrix?: number[][];
   totalCost?: number;
   totalTokens?: number;

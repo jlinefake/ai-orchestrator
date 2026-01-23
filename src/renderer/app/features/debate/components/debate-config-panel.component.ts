@@ -45,7 +45,15 @@ const DEFAULT_CONFIG: DebateConfig = {
   imports: [FormsModule],
   template: `
     <div class="config-panel" [class.expanded]="isExpanded()">
-      <div class="panel-header" (click)="toggleExpanded()">
+      <div
+        class="panel-header"
+        (click)="toggleExpanded()"
+        (keydown.enter)="toggleExpanded()"
+        (keydown.space)="toggleExpanded(); $event.preventDefault()"
+        tabindex="0"
+        role="button"
+        [attr.aria-expanded]="isExpanded()"
+      >
         <div class="header-left">
           <span class="panel-icon">⚙️</span>
           <span class="panel-title">Debate Configuration</span>
@@ -58,12 +66,13 @@ const DEFAULT_CONFIG: DebateConfig = {
           <div class="config-grid">
             <!-- Agent Count -->
             <div class="config-item">
-              <label class="config-label">
+              <label class="config-label" for="agent-count-input">
                 Number of Agents
                 <span class="config-hint">Debating participants</span>
               </label>
               <div class="config-control">
                 <input
+                  id="agent-count-input"
                   type="range"
                   class="range-input"
                   [ngModel]="localConfig().agentCount"

@@ -15,7 +15,7 @@ import {
   computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { VerificationStore, AgentProgress } from '../../core/state/verification.store';
+import { VerificationStore } from '../../core/state/verification.store';
 
 @Component({
   selector: 'app-verification-monitor',

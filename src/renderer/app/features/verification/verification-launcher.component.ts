@@ -12,7 +12,6 @@
 
 import {
   Component,
-  input,
   output,
   inject,
   signal,
@@ -27,7 +26,6 @@ import { CliDetectionPanelComponent } from './cli-detection-panel.component';
 import { AgentPersonalityPickerComponent } from './agent-personality-picker.component';
 import type { VerificationLauncherForm, LauncherValidation } from '../../../../shared/types/verification-ui.types';
 import type { CliType } from '../../../../shared/types/unified-cli-response';
-import type { PersonalityType, SynthesisStrategy } from '../../../../shared/types/verification.types';
 
 @Component({
   selector: 'app-verification-launcher',
@@ -43,11 +41,12 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
     <div class="launcher">
       <!-- Prompt Section -->
       <div class="section">
-        <label class="section-label">
+        <label for="verification-prompt" class="section-label">
           Prompt
           <span class="required">*</span>
         </label>
         <textarea
+          id="verification-prompt"
           class="prompt-input"
           [class.error]="validation().errors['prompt']"
           [(ngModel)]="form.prompt"
@@ -78,7 +77,7 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
 
       <!-- Agent Selection -->
       <div class="section">
-        <label class="section-label">Select Agents</label>
+        <div class="section-label">Select Agents</div>
         <app-cli-detection-panel
           [selectedClis]="form.selectedAgents"
           (cliSelect)="addAgent($event)"
@@ -91,7 +90,7 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
 
       <!-- Personality Selection -->
       <div class="section">
-        <label class="section-label">Agent Personalities</label>
+        <div class="section-label">Agent Personalities</div>
         <app-agent-personality-picker
           [selected]="form.personalities"
           [maxSelections]="form.selectedAgents.length"
@@ -109,8 +108,9 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
           <div class="options-grid">
             <!-- Synthesis Strategy -->
             <div class="option-item">
-              <label class="option-label">Synthesis Strategy</label>
+              <label for="synthesis-strategy" class="option-label">Synthesis Strategy</label>
               <select
+                id="synthesis-strategy"
                 class="option-select"
                 [(ngModel)]="form.synthesisStrategy"
               >
@@ -124,10 +124,11 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
 
             <!-- Confidence Threshold -->
             <div class="option-item">
-              <label class="option-label">
+              <label for="confidence-threshold" class="option-label">
                 Confidence Threshold: {{ (form.confidenceThreshold * 100).toFixed(0) }}%
               </label>
               <input
+                id="confidence-threshold"
                 type="range"
                 class="option-slider"
                 [(ngModel)]="form.confidenceThreshold"
@@ -139,10 +140,11 @@ import type { PersonalityType, SynthesisStrategy } from '../../../../shared/type
 
             <!-- Max Debate Rounds -->
             <div class="option-item">
-              <label class="option-label">
+              <label for="max-debate-rounds" class="option-label">
                 Max Debate Rounds: {{ form.maxDebateRounds }}
               </label>
               <input
+                id="max-debate-rounds"
                 type="range"
                 class="option-slider"
                 [(ngModel)]="form.maxDebateRounds"
@@ -469,8 +471,6 @@ export class VerificationLauncherComponent {
     try {
       const sessionId = await this.service.startVerification(this.form);
       this.launched.emit(sessionId);
-    } catch (error) {
-      // Error is handled by service and displayed via lastError
     } finally {
       this.isLaunching.set(false);
     }

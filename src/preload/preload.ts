@@ -28,6 +28,12 @@ const IPC_CHANNELS = {
   INSTANCE_OUTPUT: 'instance:output',
   INSTANCE_BATCH_UPDATE: 'instance:batch-update',
 
+  // User action requests (orchestrator -> user)
+  USER_ACTION_REQUEST: 'user-action:request',
+  USER_ACTION_RESPOND: 'user-action:respond',
+  USER_ACTION_LIST: 'user-action:list',
+  USER_ACTION_LIST_FOR_INSTANCE: 'user-action:list-for-instance',
+
   // App
   APP_READY: 'app:ready',
   APP_GET_VERSION: 'app:get-version',
@@ -592,6 +598,52 @@ const electronAPI = {
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
+  },
+
+  // ============================================
+  // User Action Requests (Orchestrator -> User)
+  // ============================================
+
+  /**
+   * Listen for user action requests from the orchestrator
+   */
+  onUserActionRequest: (callback: (request: unknown) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, request: unknown) =>
+      callback(request);
+    ipcRenderer.on(IPC_CHANNELS.USER_ACTION_REQUEST, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.USER_ACTION_REQUEST, handler);
+  },
+
+  /**
+   * Respond to a user action request
+   */
+  respondToUserAction: (
+    requestId: string,
+    approved: boolean,
+    selectedOption?: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.USER_ACTION_RESPOND, {
+      requestId,
+      approved,
+      selectedOption
+    });
+  },
+
+  /**
+   * Get all pending user action requests
+   */
+  listUserActionRequests: (): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.USER_ACTION_LIST);
+  },
+
+  /**
+   * Get pending user action requests for a specific instance
+   */
+  listUserActionRequestsForInstance: (instanceId: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.USER_ACTION_LIST_FOR_INSTANCE, {
+      instanceId
+    });
   },
 
   // ============================================
@@ -1395,11 +1447,11 @@ const electronAPI = {
    */
   todoWriteAll: (payload: {
     sessionId: string;
-    todos: Array<{
+    todos: {
       content: string;
       status: string;
       activeForm?: string;
-    }>;
+    }[];
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.TODO_WRITE_ALL, payload);
   },
@@ -1694,12 +1746,12 @@ const electronAPI = {
    * Preview edits without applying them
    */
   multiEditPreview: (payload: {
-    edits: Array<{
+    edits: {
       filePath: string;
       oldString: string;
       newString: string;
       replaceAll?: boolean;
-    }>;
+    }[];
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.MULTIEDIT_PREVIEW, payload);
   },
@@ -1708,12 +1760,12 @@ const electronAPI = {
    * Apply edits atomically (all succeed or all fail)
    */
   multiEditApply: (payload: {
-    edits: Array<{
+    edits: {
       filePath: string;
       oldString: string;
       newString: string;
       replaceAll?: boolean;
-    }>;
+    }[];
     instanceId?: string;
     takeSnapshots?: boolean;
   }): Promise<IpcResponse> => {
@@ -3242,12 +3294,12 @@ const electronAPI = {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{
+    toolsUsed: {
       tool: string;
       count: number;
       avgDuration: number;
       errorCount: number;
-    }>;
+    }[];
     tokensUsed: number;
     duration: number;
     success: boolean;
@@ -3297,12 +3349,12 @@ const electronAPI = {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{
+    toolsUsed: {
       tool: string;
       count: number;
       avgDuration: number;
       errorCount: number;
-    }>;
+    }[];
     tokensUsed: number;
     duration: number;
     success: boolean;

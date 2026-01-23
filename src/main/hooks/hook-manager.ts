@@ -42,7 +42,7 @@ export interface HookManagerConfig {
 
 export class HookManager extends EventEmitter {
   private static instance: HookManager;
-  private hooks: Map<string, ManagedHookConfig> = new Map();
+  private hooks = new Map<string, ManagedHookConfig>();
   private executor: HookExecutor;
   private config: HookManagerConfig;
   private executionHistory: HookExecutorResult[] = [];
@@ -118,10 +118,7 @@ export class HookManager extends EventEmitter {
     return this.hooks.get(hookId);
   }
 
-  approveHook(
-    hookId: string,
-    approved: boolean = true
-  ): ManagedHookConfig | undefined {
+  approveHook(hookId: string, approved = true): ManagedHookConfig | undefined {
     const hook = this.hooks.get(hookId);
     if (!hook) return undefined;
     const updated = { ...hook, approved };
@@ -405,7 +402,6 @@ export class HookManager extends EventEmitter {
       }
     };
   }
-}
 
   // ============ Persistence ============
 
@@ -437,7 +433,10 @@ export class HookManager extends EventEmitter {
       if (!fs.existsSync(this.approvalsFilePath)) {
         return;
       }
-      const content = await fs.promises.readFile(this.approvalsFilePath, 'utf-8');
+      const content = await fs.promises.readFile(
+        this.approvalsFilePath,
+        'utf-8'
+      );
       const data = JSON.parse(content) as { approvedHookIds?: string[] };
       const approvedIds = new Set(data.approvedHookIds || []);
       let applied = 0;

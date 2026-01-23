@@ -101,7 +101,12 @@ Your goal is to:
 3. Create a detailed plan for changes
 4. Identify potential issues or concerns
 
-When you're ready to implement changes, tell the user to switch to BUILD mode.`,
+When you're ready to implement changes, REQUEST to switch to BUILD mode using:
+:::ORCHESTRATOR_COMMAND:::
+{"action": "request_user_action", "requestType": "switch_mode", "targetMode": "build", "title": "Ready to Implement", "message": "Planning complete. Would you like to switch to build mode to begin implementation?"}
+:::END_COMMAND:::
+
+The user will see a notification and can approve or reject the mode switch.`,
     permissions: {
       read: 'allow',
       write: 'deny',

@@ -5,6 +5,7 @@
 import { Injectable, NgZone, inject } from '@angular/core';
 import type { ElectronAPI } from '../../../../preload/preload';
 import type { TodoList } from '../../../../shared/types/todo.types';
+import type { FileAttachment } from '../../../../shared/types/instance.types';
 
 /** File entry from directory listing */
 export interface FileEntry {
@@ -74,7 +75,7 @@ export class ElectronIpcService {
    * Generic event listener for IPC events
    */
   on(channel: string, callback: (data: unknown) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     if ((this.api as Record<string, unknown>)['on']) {
       return (this.api as unknown as Record<string, (...args: unknown[]) => () => void>)['on'](channel, (data: unknown) => {
@@ -83,7 +84,7 @@ export class ElectronIpcService {
     }
 
     console.warn(`No on method available, channel: ${channel}`);
-    return () => {};
+    return () => { /* noop */ };
   }
 
   // ============================================
@@ -112,7 +113,7 @@ export class ElectronIpcService {
   async createInstanceWithMessage(config: {
     workingDirectory: string;
     message: string;
-    attachments?: any[];
+    attachments?: FileAttachment[];
   }) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.createInstanceWithMessage(config);
@@ -121,7 +122,7 @@ export class ElectronIpcService {
   /**
    * Send input to an instance
    */
-  async sendInput(instanceId: string, message: string, attachments?: any[]) {
+  async sendInput(instanceId: string, message: string, attachments?: FileAttachment[]) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.sendInput({ instanceId, message, attachments });
   }
@@ -183,7 +184,7 @@ export class ElectronIpcService {
    * Subscribe to instance created events
    */
   onInstanceCreated(callback: (instance: unknown) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onInstanceCreated((instance) => {
       this.ngZone.run(() => callback(instance));
@@ -194,7 +195,7 @@ export class ElectronIpcService {
    * Subscribe to instance removed events
    */
   onInstanceRemoved(callback: (instanceId: string) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onInstanceRemoved((instanceId) => {
       this.ngZone.run(() => callback(instanceId));
@@ -205,7 +206,7 @@ export class ElectronIpcService {
    * Subscribe to instance state updates
    */
   onInstanceStateUpdate(callback: (update: unknown) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onInstanceStateUpdate((update) => {
       this.ngZone.run(() => callback(update));
@@ -216,7 +217,7 @@ export class ElectronIpcService {
    * Subscribe to instance output
    */
   onInstanceOutput(callback: (output: unknown) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onInstanceOutput((output) => {
       this.ngZone.run(() => callback(output));
@@ -227,7 +228,7 @@ export class ElectronIpcService {
    * Subscribe to batch updates
    */
   onBatchUpdate(callback: (batch: unknown) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onBatchUpdate((batch) => {
       this.ngZone.run(() => callback(batch));
@@ -861,11 +862,11 @@ export class ElectronIpcService {
    */
   async todoWriteAll(payload: {
     sessionId: string;
-    todos: Array<{
+    todos: {
       content: string;
       status: string;
       activeForm?: string;
-    }>;
+    }[];
   }) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.todoWriteAll(payload);
@@ -891,7 +892,7 @@ export class ElectronIpcService {
    * Subscribe to TODO list changes
    */
   onTodoListChanged(callback: (data: { sessionId: string; list: TodoList }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onTodoListChanged((data) => {
       this.ngZone.run(() => callback(data as { sessionId: string; list: TodoList }));
@@ -1039,7 +1040,7 @@ export class ElectronIpcService {
    * Subscribe to MCP state changes (tools, resources, prompts updated)
    */
   onMcpStateChanged(callback: (data: { type: string; serverId?: string }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onMcpStateChanged((data) => {
       this.ngZone.run(() => callback(data));
@@ -1050,7 +1051,7 @@ export class ElectronIpcService {
    * Subscribe to MCP server status changes
    */
   onMcpServerStatusChanged(callback: (data: { serverId: string; status: string; error?: string }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
 
     return this.api.onMcpServerStatusChanged((data) => {
       this.ngZone.run(() => callback(data));
@@ -1149,12 +1150,12 @@ export class ElectronIpcService {
    * Preview edits without applying them
    * Returns what would happen if edits were applied
    */
-  async multiEditPreview(edits: Array<{
+  async multiEditPreview(edits: {
     filePath: string;
     oldString: string;
     newString: string;
     replaceAll?: boolean;
-  }>) {
+  }[]) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.multiEditPreview({ edits });
   }
@@ -1164,12 +1165,12 @@ export class ElectronIpcService {
    * Optionally takes snapshots before modifications
    */
   async multiEditApply(
-    edits: Array<{
+    edits: {
       filePath: string;
       oldString: string;
       newString: string;
       replaceAll?: boolean;
-    }>,
+    }[],
     options: {
       instanceId?: string;
       takeSnapshots?: boolean;
@@ -1402,8 +1403,8 @@ export class ElectronIpcService {
   /**
    * Listen for cost usage events
    */
-  onCostUsageRecorded(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onCostUsageRecorded(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onCostUsageRecorded((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1412,8 +1413,8 @@ export class ElectronIpcService {
   /**
    * Listen for budget warning events
    */
-  onCostBudgetWarning(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onCostBudgetWarning(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onCostBudgetWarning((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1422,8 +1423,8 @@ export class ElectronIpcService {
   /**
    * Listen for budget exceeded events
    */
-  onCostBudgetExceeded(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onCostBudgetExceeded(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onCostBudgetExceeded((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1438,8 +1439,8 @@ export class ElectronIpcService {
    */
   async archiveSession(
     sessionId: string,
-    sessionData: any,
-    options?: { compress?: boolean; metadata?: Record<string, any> }
+    sessionData: unknown,
+    options?: { compress?: boolean; metadata?: Record<string, unknown> }
   ) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.archiveSession(sessionId, sessionData, options);
@@ -1497,7 +1498,7 @@ export class ElectronIpcService {
   /**
    * Get config value
    */
-  async remoteConfigGet(key: string, defaultValue?: any) {
+  async remoteConfigGet(key: string, defaultValue?: unknown) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.remoteConfigGet(key, defaultValue);
   }
@@ -1526,8 +1527,8 @@ export class ElectronIpcService {
   /**
    * Listen for remote config updates
    */
-  onRemoteConfigUpdated(callback: (config: any) => void): () => void {
-    if (!this.api) return () => {};
+  onRemoteConfigUpdated(callback: (config: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onRemoteConfigUpdated((config) => {
       this.ngZone.run(() => callback(config));
     });
@@ -1536,8 +1537,8 @@ export class ElectronIpcService {
   /**
    * Listen for remote config errors
    */
-  onRemoteConfigError(callback: (error: any) => void): () => void {
-    if (!this.api) return () => {};
+  onRemoteConfigError(callback: (error: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onRemoteConfigError((error) => {
       this.ngZone.run(() => callback(error));
     });
@@ -1616,8 +1617,8 @@ export class ElectronIpcService {
   /**
    * Listen for file change events
    */
-  onWatcherFileChanged(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onWatcherFileChanged(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onWatcherFileChanged((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1626,8 +1627,8 @@ export class ElectronIpcService {
   /**
    * Listen for file added events
    */
-  onWatcherFileAdded(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onWatcherFileAdded(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onWatcherFileAdded((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1636,8 +1637,8 @@ export class ElectronIpcService {
   /**
    * Listen for file removed events
    */
-  onWatcherFileRemoved(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onWatcherFileRemoved(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onWatcherFileRemoved((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1646,8 +1647,8 @@ export class ElectronIpcService {
   /**
    * Listen for watcher errors
    */
-  onWatcherError(callback: (data: any) => void): () => void {
-    if (!this.api) return () => {};
+  onWatcherError(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
     return this.api.onWatcherError((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1664,7 +1665,7 @@ export class ElectronIpcService {
     level: 'debug' | 'info' | 'warn' | 'error',
     message: string,
     context?: string,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.logMessage(level, message, context, metadata);
@@ -1715,7 +1716,7 @@ export class ElectronIpcService {
   /**
    * Execute debug command
    */
-  async debugExecute(command: string, args?: Record<string, any>) {
+  async debugExecute(command: string, args?: Record<string, unknown>) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.debugExecute(command, args);
   }
@@ -1918,7 +1919,7 @@ export class ElectronIpcService {
    * Listen for plugin loaded events
    */
   onPluginLoaded(callback: (data: { pluginId: string }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
     return this.api.onPluginLoaded((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1928,7 +1929,7 @@ export class ElectronIpcService {
    * Listen for plugin unloaded events
    */
   onPluginUnloaded(callback: (data: { pluginId: string }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
     return this.api.onPluginUnloaded((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -1938,7 +1939,7 @@ export class ElectronIpcService {
    * Listen for plugin error events
    */
   onPluginError(callback: (data: { pluginId: string; error: string }) => void): () => void {
-    if (!this.api) return () => {};
+    if (!this.api) return () => { /* noop */ };
     return this.api.onPluginError((data) => {
       this.ngZone.run(() => callback(data));
     });
@@ -2595,7 +2596,7 @@ export class ElectronIpcService {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{ tool: string; count: number; avgDuration: number; errorCount: number }>;
+    toolsUsed: { tool: string; count: number; avgDuration: number; errorCount: number }[];
     tokensUsed: number;
     duration: number;
     success: boolean;
@@ -2640,7 +2641,7 @@ export class ElectronIpcService {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{ tool: string; count: number; avgDuration: number; errorCount: number }>;
+    toolsUsed: { tool: string; count: number; avgDuration: number; errorCount: number }[];
     tokensUsed: number;
     duration: number;
     success: boolean;
@@ -3094,5 +3095,48 @@ export class ElectronIpcService {
   async trainingConfigure(config: Record<string, unknown>) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.trainingConfigure(config);
+  }
+
+  // ============================================
+  // User Action Requests
+  // ============================================
+
+  /**
+   * Subscribe to user action requests from the orchestrator
+   */
+  onUserActionRequest(callback: (request: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
+
+    return this.api.onUserActionRequest((request) => {
+      this.ngZone.run(() => callback(request));
+    });
+  }
+
+  /**
+   * Respond to a user action request
+   */
+  async respondToUserAction(
+    requestId: string,
+    approved: boolean,
+    selectedOption?: string
+  ) {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.respondToUserAction(requestId, approved, selectedOption);
+  }
+
+  /**
+   * List all pending user action requests
+   */
+  async listUserActionRequests() {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.listUserActionRequests();
+  }
+
+  /**
+   * List pending user action requests for a specific instance
+   */
+  async listUserActionRequestsForInstance(instanceId: string) {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.listUserActionRequestsForInstance(instanceId);
   }
 }

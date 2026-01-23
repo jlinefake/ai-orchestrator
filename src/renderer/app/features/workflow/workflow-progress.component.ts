@@ -12,7 +12,6 @@ import {
   Component,
   input,
   output,
-  signal,
   computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
@@ -632,7 +631,7 @@ export class WorkflowProgressComponent {
   gateAction = output<GateAction>();
 
   /** Event when workflow is cancelled */
-  cancel = output<string>();
+  abortRequested = output<string>();
 
   /** Phases combined with their status from execution */
   phasesWithStatus = computed((): PhaseWithStatus[] => {
@@ -727,7 +726,7 @@ export class WorkflowProgressComponent {
   onCancel(): void {
     const exec = this.execution();
     if (exec) {
-      this.cancel.emit(exec.id);
+      this.abortRequested.emit(exec.id);
     }
   }
 }

@@ -5,7 +5,7 @@
 
 // Core orchestration
 export { OrchestrationHandler } from './orchestration-handler';
-export type { OrchestrationContext, OrchestrationEvents, ChildInfo } from './orchestration-handler';
+export type { OrchestrationContext, OrchestrationEvents, ChildInfo, UserActionRequest } from './orchestration-handler';
 export { TaskManager, getTaskManager } from './task-manager';
 export { Supervisor, getSupervisor } from './supervisor';
 

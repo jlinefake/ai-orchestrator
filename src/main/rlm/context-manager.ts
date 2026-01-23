@@ -15,8 +15,6 @@ import {
   ContextSection,
   ContextQuery,
   ContextQueryResult,
-  SearchIndex,
-  SummaryIndex,
   RLMSession,
   RLMConfig,
   RecursiveCall,
@@ -34,8 +32,8 @@ import { HyDEService, getHyDEService } from './hyde-service';
 
 export class RLMContextManager extends EventEmitter {
   private static instance: RLMContextManager;
-  private stores: Map<string, ContextStore> = new Map();
-  private sessions: Map<string, RLMSession> = new Map();
+  private stores = new Map<string, ContextStore>();
+  private sessions = new Map<string, RLMSession>();
   private config: RLMConfig;
   private db: RLMDatabase | null = null;
   private vectorStore: VectorStore | null = null;
@@ -565,7 +563,7 @@ export class RLMContextManager extends EventEmitter {
   async executeQuery(
     sessionId: string,
     query: ContextQuery,
-    depth: number = 0
+    depth = 0
   ): Promise<ContextQueryResult> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
@@ -614,7 +612,7 @@ export class RLMContextManager extends EventEmitter {
           .sectionIds;
         break;
 
-      case 'sub_query':
+      case 'sub_query': {
         const subResult = await this.executeSubQuery(
           session,
           store,
@@ -625,6 +623,7 @@ export class RLMContextManager extends EventEmitter {
         sectionsAccessed = subResult.sectionsAccessed;
         subQueries = subResult.subQueries || [];
         break;
+      }
 
       case 'semantic_search':
         ({ result, sectionsAccessed } = await this.executeSemanticSearch(
@@ -1146,10 +1145,10 @@ export class RLMContextManager extends EventEmitter {
     embedding: number[],
     options: { topK: number; minSimilarity: number }
   ): Promise<
-    Array<{
+    {
       entry: { sectionId: string; contentPreview: string };
       similarity: number;
-    }>
+    }[]
   > {
     if (!this.vectorStore) {
       return [];
@@ -1176,12 +1175,12 @@ export class RLMContextManager extends EventEmitter {
     }
 
     // Collect candidates
-    const candidates: Array<{
+    const candidates: {
       id: string;
       sectionId: string;
       embedding: number[];
       contentPreview: string;
-    }> = [];
+    }[] = [];
     for (const vectorId of storeVectors) {
       const entry = vectorStore.vectorCache.get(vectorId);
       if (entry) {
@@ -1190,10 +1189,10 @@ export class RLMContextManager extends EventEmitter {
     }
 
     // Calculate similarities
-    const results: Array<{
+    const results: {
       entry: { sectionId: string; contentPreview: string };
       similarity: number;
-    }> = [];
+    }[] = [];
     for (const candidate of candidates) {
       const similarity = this.cosineSimilarity(embedding, candidate.embedding);
       if (similarity >= options.minSimilarity) {
@@ -1350,7 +1349,7 @@ export class RLMContextManager extends EventEmitter {
    * Simple Bloom Filter implementation for fast negative lookups
    * Uses multiple hash functions to minimize false positives
    */
-  private createBloomFilter(expectedItems: number = 10000): BloomFilter {
+  private createBloomFilter(expectedItems = 10000): BloomFilter {
     const size = Math.max(1000, expectedItems * 10); // ~10 bits per item
     const hashCount = 4;
     return {
@@ -1400,12 +1399,12 @@ export class RLMContextManager extends EventEmitter {
    */
   async addSectionsBatch(
     storeId: string,
-    sections: Array<{
+    sections: {
       type: ContextSection['type'];
       name: string;
       content: string;
       metadata?: Partial<ContextSection>;
-    }>
+    }[]
   ): Promise<string[]> {
     const store = this.stores.get(storeId);
     if (!store) throw new Error(`Store not found: ${storeId}`);
@@ -1567,7 +1566,7 @@ export class RLMContextManager extends EventEmitter {
   searchStoreOptimized(
     storeId: string,
     terms: string[],
-    maxResults: number = 10
+    maxResults = 10
   ): { result: string; sectionsAccessed: string[] } {
     const store = this.stores.get(storeId);
     if (!store) return { result: '', sectionsAccessed: [] };
@@ -1827,7 +1826,7 @@ export class RLMContextManager extends EventEmitter {
     savingsPercent: number;
   }[] {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    const history: Map<string, { direct: number; actual: number }> = new Map();
+    const history = new Map<string, { direct: number; actual: number }>();
 
     const sessionRows =
       this.db && this.persistenceEnabled ? this.db.listSessions() : [];
@@ -1880,10 +1879,10 @@ export class RLMContextManager extends EventEmitter {
     avgTokens: number;
   }[] {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    const stats: Map<
+    const stats = new Map<
       string,
       { count: number; totalDuration: number; totalTokens: number }
-    > = new Map();
+    >();
 
     const sessionRows =
       this.db && this.persistenceEnabled ? this.db.listSessions() : [];
@@ -1949,7 +1948,7 @@ export class RLMContextManager extends EventEmitter {
     let totalSections = 0;
     let totalTokens = 0;
     let totalSize = 0;
-    const byType: Map<string, { count: number; tokens: number }> = new Map();
+    const byType = new Map<string, { count: number; tokens: number }>();
 
     for (const store of this.stores.values()) {
       for (const section of store.sections) {
@@ -2136,7 +2135,7 @@ export interface ExportedStore {
   store: {
     id: string;
     instanceId: string;
-    sections: Array<{
+    sections: {
       id: string;
       type: ContextSection['type'];
       name: string;
@@ -2151,7 +2150,7 @@ export interface ExportedStore {
       filePath?: string;
       language?: string;
       sourceUrl?: string;
-    }>;
+    }[];
     totalTokens: number;
     totalSize: number;
     createdAt: number;

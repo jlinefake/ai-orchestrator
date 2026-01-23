@@ -13,10 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app, safeStorage } from 'electron';
 import { EventEmitter } from 'events';
-import type {
-  Instance,
-  OutputMessage
-} from '../../shared/types/instance.types';
+import type { Instance } from '../../shared/types/instance.types';
 import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 import { getSettingsManager } from '../settings/settings-manager';
 
@@ -144,9 +141,9 @@ export class SessionContinuityManager extends EventEmitter {
   private stateDir: string;
   private snapshotDir: string;
   private config: ContinuityConfig;
-  private autoSaveTimers: Map<string, NodeJS.Timeout> = new Map();
-  private sessionStates: Map<string, SessionState> = new Map();
-  private dirty: Set<string> = new Set();
+  private autoSaveTimers = new Map<string, NodeJS.Timeout>();
+  private sessionStates = new Map<string, SessionState>();
+  private dirty = new Set<string>();
 
   constructor(config: Partial<ContinuityConfig> = {}) {
     super();
@@ -211,7 +208,7 @@ export class SessionContinuityManager extends EventEmitter {
   /**
    * Stop tracking a session
    */
-  stopTracking(instanceId: string, archive: boolean = false): void {
+  stopTracking(instanceId: string, archive = false): void {
     // Clear auto-save timer
     const timer = this.autoSaveTimers.get(instanceId);
     if (timer) {

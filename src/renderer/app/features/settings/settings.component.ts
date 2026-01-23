@@ -1038,7 +1038,7 @@ export class SettingsComponent {
   // Computed: keybindings grouped by category
   keybindingCategories = computed(() => {
     const byCategory = this.keybindingService.bindingsByCategory();
-    const categories: Array<{ name: string; bindings: any[] }> = [];
+    const categories: { name: string; bindings: any[] }[] = [];
     byCategory.forEach((bindings, name) => {
       categories.push({ name, bindings });
     });

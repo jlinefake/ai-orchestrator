@@ -12,7 +12,7 @@ import {
   inject,
   output,
   signal,
-  ChangeDetectionStrategy,
+  ChangeDetectionStrategy, OnInit,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { VerificationStore } from '../../core/state/verification.store';
@@ -472,7 +472,7 @@ interface AgentConfig {
     }
   `],
 })
-export class AgentConfigPanelComponent {
+export class AgentConfigPanelComponent implements OnInit {
   store = inject(VerificationStore);
 
   close = output<void>();

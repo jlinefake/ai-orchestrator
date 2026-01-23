@@ -414,6 +414,9 @@ export class IpcMainHandler {
     // Orchestration handlers (Phase 6: Workflows, Hooks, Skills)
     registerOrchestrationHandlers();
 
+    // User action request handlers (orchestrator -> user communication)
+    this.registerUserActionHandlers();
+
     // Verification handlers (Worktree, Verification, Supervision)
     registerVerificationHandlers();
 
@@ -721,6 +724,98 @@ export class IpcMainHandler {
             success: false,
             error: {
               code: 'LIST_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now()
+            }
+          };
+        }
+      }
+    );
+  }
+
+  /**
+   * Register user action request handlers (orchestrator -> user communication)
+   */
+  private registerUserActionHandlers(): void {
+    // Respond to a user action request
+    ipcMain.handle(
+      IPC_CHANNELS.USER_ACTION_RESPOND,
+      async (
+        event: IpcMainInvokeEvent,
+        payload: { requestId: string; approved: boolean; selectedOption?: string }
+      ): Promise<IpcResponse> => {
+        try {
+          const orchestration = this.instanceManager.getOrchestrationHandler();
+          orchestration.respondToUserAction(
+            payload.requestId,
+            payload.approved,
+            payload.selectedOption
+          );
+
+          return {
+            success: true,
+            data: { requestId: payload.requestId, responded: true }
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'USER_ACTION_RESPOND_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now()
+            }
+          };
+        }
+      }
+    );
+
+    // List all pending user action requests
+    ipcMain.handle(
+      IPC_CHANNELS.USER_ACTION_LIST,
+      async (): Promise<IpcResponse> => {
+        try {
+          const orchestration = this.instanceManager.getOrchestrationHandler();
+          const requests = orchestration.getPendingUserActions();
+
+          return {
+            success: true,
+            data: requests
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'USER_ACTION_LIST_FAILED',
+              message: (error as Error).message,
+              timestamp: Date.now()
+            }
+          };
+        }
+      }
+    );
+
+    // List pending user action requests for a specific instance
+    ipcMain.handle(
+      IPC_CHANNELS.USER_ACTION_LIST_FOR_INSTANCE,
+      async (
+        event: IpcMainInvokeEvent,
+        payload: { instanceId: string }
+      ): Promise<IpcResponse> => {
+        try {
+          const orchestration = this.instanceManager.getOrchestrationHandler();
+          const requests = orchestration.getPendingUserActionsForInstance(
+            payload.instanceId
+          );
+
+          return {
+            success: true,
+            data: requests
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: 'USER_ACTION_LIST_FOR_INSTANCE_FAILED',
               message: (error as Error).message,
               timestamp: Date.now()
             }

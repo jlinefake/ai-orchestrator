@@ -18,7 +18,7 @@ type FlushCallback = (updates: StateUpdate[]) => void;
 
 @Injectable({ providedIn: 'root' })
 export class UpdateBatcherService {
-  private queue: Map<string, StateUpdate> = new Map();
+  private queue = new Map<string, StateUpdate>();
   private flushCallbacks: FlushCallback[] = [];
   private flushInterval: ReturnType<typeof setInterval> | null = null;
   private readonly BATCH_INTERVAL = 50; // 50ms batching window

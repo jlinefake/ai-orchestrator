@@ -22,14 +22,31 @@ export interface AttachmentDisplay {
       @for (attachment of attachments(); track attachment.name) {
         <div class="attachment" [class.image-attachment]="isImage(attachment)">
           @if (isImage(attachment) && attachment.data) {
-            <div class="image-thumbnail" (click)="openPreview(attachment)" [style.background-image]="'url(' + attachment.data + ')'" title="Click to preview image">
+            <div
+              class="image-thumbnail"
+              (click)="openPreview(attachment)"
+              (keydown.enter)="openPreview(attachment)"
+              (keydown.space)="openPreview(attachment)"
+              tabindex="0"
+              role="button"
+              [style.background-image]="'url(' + attachment.data + ')'"
+              title="Click to preview image"
+            >
               <div class="image-overlay">
                 <span class="image-name">{{ attachment.name }}</span>
               </div>
             </div>
           } @else if (isImage(attachment)) {
             <!-- Fallback for images with no data -->
-            <div class="file-attachment clickable" (click)="openPreview(attachment)" title="Click to preview image">
+            <div
+              class="file-attachment clickable"
+              (click)="openPreview(attachment)"
+              (keydown.enter)="openPreview(attachment)"
+              (keydown.space)="openPreview(attachment)"
+              tabindex="0"
+              role="button"
+              title="Click to preview image"
+            >
               <div class="file-icon">🖼️</div>
               <div class="file-info">
                 <span class="file-name">{{ attachment.name }}</span>
@@ -37,7 +54,15 @@ export interface AttachmentDisplay {
               </div>
             </div>
           } @else {
-            <div class="file-attachment clickable" (click)="openFile(attachment)" title="Click to open file">
+            <div
+              class="file-attachment clickable"
+              (click)="openFile(attachment)"
+              (keydown.enter)="openFile(attachment)"
+              (keydown.space)="openFile(attachment)"
+              tabindex="0"
+              role="button"
+              title="Click to open file"
+            >
               <div class="file-icon">{{ getFileIcon(attachment) }}</div>
               <div class="file-info">
                 <span class="file-name">{{ attachment.name }}</span>
@@ -51,8 +76,20 @@ export interface AttachmentDisplay {
 
     <!-- Image preview modal -->
     @if (previewAttachment()) {
-      <div class="preview-overlay" (click)="closePreview()">
-        <div class="preview-content" (click)="$event.stopPropagation()">
+      <div
+        class="preview-overlay"
+        (click)="closePreview()"
+        (keydown.escape)="closePreview()"
+        tabindex="-1"
+        role="button"
+        aria-label="Close preview"
+      >
+        <div
+          class="preview-content"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+          tabindex="-1"
+        >
           <div class="preview-header">
             <span class="preview-title">{{ previewAttachment()!.name }}</span>
             <button class="preview-close" (click)="closePreview()" title="Close preview">×</button>

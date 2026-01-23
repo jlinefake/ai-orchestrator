@@ -16,7 +16,8 @@ export type OrchestratorAction =
   | 'report_task_complete'
   | 'report_progress'
   | 'report_error'
-  | 'get_task_status';
+  | 'get_task_status'
+  | 'request_user_action';
 
 export interface SpawnChildCommand {
   action: 'spawn_child';
@@ -89,6 +90,38 @@ export interface GetTaskStatusCommand {
   taskId?: string;
 }
 
+/**
+ * Request types that can be sent to the user
+ */
+export type UserActionRequestType =
+  | 'switch_mode'      // Request to switch from plan to build mode (or vice versa)
+  | 'approve_action'   // Request approval for a specific action
+  | 'confirm'          // Generic confirmation request
+  | 'select_option';   // Request user to select from options
+
+/**
+ * Request user action command - asks the user to approve/confirm something
+ */
+export interface RequestUserActionCommand {
+  action: 'request_user_action';
+  /** Type of request */
+  requestType: UserActionRequestType;
+  /** Title shown to user */
+  title: string;
+  /** Detailed message explaining what's being requested */
+  message: string;
+  /** For switch_mode: the target mode */
+  targetMode?: 'build' | 'plan' | 'review';
+  /** For select_option: available options */
+  options?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+  }>;
+  /** Additional context/metadata */
+  context?: Record<string, unknown>;
+}
+
 export type OrchestratorCommand =
   | SpawnChildCommand
   | MessageChildCommand
@@ -98,7 +131,8 @@ export type OrchestratorCommand =
   | ReportTaskCompleteCommand
   | ReportProgressCommand
   | ReportErrorCommand
-  | GetTaskStatusCommand;
+  | GetTaskStatusCommand
+  | RequestUserActionCommand;
 
 /**
  * Generate the system prompt that explains orchestration capabilities to Claude
@@ -142,6 +176,21 @@ ${ORCHESTRATION_MARKER_END}
 | get_children | (none) |
 | get_child_output | childId, lastN? |
 | terminate_child | childId |
+| request_user_action | requestType, title, message, targetMode?, options? |
+
+### Requesting User Actions
+
+When you need user approval or want to switch modes, use \`request_user_action\`:
+
+**Switch to Build Mode (from Plan mode):**
+${ORCHESTRATION_MARKER_START}
+{"action": "request_user_action", "requestType": "switch_mode", "targetMode": "build", "title": "Ready to Implement", "message": "Planning complete. Switch to build mode to begin implementation?"}
+${ORCHESTRATION_MARKER_END}
+
+**Request Approval:**
+${ORCHESTRATION_MARKER_START}
+{"action": "request_user_action", "requestType": "approve_action", "title": "Confirm Action", "message": "Description of what you want to do"}
+${ORCHESTRATION_MARKER_END}
 
 **Model options:** \`${CLAUDE_MODELS.HAIKU}\`, \`${CLAUDE_MODELS.SONNET}\`, \`${CLAUDE_MODELS.OPUS}\`
 (Usually leave unspecified for automatic routing)
@@ -244,6 +293,12 @@ function isValidCommand(cmd: unknown): cmd is OrchestratorCommand {
       );
     case 'get_task_status':
       return true;
+    case 'request_user_action':
+      return (
+        typeof (cmd as RequestUserActionCommand).requestType === 'string' &&
+        typeof (cmd as RequestUserActionCommand).title === 'string' &&
+        typeof (cmd as RequestUserActionCommand).message === 'string'
+      );
     default:
       return false;
   }

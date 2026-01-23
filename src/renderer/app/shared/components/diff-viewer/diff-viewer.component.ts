@@ -17,7 +17,7 @@ import {
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { DiffService, DiffLine, DiffResult } from '../../../core/services/diff.service';
+import { DiffService, DiffLine } from '../../../core/services/diff.service';
 
 export type DiffViewMode = 'inline' | 'split';
 

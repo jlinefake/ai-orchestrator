@@ -96,7 +96,7 @@ export class LLMService extends EventEmitter {
   private ollamaAvailable: boolean | null = null;
   private openaiAvailable: boolean | null = null;
   private tokenCounter: TokenCounter;
-  private activeStreams: Map<string, AbortController> = new Map();
+  private activeStreams = new Map<string, AbortController>();
 
   private constructor(config: Partial<LLMServiceConfig> = {}) {
     super();

@@ -23,6 +23,7 @@ import { DropZoneComponent } from '../file-drop/drop-zone.component';
 import { ActivityStatusComponent } from './activity-status.component';
 import { ChildInstancesPanelComponent } from './child-instances-panel.component';
 import { TodoListComponent } from './todo-list.component';
+import { UserActionRequestComponent } from './user-action-request.component';
 
 @Component({
   selector: 'app-instance-detail',
@@ -35,7 +36,8 @@ import { TodoListComponent } from './todo-list.component';
     DropZoneComponent,
     ActivityStatusComponent,
     ChildInstancesPanelComponent,
-    TodoListComponent
+    TodoListComponent,
+    UserActionRequestComponent
   ],
   template: `
     @if (instance(); as inst) {
@@ -65,7 +67,11 @@ import { TodoListComponent } from './todo-list.component';
                   <h2
                     class="instance-name editable"
                     title="Click to rename"
+                    role="button"
+                    tabindex="0"
                     (click)="onStartEditName()"
+                    (keydown.enter)="onStartEditName()"
+                    (keydown.space)="onStartEditName()"
                   >
                     {{ inst.displayName }}
                     <span class="edit-icon">✏️</span>
@@ -161,6 +167,9 @@ import { TodoListComponent } from './todo-list.component';
 
           <!-- TODO list -->
           <app-todo-list [sessionId]="inst.sessionId" />
+
+          <!-- User action requests (orchestrator -> user) -->
+          <app-user-action-request [instanceId]="inst.id" />
 
           <!-- Output stream -->
           <div class="output-section">
@@ -892,15 +901,15 @@ export class InstanceDetailComponent {
     if (!inst) return;
 
     // File path dropped from file explorer - fetch file content via IPC
-    const ipc = (window as any).electronAPI;
-    if (!ipc) return;
+    if (!window.electronAPI) return;
 
     try {
-      const stats = await ipc.getFileStats(filePath);
+      const stats = await window.electronAPI.getFileStats(filePath);
       if (!stats.success || !stats.data) return;
+      const data = stats.data as { isDirectory?: boolean };
 
       // For directories, we can't add them as attachments yet
-      if (stats.data.isDirectory) {
+      if (data.isDirectory) {
         console.log('Directory dropped - not supported yet:', filePath);
         return;
       }

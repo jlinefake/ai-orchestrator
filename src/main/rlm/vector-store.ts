@@ -6,8 +6,7 @@
 
 import { EventEmitter } from 'events';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
-import { EmbeddingService, getEmbeddingService, EmbeddingResult } from './embedding-service';
-import { VectorRow } from '../persistence/rlm-database.types';
+import { EmbeddingService, getEmbeddingService } from './embedding-service';
 
 export interface VectorEntry {
   id: string;
@@ -44,8 +43,8 @@ export class VectorStore extends EventEmitter {
   private config: VectorStoreConfig;
 
   // In-memory cache for fast similarity search
-  private vectorCache: Map<string, VectorEntry> = new Map();
-  private storeVectorIds: Map<string, Set<string>> = new Map();
+  private vectorCache = new Map<string, VectorEntry>();
+  private storeVectorIds = new Map<string, Set<string>>();
 
   private constructor(config: Partial<VectorStoreConfig> = {}) {
     super();
@@ -270,9 +269,6 @@ export class VectorStore extends EventEmitter {
 
     // Get all candidates or filter by storeIds
     const candidates: { id: string; embedding: number[] }[] = [];
-    const targetStores = options?.storeIds
-      ? new Set(options.storeIds)
-      : this.storeVectorIds;
 
     for (const [storeId, vectorIds] of this.storeVectorIds) {
       if (options?.storeIds && !options.storeIds.includes(storeId)) {

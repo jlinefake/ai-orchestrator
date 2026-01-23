@@ -48,7 +48,7 @@ const DEFAULT_CONFIG: EmbeddingConfig = {
 export class EmbeddingService extends EventEmitter {
   private static instance: EmbeddingService;
   private config: EmbeddingConfig;
-  private cache: Map<string, CacheEntry> = new Map();
+  private cache = new Map<string, CacheEntry>();
   private ollamaAvailable: boolean | null = null;
   private openaiAvailable: boolean | null = null;
 
@@ -153,7 +153,8 @@ export class EmbeddingService extends EventEmitter {
     const batchSize = this.config.batchSize || 32;
     for (let i = 0; i < uncached.length; i += batchSize) {
       const batch = uncached.slice(i, i + batchSize);
-      const batchTexts = batch.map(b => b.text);
+      // TODO: Use batchTexts when provider supports batch embedding
+      // const batchTexts = batch.map(b => b.text);
 
       // For now, process individually (can be optimized for providers that support batching)
       for (const item of batch) {
@@ -197,8 +198,8 @@ export class EmbeddingService extends EventEmitter {
   findSimilar(
     queryEmbedding: number[],
     candidates: { id: string; embedding: number[] }[],
-    topK: number = 10,
-    minSimilarity: number = 0.5
+    topK = 10,
+    minSimilarity = 0.5
   ): { id: string; similarity: number }[] {
     const results = candidates
       .map(candidate => ({

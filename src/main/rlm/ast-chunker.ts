@@ -60,7 +60,7 @@ const DEFAULT_CONFIG: ChunkConfig = {
 // Language detection patterns
 const LANGUAGE_PATTERNS = {
   typescript:
-    /\b(interface|type|enum|namespace|declare)\b|:\s*\w+\s*[;,\)=]|<\w+>/,
+    /\b(interface|type|enum|namespace|declare)\b|:\s*\w+\s*[;,)=]|<\w+>/,
   javascript: /\b(const|let|var|function|class|import|export|async|await)\b/,
   python: /\b(def|class|import|from|async|await|with|lambda)\b|:\s*$/m,
   rust: /\b(fn|struct|impl|enum|trait|mod|use|pub|mut|let)\b/,

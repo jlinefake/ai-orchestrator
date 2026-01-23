@@ -24,11 +24,7 @@
 
 import { EventEmitter } from 'events';
 import { LLMService, getLLMService } from './llm-service';
-import {
-  EmbeddingService,
-  getEmbeddingService,
-  EmbeddingResult
-} from './embedding-service';
+import { EmbeddingService, getEmbeddingService } from './embedding-service';
 
 export interface HyDEConfig {
   enabled: boolean;
@@ -118,7 +114,7 @@ export class HyDEService extends EventEmitter {
   private config: HyDEConfig;
   private llmService: LLMService;
   private embeddingService: EmbeddingService;
-  private cache: Map<string, CacheEntry> = new Map();
+  private cache = new Map<string, CacheEntry>();
 
   private constructor(config: Partial<HyDEConfig> = {}) {
     super();
@@ -292,7 +288,7 @@ Generate a hypothetical document that would perfectly match this query:`;
     // Generate hypotheticals in parallel
     const promises = Array(this.config.hypotheticalCount)
       .fill(null)
-      .map(async (_, i) => {
+      .map(async () => {
         const doc = await this.generateHypotheticalDocument(query, contextType);
         const embedding = await this.embeddingService.embed(doc);
         return { doc, embedding: embedding.embedding };
@@ -354,21 +350,21 @@ Generate a hypothetical document that would perfectly match this query:`;
     systemPrompt: string,
     userPrompt: string
   ): Promise<string> {
-    return new Promise<string>(async (resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         reject(new Error('HyDE generation timed out'));
       }, this.config.generationTimeout);
 
-      try {
-        // Access the LLM service's generate method
-        // We'll use the summarize capability with a custom prompt
-        const response = await this.callLLM(systemPrompt, userPrompt);
-        clearTimeout(timeoutId);
-        resolve(response);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        reject(error);
-      }
+      // Execute async operation
+      this.callLLM(systemPrompt, userPrompt)
+        .then((response) => {
+          clearTimeout(timeoutId);
+          resolve(response);
+        })
+        .catch((error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
     });
   }
 
@@ -452,7 +448,9 @@ Generate a hypothetical document that would perfectly match this query:`;
       throw new Error(`Anthropic API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      content?: { text?: string }[];
+    };
     return data.content?.[0]?.text || '';
   }
 
@@ -481,7 +479,9 @@ Generate a hypothetical document that would perfectly match this query:`;
       throw new Error(`OpenAI API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
     return data.choices?.[0]?.message?.content || '';
   }
 
@@ -509,7 +509,7 @@ Generate a hypothetical document that would perfectly match this query:`;
       throw new Error(`Ollama API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as { response?: string };
     return data.response || '';
   }
 

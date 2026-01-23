@@ -17,7 +17,7 @@ export interface DiffLine {
   oldLineNumber?: number;
   newLineNumber?: number;
   // For character-level diffs within a line
-  changes?: Array<{ value: string; added?: boolean; removed?: boolean }>;
+  changes?: { value: string; added?: boolean; removed?: boolean }[];
 }
 
 export interface DiffResult {
@@ -163,8 +163,7 @@ export class DiffService {
     let currentHunk: DiffHunk | null = null;
     let contextBuffer: DiffLine[] = [];
 
-    for (let i = 0; i < result.lines.length; i++) {
-      const line = result.lines[i];
+    for (const line of result.lines) {
       const isChange = line.type === 'add' || line.type === 'remove';
 
       if (isChange) {

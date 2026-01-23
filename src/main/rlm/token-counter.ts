@@ -50,7 +50,7 @@ const MODEL_PATTERNS = {
 function isLikelyCode(text: string): boolean {
   const codeIndicators = [
     /^(import|export|const|let|var|function|class|interface|type)\s/m,
-    /[{}\[\]();]/,
+    /[{}[\]();]/,
     /^\s*(\/\/|\/\*|\*|#)/m,
     /=>/,
     /\.\w+\(/,
@@ -67,7 +67,7 @@ function isLikelyCode(text: string): boolean {
 function countSpecialTokens(text: string): number {
   // Count newlines, special punctuation that often gets separate tokens
   const newlines = (text.match(/\n/g) || []).length;
-  const specialPunct = (text.match(/[{}()\[\]<>]/g) || []).length;
+  const specialPunct = (text.match(/[{}()[\]<>]/g) || []).length;
 
   return Math.floor(newlines * 0.5 + specialPunct * 0.3);
 }
@@ -103,7 +103,10 @@ export class TokenCounter {
   private static instance: TokenCounter;
   private modelFamily: ModelFamily = 'unknown';
 
-  private constructor() {}
+  // Private constructor for singleton pattern
+  private constructor() {
+    // Intentionally empty - initialization happens via setModelFamily()
+  }
 
   /**
    * Get the singleton instance
@@ -229,7 +232,7 @@ export class TokenCounter {
   splitIntoChunks(
     text: string,
     maxTokensPerChunk: number,
-    overlap: number = 0,
+    overlap = 0,
     model?: string
   ): string[] {
     if (!text) return [];
@@ -241,7 +244,8 @@ export class TokenCounter {
 
     const chunks: string[] = [];
     const family = model ? getModelFamily(model) : this.modelFamily;
-    const pattern = MODEL_PATTERNS[family];
+    // Pattern available for future tokenization optimizations
+    void MODEL_PATTERNS[family];
 
     // Split by paragraphs first
     const paragraphs = text.split(/\n\n+/);

@@ -838,7 +838,7 @@ export class MemoryBrowserComponent {
     const tags = this.selectedTags();
     const sort = this.sortBy();
 
-    let filtered = this.entries().filter((entry) => {
+    const filtered = this.entries().filter((entry) => {
       if (type && entry.type !== type) return false;
       if (query && !entry.content.toLowerCase().includes(query)) return false;
       if (tags.size > 0) {
