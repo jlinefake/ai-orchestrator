@@ -2,7 +2,13 @@
  * IPC Types - Inter-Process Communication between Main and Renderer
  */
 
-import type { ContextUsage, FileAttachment, InstanceStatus, OutputMessage } from './instance.types';
+import type {
+  ContextUsage,
+  FileAttachment,
+  InstanceStatus,
+  OutputMessage,
+  InstanceProvider
+} from './instance.types';
 
 /**
  * IPC Channel names - domain:action pattern
@@ -346,6 +352,9 @@ export const IPC_CHANNELS = {
   HOOKS_EVALUATE: 'hooks:evaluate',
   HOOKS_IMPORT: 'hooks:import',
   HOOKS_EXPORT: 'hooks:export',
+  HOOK_APPROVALS_LIST: 'hooks:approvals:list',
+  HOOK_APPROVALS_UPDATE: 'hooks:approvals:update',
+  HOOK_APPROVALS_CLEAR: 'hooks:approvals:clear',
   HOOKS_TRIGGERED: 'hooks:triggered',
 
   // Skill operations (6.4)
@@ -536,10 +545,10 @@ export const IPC_CHANNELS = {
   AB_GET_RESULTS: 'ab:get-results',
   AB_GET_WINNER: 'ab:get-winner',
   AB_GET_STATS: 'ab:get-stats',
-  AB_CONFIGURE: 'ab:configure',
+  AB_CONFIGURE: 'ab:configure'
 } as const;
 
-export type IpcChannel = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
+export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 
 /**
  * Message envelope for all IPC communication
@@ -564,7 +573,8 @@ export interface InstanceCreatePayload {
   initialPrompt?: string;
   attachments?: FileAttachment[];
   yoloMode?: boolean;
-  agentId?: string;  // Agent profile ID (defaults to 'build')
+  agentId?: string; // Agent profile ID (defaults to 'build')
+  provider?: InstanceProvider; // CLI provider (defaults to 'auto')
 }
 
 export interface InstanceStateUpdatePayload {
@@ -781,6 +791,7 @@ export interface ProviderStatusPayload {
 export interface ProviderUpdateConfigPayload {
   providerType: string;
   config: Record<string, unknown>;
+  ipcAuthToken?: string;
 }
 
 // ============================================
@@ -789,7 +800,7 @@ export interface ProviderUpdateConfigPayload {
 
 export interface SessionForkPayload {
   instanceId: string;
-  atMessageIndex?: number;  // Fork at specific message, defaults to latest
+  atMessageIndex?: number; // Fork at specific message, defaults to latest
   displayName?: string;
 }
 
@@ -812,7 +823,7 @@ export interface SessionCopyToClipboardPayload {
 export interface SessionSaveToFilePayload {
   instanceId: string;
   format: 'json' | 'markdown';
-  filePath?: string;  // If not provided, will show save dialog
+  filePath?: string; // If not provided, will show save dialog
 }
 
 export interface SessionRevealFilePayload {
@@ -881,7 +892,7 @@ export interface PlanModeEnterPayload {
 
 export interface PlanModeExitPayload {
   instanceId: string;
-  force?: boolean;  // Force exit without approval
+  force?: boolean; // Force exit without approval
 }
 
 export interface PlanModeApprovePayload {
@@ -922,8 +933,8 @@ export interface VcsGetCommitsPayload {
 export interface VcsGetDiffPayload {
   workingDirectory: string;
   type: 'staged' | 'unstaged' | 'between';
-  fromRef?: string;  // For 'between' type
-  toRef?: string;    // For 'between' type
+  fromRef?: string; // For 'between' type
+  toRef?: string; // For 'between' type
   filePath?: string; // For single file diff
 }
 
@@ -1101,7 +1112,7 @@ export interface McpServerStatusChangedPayload {
 
 export interface LspPositionPayload {
   filePath: string;
-  line: number;      // 0-based
+  line: number; // 0-based
   character: number; // 0-based
 }
 
@@ -1123,9 +1134,9 @@ export interface LspWorkspaceSymbolPayload {
 // ============================================
 
 export interface MultiEditOperation {
-  filePath: string;    // Absolute path to the file
-  oldString: string;   // Text to find and replace
-  newString: string;   // Replacement text
+  filePath: string; // Absolute path to the file
+  oldString: string; // Text to find and replace
+  newString: string; // Replacement text
   replaceAll?: boolean; // Replace all occurrences (default: false)
 }
 
@@ -1144,7 +1155,7 @@ export interface TaskGetStatusPayload {
 }
 
 export interface TaskGetHistoryPayload {
-  parentId?: string;  // If provided, get history for this parent only
+  parentId?: string; // If provided, get history for this parent only
   limit?: number;
 }
 
@@ -1166,7 +1177,7 @@ export interface TaskCancelPayload {
 
 export interface SecurityDetectSecretsPayload {
   content: string;
-  contentType?: 'env' | 'text' | 'auto';  // auto = detect based on content
+  contentType?: 'env' | 'text' | 'auto'; // auto = detect based on content
 }
 
 export interface SecurityRedactContentPayload {
@@ -1186,7 +1197,7 @@ export interface SecurityCheckFilePayload {
 }
 
 export interface SecurityGetAuditLogPayload {
-  instanceId?: string;  // If provided, filter by instance
+  instanceId?: string; // If provided, filter by instance
   limit?: number;
 }
 
@@ -1198,8 +1209,8 @@ export interface SecurityCheckEnvVarPayload {
 export interface SecurityUpdateEnvFilterConfigPayload {
   blocklist?: string[];
   allowlist?: string[];
-  blockPatterns?: string[];  // Regex patterns as strings
-  allowPatterns?: string[];  // Regex patterns as strings
+  blockPatterns?: string[]; // Regex patterns as strings
+  allowPatterns?: string[]; // Regex patterns as strings
   blockAllSecrets?: boolean;
 }
 
@@ -1215,15 +1226,18 @@ export interface CostRecordUsagePayload {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  ipcAuthToken?: string;
 }
 
 export interface CostGetSummaryPayload {
   startTime?: number;
   endTime?: number;
+  ipcAuthToken?: string;
 }
 
 export interface CostGetSessionCostPayload {
   sessionId: string;
+  ipcAuthToken?: string;
 }
 
 export interface CostSetBudgetPayload {
@@ -1233,10 +1247,24 @@ export interface CostSetBudgetPayload {
   monthlyLimit?: number;
   perSessionLimit?: number;
   alertThresholds?: number[];
+  ipcAuthToken?: string;
+}
+
+export interface CostGetBudgetPayload {
+  ipcAuthToken?: string;
+}
+
+export interface CostGetBudgetStatusPayload {
+  ipcAuthToken?: string;
 }
 
 export interface CostGetEntriesPayload {
   limit?: number;
+  ipcAuthToken?: string;
+}
+
+export interface CostClearEntriesPayload {
+  ipcAuthToken?: string;
 }
 
 // ============================================
@@ -1695,6 +1723,19 @@ export interface HooksExportPayload {
   source?: 'built-in' | 'project' | 'user';
 }
 
+export interface HookApprovalsListPayload {
+  pendingOnly?: boolean;
+}
+
+export interface HookApprovalsUpdatePayload {
+  hookId: string;
+  approved: boolean;
+}
+
+export interface HookApprovalsClearPayload {
+  hookIds?: string[];
+}
+
 // ============================================
 // Skill Payloads (6.4)
 // ============================================
@@ -1793,7 +1834,13 @@ export interface VerifyStartPayload {
   taskType?: string;
   config?: {
     minAgents?: number;
-    synthesisStrategy?: 'consensus' | 'best-of' | 'merge' | 'majority-vote' | 'debate' | 'hierarchical';
+    synthesisStrategy?:
+      | 'consensus'
+      | 'best-of'
+      | 'merge'
+      | 'majority-vote'
+      | 'debate'
+      | 'hierarchical';
     personalities?: string[];
     confidenceThreshold?: number;
     timeoutMs?: number;
@@ -1816,7 +1863,13 @@ export interface VerifyCancelPayload {
 export interface VerifyConfigurePayload {
   config: {
     minAgents?: number;
-    synthesisStrategy?: 'consensus' | 'best-of' | 'merge' | 'majority-vote' | 'debate' | 'hierarchical';
+    synthesisStrategy?:
+      | 'consensus'
+      | 'best-of'
+      | 'merge'
+      | 'majority-vote'
+      | 'debate'
+      | 'hierarchical';
     confidenceThreshold?: number;
     timeoutMs?: number;
     enableByDefault?: boolean;

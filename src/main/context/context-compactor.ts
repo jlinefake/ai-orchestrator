@@ -10,6 +10,7 @@
 
 import { EventEmitter } from 'events';
 import Anthropic from '@anthropic-ai/sdk';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
 export interface CompactionConfig {
   /** Threshold to trigger compaction (0-1, default 0.85) */
@@ -77,7 +78,7 @@ const DEFAULT_CONFIG: CompactionConfig = {
   triggerThreshold: 0.85,
   targetReduction: 0.5,
   preserveRecent: 5,
-  summaryModel: 'claude-3-haiku-20240307',
+  summaryModel: CLAUDE_MODELS.HAIKU,
   toolCallRetention: 'results_only',
   maxContextTokens: 200000,
   autoCompact: true,

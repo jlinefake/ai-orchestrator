@@ -3,6 +3,12 @@
  */
 
 import type { AgentMode } from './agent.types';
+import type { CliType } from './settings.types';
+
+/**
+ * CLI provider type for instances
+ */
+export type InstanceProvider = CliType;
 
 // ============================================
 // Session Export Types
@@ -12,7 +18,7 @@ import type { AgentMode } from './agent.types';
  * Exported session format (JSON)
  */
 export interface ExportedSession {
-  version: string;           // Export format version
+  version: string; // Export format version
   exportedAt: number;
   metadata: {
     displayName: string;
@@ -31,7 +37,7 @@ export interface ExportedSession {
  */
 export interface ForkConfig {
   instanceId: string;
-  atMessageIndex?: number;   // Fork at specific message, defaults to latest
+  atMessageIndex?: number; // Fork at specific message, defaults to latest
   displayName?: string;
 }
 
@@ -46,8 +52,8 @@ export type PlanModeState = 'off' | 'planning' | 'approved';
 export interface PlanModeConfig {
   enabled: boolean;
   state: PlanModeState;
-  planContent?: string;     // The plan being reviewed
-  approvedAt?: number;      // When the plan was approved
+  planContent?: string; // The plan being reviewed
+  approvedAt?: number; // When the plan was approved
 }
 
 // ============================================
@@ -106,7 +112,7 @@ export interface Instance {
   supervisorNodeId: string;
 
   // Agent mode
-  agentId: string;  // References AgentProfile.id ('build', 'plan', 'review', or custom)
+  agentId: string; // References AgentProfile.id ('build', 'plan', 'review', or custom)
   agentMode: AgentMode;
 
   // Plan mode state
@@ -116,14 +122,15 @@ export interface Instance {
   status: InstanceStatus;
   contextUsage: ContextUsage;
   lastActivity: number;
-  currentActivity?: string;  // Human-readable activity description
-  currentTool?: string;       // Current tool being used
+  currentActivity?: string; // Human-readable activity description
+  currentTool?: string; // Current tool being used
 
   // CLI process
   processId: number | null;
   sessionId: string;
   workingDirectory: string;
-  yoloMode: boolean;  // Auto-approve all permissions
+  yoloMode: boolean; // Auto-approve all permissions
+  provider: InstanceProvider; // Which CLI provider is being used
 
   // Output
   outputBuffer: OutputMessage[];
@@ -144,14 +151,15 @@ export interface InstanceCreateConfig {
   displayName?: string;
   parentId?: string | null;
   sessionId?: string;
-  resume?: boolean;  // Resume a previous session (requires sessionId)
+  resume?: boolean; // Resume a previous session (requires sessionId)
   workingDirectory: string;
   initialPrompt?: string;
   attachments?: FileAttachment[];
   yoloMode?: boolean;
-  initialOutputBuffer?: OutputMessage[];  // Pre-populate output buffer (for history restore)
-  agentId?: string;  // Agent profile ID (defaults to 'build')
-  modelOverride?: string;  // Optional model override for the instance
+  initialOutputBuffer?: OutputMessage[]; // Pre-populate output buffer (for history restore)
+  agentId?: string; // Agent profile ID (defaults to 'build')
+  modelOverride?: string; // Optional model override for the instance
+  provider?: InstanceProvider; // CLI provider to use (defaults to settings.defaultCli)
 }
 
 export interface InstanceSummary {
@@ -172,7 +180,9 @@ export function createInstance(config: InstanceCreateConfig): Instance {
   const now = Date.now();
   // Import agent profile to get mode
   const { getAgentById, getDefaultAgent } = require('./agent.types');
-  const agent = config.agentId ? getAgentById(config.agentId) : getDefaultAgent();
+  const agent = config.agentId
+    ? getAgentById(config.agentId)
+    : getDefaultAgent();
   const resolvedAgent = agent || getDefaultAgent();
 
   return {
@@ -189,7 +199,7 @@ export function createInstance(config: InstanceCreateConfig): Instance {
 
     planMode: {
       enabled: false,
-      state: 'off',
+      state: 'off'
     },
 
     status: 'initializing',
@@ -199,7 +209,8 @@ export function createInstance(config: InstanceCreateConfig): Instance {
     processId: null,
     sessionId: config.sessionId || crypto.randomUUID(),
     workingDirectory: config.workingDirectory,
-    yoloMode: config.yoloMode ?? true,  // Default to YOLO mode enabled
+    yoloMode: config.yoloMode ?? false, // Default to YOLO mode disabled
+    provider: config.provider || 'auto', // Default to auto (resolved by instance manager)
 
     outputBuffer: config.initialOutputBuffer || [],
     outputBufferMaxSize: 1000,
@@ -210,7 +221,7 @@ export function createInstance(config: InstanceCreateConfig): Instance {
     totalTokensUsed: 0,
     requestCount: 0,
     errorCount: 0,
-    restartCount: 0,
+    restartCount: 0
   };
 }
 
@@ -220,7 +231,7 @@ export function createInstance(config: InstanceCreateConfig): Instance {
 export function serializeInstance(instance: Instance): Record<string, unknown> {
   return {
     ...instance,
-    communicationTokens: Object.fromEntries(instance.communicationTokens),
+    communicationTokens: Object.fromEntries(instance.communicationTokens)
   };
 }
 
@@ -231,7 +242,10 @@ export function deserializeInstance(data: Record<string, unknown>): Instance {
   return {
     ...(data as unknown as Instance),
     communicationTokens: new Map(
-      Object.entries(data['communicationTokens'] as Record<string, CommunicationToken> || {})
-    ),
+      Object.entries(
+        (data['communicationTokens'] as Record<string, CommunicationToken>) ||
+          {}
+      )
+    )
   };
 }

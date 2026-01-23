@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentStore, AgentPreference } from './agent.store';
+import { CLAUDE_MODELS } from '../../../../shared/types/provider.types';
 
 // Mock localStorage for testing
 class LocalStorageMock {
@@ -62,7 +63,7 @@ describe('AgentStore', () => {
 
         expect(claudePreference).toBeDefined();
         expect(claudePreference?.command).toBe('claude');
-        expect(claudePreference?.defaultModel).toBe('claude-sonnet-4-20250514');
+        expect(claudePreference?.defaultModel).toBe(CLAUDE_MODELS.SONNET);
         expect(claudePreference?.defaultTimeout).toBe(300);
         expect(claudePreference?.autoApprove).toBe(false);
         expect(claudePreference?.personality).toBe('methodical-analyst');
@@ -120,7 +121,7 @@ describe('AgentStore', () => {
         expect(updated?.defaultTimeout).toBe(600);
         // Other properties should remain unchanged
         expect(updated?.command).toBe('claude');
-        expect(updated?.defaultModel).toBe('claude-sonnet-4-20250514');
+        expect(updated?.defaultModel).toBe(CLAUDE_MODELS.SONNET);
         expect(updated?.autoApprove).toBe(false);
         expect(updated?.personality).toBe('methodical-analyst');
       });
@@ -257,7 +258,7 @@ describe('AgentStore', () => {
         const reset = store.getPreference('claude');
         expect(reset?.defaultTimeout).toBe(300);
         expect(reset?.autoApprove).toBe(false);
-        expect(reset?.defaultModel).toBe('claude-sonnet-4-20250514');
+        expect(reset?.defaultModel).toBe(CLAUDE_MODELS.SONNET);
         expect(reset?.personality).toBe('methodical-analyst');
       });
 
@@ -357,7 +358,7 @@ describe('AgentStore', () => {
           preferences: {
             claude: {
               command: 'claude',
-              defaultModel: 'claude-sonnet-4-20250514',
+              defaultModel: CLAUDE_MODELS.SONNET,
               defaultTimeout: 888,
               autoApprove: true,
               personality: 'methodical-analyst',
@@ -439,7 +440,7 @@ describe('AgentStore', () => {
         // Should have stored timeout
         expect(claudePreference?.defaultTimeout).toBe(555);
         // Should have merged default values for missing fields
-        expect(claudePreference?.defaultModel).toBe('claude-sonnet-4-20250514');
+        expect(claudePreference?.defaultModel).toBe(CLAUDE_MODELS.SONNET);
         expect(claudePreference?.autoApprove).toBe(false);
         expect(claudePreference?.personality).toBe('methodical-analyst');
       });
@@ -449,7 +450,7 @@ describe('AgentStore', () => {
           preferences: {
             claude: {
               command: 'claude',
-              defaultModel: 'claude-sonnet-4-20250514',
+              defaultModel: CLAUDE_MODELS.SONNET,
               defaultTimeout: 300,
               autoApprove: false,
               personality: 'methodical-analyst',

@@ -17,7 +17,7 @@ import type {
   ProviderSessionOptions,
   ProviderAttachment,
 } from '../../shared/types/provider.types';
-import { MODEL_PRICING } from '../../shared/types/provider.types';
+import { MODEL_PRICING, CLAUDE_MODELS } from '../../shared/types/provider.types';
 import type { ContextUsage } from '../../shared/types/instance.types';
 import { isCliAvailable } from '../cli/cli-detection';
 
@@ -140,7 +140,7 @@ export class ClaudeCliProvider extends BaseProvider {
    */
   private updateUsageFromContext(context: ContextUsage): void {
     // Estimate cost based on model pricing
-    const modelId = this.config.defaultModel || 'claude-sonnet-4-20250514';
+    const modelId = this.config.defaultModel || CLAUDE_MODELS.SONNET;
     const pricing = (MODEL_PRICING as any)[modelId] || { input: 3.0, output: 15.0 };
 
     // Context usage gives us total tokens used, estimate input/output split

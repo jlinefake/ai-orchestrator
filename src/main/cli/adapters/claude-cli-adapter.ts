@@ -12,15 +12,22 @@ import {
   CliMessage,
   CliResponse,
   CliToolCall,
-  CliUsage,
+  CliUsage
 } from './base-cli-adapter';
 import { NdjsonParser } from '../ndjson-parser';
 import { InputFormatter } from '../input-formatter';
 import { processAttachments, buildMessageWithFiles } from '../file-handler';
 import type { CliStreamMessage } from '../../../shared/types/cli.types';
-import type { OutputMessage, ContextUsage, InstanceStatus } from '../../../shared/types/instance.types';
+import type {
+  OutputMessage,
+  ContextUsage,
+  InstanceStatus
+} from '../../../shared/types/instance.types';
 import { generateId } from '../../../shared/utils/id-generator';
-import { MODEL_PRICING } from '../../../shared/types/provider.types';
+import {
+  MODEL_PRICING,
+  CLAUDE_MODELS
+} from '../../../shared/types/provider.types';
 
 /**
  * Claude CLI specific spawn options
@@ -42,12 +49,12 @@ export interface ClaudeCliSpawnOptions {
  * Events emitted by ClaudeCliAdapter (backward compatible)
  */
 export interface ClaudeCliAdapterEvents {
-  'output': (message: OutputMessage) => void;
-  'status': (status: InstanceStatus) => void;
-  'context': (usage: ContextUsage) => void;
-  'error': (error: Error) => void;
-  'exit': (code: number | null, signal: string | null) => void;
-  'spawned': (pid: number) => void;
+  output: (message: OutputMessage) => void;
+  status: (status: InstanceStatus) => void;
+  context: (usage: ContextUsage) => void;
+  error: (error: Error) => void;
+  exit: (code: number | null, signal: string | null) => void;
+  spawned: (pid: number) => void;
 }
 
 /**
@@ -64,7 +71,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       args: [],
       cwd: options.workingDirectory,
       timeout: 300000,
-      sessionPersistence: true,
+      sessionPersistence: true
     };
     super(config);
 
@@ -89,7 +96,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       vision: true,
       codeExecution: true,
       contextWindow: 200000, // Claude 3.5 context window
-      outputFormats: ['ndjson', 'text', 'json'],
+      outputFormats: ['ndjson', 'text', 'json']
     };
   }
 
@@ -112,12 +119,12 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             available: true,
             version: versionMatch?.[1] || 'unknown',
             path: 'claude',
-            authenticated: true, // Claude CLI handles auth internally
+            authenticated: true // Claude CLI handles auth internally
           });
         } else {
           resolve({
             available: false,
-            error: `Claude CLI not found or not configured: ${output}`,
+            error: `Claude CLI not found or not configured: ${output}`
           });
         }
       });
@@ -125,7 +132,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       proc.on('error', (err) => {
         resolve({
           available: false,
-          error: `Failed to spawn claude: ${err.message}`,
+          error: `Failed to spawn claude: ${err.message}`
         });
       });
 
@@ -134,7 +141,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         proc.kill();
         resolve({
           available: false,
-          error: 'Timeout checking Claude CLI',
+          error: 'Timeout checking Claude CLI'
         });
       }, 5000);
     });
@@ -155,21 +162,23 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
       // Prepare message content with file attachments
       let finalMessage = message.content;
-      const imageAttachments = message.attachments?.filter(a =>
-        a.mimeType?.startsWith('image/') || a.type === 'image'
-      ) || [];
-      const otherAttachments = message.attachments?.filter(a =>
-        !a.mimeType?.startsWith('image/') && a.type !== 'image'
-      ) || [];
+      const imageAttachments =
+        message.attachments?.filter(
+          (a) => a.mimeType?.startsWith('image/') || a.type === 'image'
+        ) || [];
+      const otherAttachments =
+        message.attachments?.filter(
+          (a) => !a.mimeType?.startsWith('image/') && a.type !== 'image'
+        ) || [];
 
       // Process non-image attachments
       if (otherAttachments.length > 0 && this.config.cwd) {
         const processed = await processAttachments(
-          otherAttachments.map(a => ({
+          otherAttachments.map((a) => ({
             type: a.mimeType || 'text/plain',
             name: a.name || 'attachment',
             data: a.content || '',
-            size: a.content?.length || 0,
+            size: a.content?.length || 0
           })),
           this.sessionId || generateId(),
           this.config.cwd
@@ -182,11 +191,11 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         await this.formatter.sendMessage(
           finalMessage,
           imageAttachments.length > 0
-            ? imageAttachments.map(a => ({
+            ? imageAttachments.map((a) => ({
                 type: a.mimeType || 'image/png',
                 name: a.name || 'image',
                 data: a.content || '',
-                size: a.content?.length || 0,
+                size: a.content?.length || 0
               }))
             : undefined
         );
@@ -222,7 +231,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           const response = this.parseOutput(this.outputBuffer);
           response.usage = {
             ...response.usage,
-            duration,
+            duration
           };
           this.emit('complete', response);
           resolve(response);
@@ -289,7 +298,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     let usage: CliUsage = {};
 
     // Parse all NDJSON lines
-    const lines = raw.split('\n').filter(line => line.trim());
+    const lines = raw.split('\n').filter((line) => line.trim());
 
     for (const line of lines) {
       try {
@@ -313,14 +322,18 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             toolCalls.push({
               id: tool.id || generateId(),
               name: tool.name,
-              arguments: tool.input || {},
+              arguments: tool.input || {}
             });
           }
         }
 
-        if (msg.type === 'system' && msg.subtype === 'context_usage' && msg.usage) {
+        if (
+          msg.type === 'system' &&
+          msg.subtype === 'context_usage' &&
+          msg.usage
+        ) {
           usage = {
-            totalTokens: msg.usage.total_tokens,
+            totalTokens: msg.usage.total_tokens
           };
         }
       } catch {
@@ -334,20 +347,26 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       role: 'assistant',
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
-      raw,
+      raw
     };
   }
 
   protected buildArgs(message: CliMessage): string[] {
     const args = [
       '--print',
-      '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
-      '--verbose',
+      '--output-format',
+      'stream-json',
+      '--input-format',
+      'stream-json',
+      '--verbose'
     ];
 
     // YOLO mode - auto-approve all permissions
     if (this.spawnOptions.yoloMode) {
+      console.warn('[Security] YOLO mode enabled for Claude CLI instance', {
+        sessionId: this.sessionId,
+        model: this.spawnOptions.model
+      });
       args.push('--dangerously-skip-permissions');
     }
 
@@ -369,12 +388,21 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       args.push('--max-tokens', this.spawnOptions.maxTokens.toString());
     }
 
-    if (this.spawnOptions.allowedTools && this.spawnOptions.allowedTools.length > 0) {
+    if (
+      this.spawnOptions.allowedTools &&
+      this.spawnOptions.allowedTools.length > 0
+    ) {
       args.push('--allowed-tools', this.spawnOptions.allowedTools.join(','));
     }
 
-    if (this.spawnOptions.disallowedTools && this.spawnOptions.disallowedTools.length > 0) {
-      args.push('--disallowed-tools', this.spawnOptions.disallowedTools.join(','));
+    if (
+      this.spawnOptions.disallowedTools &&
+      this.spawnOptions.disallowedTools.length > 0
+    ) {
+      args.push(
+        '--disallowed-tools',
+        this.spawnOptions.disallowedTools.join(',')
+      );
     }
 
     if (this.spawnOptions.systemPrompt) {
@@ -439,8 +467,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     }
 
     // Separate images (inline) from other files (need file path)
-    const imageAttachments = attachments?.filter(a => a.type?.startsWith('image/')) || [];
-    const otherAttachments = attachments?.filter(a => !a.type?.startsWith('image/')) || [];
+    const imageAttachments =
+      attachments?.filter((a) => a.type?.startsWith('image/')) || [];
+    const otherAttachments =
+      attachments?.filter((a) => !a.type?.startsWith('image/')) || [];
 
     let finalMessage = message;
 
@@ -454,7 +484,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       finalMessage = buildMessageWithFiles(message, processed);
     }
 
-    await this.formatter.sendMessage(finalMessage, imageAttachments.length > 0 ? imageAttachments : undefined);
+    await this.formatter.sendMessage(
+      finalMessage,
+      imageAttachments.length > 0 ? imageAttachments : undefined
+    );
     this.emit('status', 'busy' as InstanceStatus);
   }
 
@@ -476,7 +509,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         id: generateId(),
         timestamp: Date.now(),
         type: 'error',
-        content: errorText,
+        content: errorText
       };
       this.emit('output', errorMessage);
     }
@@ -514,16 +547,17 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             id: generateId(),
             timestamp: message.timestamp || Date.now(),
             type: 'assistant',
-            content: assistantContent,
+            content: assistantContent
           });
         }
 
         // Extract context usage from assistant message (for real-time updates)
         if (assistantMsg.message?.usage) {
           const usage = assistantMsg.message.usage;
-          const totalUsedTokens = (usage.input_tokens || 0) +
-                                 (usage.output_tokens || 0) +
-                                 (usage.cache_read_input_tokens || 0);
+          const totalUsedTokens =
+            (usage.input_tokens || 0) +
+            (usage.output_tokens || 0) +
+            (usage.cache_read_input_tokens || 0);
 
           // Default context window - will be updated by result message
           const contextWindow = 200000;
@@ -532,7 +566,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           this.emit('context', {
             used: totalUsedTokens,
             total: contextWindow,
-            percentage: Math.min(percentage, 100),
+            percentage: Math.min(percentage, 100)
           });
         }
 
@@ -541,7 +575,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
       case 'user':
         const userMsg = message as any;
-        if (userMsg.message?.content && Array.isArray(userMsg.message.content)) {
+        if (
+          userMsg.message?.content &&
+          Array.isArray(userMsg.message.content)
+        ) {
           break;
         }
         if (typeof message.content === 'string' && message.content.trim()) {
@@ -549,29 +586,33 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             id: generateId(),
             timestamp: message.timestamp || Date.now(),
             type: 'user',
-            content: message.content,
+            content: message.content
           });
         }
         break;
 
       case 'system':
         if (message.subtype === 'context_usage' && message.usage) {
-          const modelId = this.spawnOptions.model || 'claude-sonnet-4-20250514';
-          const pricing = MODEL_PRICING[modelId] || { input: 3.0, output: 15.0 };
+          const modelId = this.spawnOptions.model || CLAUDE_MODELS.SONNET;
+          const pricing = MODEL_PRICING[modelId] || {
+            input: 3.0,
+            output: 15.0
+          };
 
           const totalTokens = message.usage.total_tokens;
           const estimatedInputTokens = Math.floor(totalTokens * 0.7);
           const estimatedOutputTokens = totalTokens - estimatedInputTokens;
 
           const inputCost = (estimatedInputTokens / 1_000_000) * pricing.input;
-          const outputCost = (estimatedOutputTokens / 1_000_000) * pricing.output;
+          const outputCost =
+            (estimatedOutputTokens / 1_000_000) * pricing.output;
           const costEstimate = inputCost + outputCost;
 
           this.emit('context', {
             used: message.usage.total_tokens,
             total: message.usage.max_tokens,
             percentage: message.usage.percentage,
-            costEstimate,
+            costEstimate
           });
         }
         if (message.session_id) {
@@ -582,7 +623,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             id: generateId(),
             timestamp: message.timestamp || Date.now(),
             type: 'system',
-            content: message.content,
+            content: message.content
           });
         }
         break;
@@ -593,7 +634,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           timestamp: message.timestamp || Date.now(),
           type: 'tool_use',
           content: `Using tool: ${message.tool.name}`,
-          metadata: message.tool,
+          metadata: message.tool
         });
         break;
 
@@ -605,8 +646,8 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           content: message.content,
           metadata: {
             tool_use_id: message.tool_use_id,
-            is_error: message.is_error,
-          },
+            is_error: message.is_error
+          }
         });
         break;
 
@@ -626,14 +667,16 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
               const modelData = resultMsg.modelUsage[modelKeys[0]];
               contextWindow = modelData.contextWindow || 200000;
               // Total used = input + output + cache reads (cache reads count toward context)
-              totalUsedTokens = (modelData.inputTokens || 0) +
-                               (modelData.outputTokens || 0) +
-                               (modelData.cacheReadInputTokens || 0);
+              totalUsedTokens =
+                (modelData.inputTokens || 0) +
+                (modelData.outputTokens || 0) +
+                (modelData.cacheReadInputTokens || 0);
             }
           } else if (resultMsg.usage) {
-            totalUsedTokens = (resultMsg.usage.input_tokens || 0) +
-                             (resultMsg.usage.output_tokens || 0) +
-                             (resultMsg.usage.cache_read_input_tokens || 0);
+            totalUsedTokens =
+              (resultMsg.usage.input_tokens || 0) +
+              (resultMsg.usage.output_tokens || 0) +
+              (resultMsg.usage.cache_read_input_tokens || 0);
           }
 
           const percentage = (totalUsedTokens / contextWindow) * 100;
@@ -643,7 +686,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             used: totalUsedTokens,
             total: contextWindow,
             percentage: Math.min(percentage, 100),
-            costEstimate,
+            costEstimate
           });
         }
 
@@ -656,7 +699,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           timestamp: message.timestamp || Date.now(),
           type: 'error',
           content: message.error.message,
-          metadata: { code: message.error.code },
+          metadata: { code: message.error.code }
         });
         this.emit('status', 'error' as InstanceStatus);
         break;
@@ -668,7 +711,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             id: generateId(),
             timestamp: message.timestamp || Date.now(),
             type: 'system',
-            content: message.prompt,
+            content: message.prompt
           });
         }
         break;

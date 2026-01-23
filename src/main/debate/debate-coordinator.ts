@@ -10,6 +10,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 import type {
   DebateConfig,
   DebateSessionRound,
@@ -36,7 +37,7 @@ export class DebateCoordinator extends EventEmitter {
     agents: 3,
     maxRounds: 4,
     convergenceThreshold: 0.8,
-    synthesisModel: 'claude-sonnet-4-20250514',
+    synthesisModel: CLAUDE_MODELS.SONNET,
     temperatureRange: [0.3, 0.9],
     timeout: 300000, // 5 minutes
   };

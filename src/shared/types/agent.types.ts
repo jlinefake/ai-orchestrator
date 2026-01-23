@@ -2,6 +2,8 @@
  * Agent Types - Defines agent profiles with different capabilities
  */
 
+import { CLAUDE_MODELS } from './provider.types';
+
 /**
  * Available agent mode types
  */
@@ -155,7 +157,7 @@ Rules:
       web: 'deny',
       task: 'deny',
     },
-    modelOverride: 'claude-3-5-haiku-20241022',
+    modelOverride: CLAUDE_MODELS.HAIKU,
     builtin: true,
   },
 ];

@@ -53,7 +53,7 @@ interface DisplayItem {
             @if (item.response) {
               <div class="message message-assistant">
                 <div class="message-header">
-                  <span class="message-type">Claude</span>
+                  <span class="message-type">{{ getProviderDisplayName(provider()) }}</span>
                   <span class="message-time">
                     {{ item.response.timestamp | date:'HH:mm:ss' }}
                   </span>
@@ -120,8 +120,21 @@ interface DisplayItem {
       } @empty {
         <div class="empty-stream">
           <p>No messages yet</p>
-          <p class="hint">Start a conversation with Claude</p>
+          <p class="hint">Start a conversation</p>
         </div>
+      }
+
+      <!-- Scroll to bottom button -->
+      @if (showScrollToBottom()) {
+        <button
+          class="scroll-to-bottom-btn"
+          (click)="scrollToBottom()"
+          title="Scroll to bottom"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
       }
     </div>
   `,
@@ -142,6 +155,7 @@ interface DisplayItem {
       display: flex;
       flex-direction: column;
       gap: var(--spacing-md);
+      position: relative;
     }
 
     .message {
@@ -314,14 +328,50 @@ interface DisplayItem {
     .thought-group .message-assistant {
       margin-right: 0;
     }
+
+    .scroll-to-bottom-btn {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      transition: all var(--transition-fast);
+      z-index: 10;
+
+      &:hover {
+        background: var(--primary-color);
+        border-color: var(--primary-color);
+        color: var(--bg-primary);
+        transform: scale(1.1);
+        box-shadow: 0 6px 16px rgba(var(--primary-rgb), 0.3);
+      }
+
+      svg {
+        flex-shrink: 0;
+      }
+    }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class OutputStreamComponent {
   messages = input.required<OutputMessage[]>();
   instanceId = input.required<string>();
+  provider = input<string>('claude');
 
   container = viewChild<ElementRef>('container');
+
+  // Scroll state
+  protected showScrollToBottom = signal(false);
+  private userScrolledUp = false;
 
   private markdownService = inject(MarkdownService);
 
@@ -352,21 +402,24 @@ export class OutputStreamComponent {
   });
 
   constructor() {
-    // Auto-scroll to bottom when new messages arrive
+    // Auto-scroll to bottom when new messages arrive (only if user hasn't scrolled up)
     effect(() => {
       const msgs = this.messages();
       const el = this.container()?.nativeElement;
       if (el && msgs.length > 0) {
         // Use setTimeout to ensure DOM is updated
         setTimeout(() => {
-          el.scrollTop = el.scrollHeight;
+          if (!this.userScrolledUp) {
+            el.scrollTop = el.scrollHeight;
+          }
         }, 0);
       }
     });
 
-    // Setup copy handlers after render
+    // Setup scroll listener and copy handlers after render
     afterNextRender(() => {
       this.setupCopyHandlers();
+      this.setupScrollListener();
     });
 
     // Re-setup copy handlers when messages change
@@ -374,6 +427,39 @@ export class OutputStreamComponent {
       this.messages(); // Track message changes
       setTimeout(() => this.setupCopyHandlers(), 100);
     });
+  }
+
+  /**
+   * Setup scroll event listener to detect user scrolling
+   */
+  private setupScrollListener(): void {
+    const el = this.container()?.nativeElement;
+    if (!el) return;
+
+    el.addEventListener('scroll', () => {
+      const scrollPosition = el.scrollTop + el.clientHeight;
+      const scrollHeight = el.scrollHeight;
+      const threshold = 100; // Consider "at bottom" if within 100px
+
+      const isAtBottom = scrollPosition >= scrollHeight - threshold;
+      this.userScrolledUp = !isAtBottom;
+      this.showScrollToBottom.set(!isAtBottom);
+    });
+  }
+
+  /**
+   * Scroll to the bottom of the container
+   */
+  scrollToBottom(): void {
+    const el = this.container()?.nativeElement;
+    if (el) {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: 'smooth'
+      });
+      this.userScrolledUp = false;
+      this.showScrollToBottom.set(false);
+    }
   }
 
   /**
@@ -401,8 +487,10 @@ export class OutputStreamComponent {
   }
 
   formatType(type: string): string {
+    if (type === 'assistant') {
+      return this.getProviderDisplayName(this.provider());
+    }
     const labels: Record<string, string> = {
-      assistant: 'Claude',
       user: 'You',
       system: 'System',
       tool_use: 'Tool',
@@ -410,6 +498,16 @@ export class OutputStreamComponent {
       error: 'Error',
     };
     return labels[type] || type;
+  }
+
+  protected getProviderDisplayName(provider: string): string {
+    switch (provider) {
+      case 'claude': return 'Claude';
+      case 'codex': return 'Codex';
+      case 'gemini': return 'Gemini';
+      case 'ollama': return 'Ollama';
+      default: return 'AI';
+    }
   }
 
   hasContent(message: OutputMessage): boolean {

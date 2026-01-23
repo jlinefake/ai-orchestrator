@@ -73,6 +73,14 @@ import { TodoListComponent } from './todo-list.component';
                 }
               </div>
               <div class="instance-meta">
+                <span
+                  class="provider-badge"
+                  [style.background-color]="getProviderColor(inst.provider)"
+                  [title]="'Provider: ' + getProviderDisplayName(inst.provider)"
+                >
+                  {{ getProviderDisplayName(inst.provider) }}
+                </span>
+                <span class="separator">•</span>
                 <button
                   class="mode-badge"
                   [class.plan]="inst.agentId === 'plan'"
@@ -81,12 +89,15 @@ import { TodoListComponent } from './todo-list.component';
                   [title]="'Click to change mode (will restart instance)'"
                   (click)="onCycleAgentMode()"
                 >
-                  {{ getAgentModeIcon(inst.agentId) }} {{ getAgentModeName(inst.agentId) }}
+                  {{ getAgentModeIcon(inst.agentId) }}
+                  {{ getAgentModeName(inst.agentId) }}
                 </button>
                 <span class="separator">•</span>
                 <button
                   class="working-dir-btn mono truncate"
-                  [title]="inst.workingDirectory || 'Click to select a working folder'"
+                  [title]="
+                    inst.workingDirectory || 'Click to select a working folder'
+                  "
                   (click)="onSelectFolder()"
                 >
                   📁 {{ inst.workingDirectory || 'No folder selected' }}
@@ -96,7 +107,11 @@ import { TodoListComponent } from './todo-list.component';
                   class="yolo-badge"
                   [class.active]="inst.yoloMode"
                   [disabled]="isTogglingYolo()"
-                  [title]="inst.yoloMode ? 'YOLO Mode: Auto-approve all tool calls without prompting. Click to disable (will restart)' : 'YOLO Mode: Requires manual approval for tool calls. Click to enable auto-approve (will restart)'"
+                  [title]="
+                    inst.yoloMode
+                      ? 'YOLO Mode: Auto-approve all tool calls without prompting. Click to disable (will restart)'
+                      : 'YOLO Mode: Requires manual approval for tool calls. Click to enable auto-approve (will restart)'
+                  "
                   (click)="onToggleYolo()"
                 >
                   ⚡ YOLO {{ inst.yoloMode ? 'ON' : 'OFF' }}
@@ -152,6 +167,7 @@ import { TodoListComponent } from './todo-list.component';
             <app-output-stream
               [messages]="inst.outputBuffer"
               [instanceId]="inst.id"
+              [provider]="inst.provider"
             />
             <!-- Activity status (shown when processing) - appears at bottom of conversation -->
             @if (inst.status === 'busy' || inst.status === 'initializing') {
@@ -200,13 +216,17 @@ import { TodoListComponent } from './todo-list.component';
           <div class="welcome-content">
             <div class="welcome-icon">🤖</div>
             <h1 class="welcome-title">Claude Orchestrator</h1>
-            <p class="welcome-hint">Start a conversation to create a new instance</p>
+            <p class="welcome-hint">
+              Start a conversation to create a new instance
+            </p>
 
             <!-- Folder selector -->
             <button
               class="welcome-folder-btn"
               (click)="onSelectWelcomeFolder()"
-              [title]="welcomeWorkingDirectory() || 'Click to select a working folder'"
+              [title]="
+                welcomeWorkingDirectory() || 'Click to select a working folder'
+              "
             >
               📁 {{ welcomeWorkingDirectory() || 'Select working folder...' }}
             </button>
@@ -371,6 +391,20 @@ import { TodoListComponent } from './todo-list.component';
         }
       }
 
+      /* Provider Badge - Shows which CLI is being used */
+      .provider-badge {
+        padding: 4px 10px;
+        border: none;
+        border-radius: 12px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+
       /* Mode Badge - Pill style with glow */
       .mode-badge {
         padding: 4px 10px;
@@ -401,7 +435,11 @@ import { TodoListComponent } from './todo-list.component';
         }
 
         &.review {
-          background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+          background: linear-gradient(
+            135deg,
+            var(--primary-color) 0%,
+            var(--primary-hover) 100%
+          );
           box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
           &:hover {
             box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
@@ -510,7 +548,11 @@ import { TodoListComponent } from './todo-list.component';
       }
 
       .btn-primary {
-        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+        background: linear-gradient(
+          135deg,
+          var(--primary-color) 0%,
+          var(--primary-hover) 100%
+        );
         border: none;
         color: var(--bg-primary);
         box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
@@ -569,7 +611,11 @@ import { TodoListComponent } from './todo-list.component';
         content: '';
         position: absolute;
         inset: 0;
-        background: radial-gradient(ellipse 60% 40% at 50% 40%, rgba(var(--primary-rgb), 0.1), transparent);
+        background: radial-gradient(
+          ellipse 60% 40% at 50% 40%,
+          rgba(var(--primary-rgb), 0.1),
+          transparent
+        );
         pointer-events: none;
       }
 
@@ -619,8 +665,16 @@ import { TodoListComponent } from './todo-list.component';
         position: absolute;
         inset: 0;
         background:
-          radial-gradient(ellipse 80% 50% at 50% -10%, rgba(var(--primary-rgb), 0.12), transparent),
-          radial-gradient(circle at 80% 80%, rgba(var(--secondary-rgb), 0.08), transparent);
+          radial-gradient(
+            ellipse 80% 50% at 50% -10%,
+            rgba(var(--primary-rgb), 0.12),
+            transparent
+          ),
+          radial-gradient(
+            circle at 80% 80%,
+            rgba(var(--secondary-rgb), 0.08),
+            transparent
+          );
         pointer-events: none;
       }
 
@@ -645,7 +699,11 @@ import { TodoListComponent } from './todo-list.component';
         letter-spacing: -0.03em;
         color: var(--text-primary);
         margin: 0 0 var(--spacing-sm) 0;
-        background: linear-gradient(135deg, var(--text-primary) 0%, var(--primary-color) 100%);
+        background: linear-gradient(
+          135deg,
+          var(--text-primary) 0%,
+          var(--primary-color) 100%
+        );
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
@@ -766,17 +824,48 @@ export class InstanceDetailComponent {
     const inst = this.instance();
     if (!inst) return '';
 
+    const providerName = this.getProviderDisplayName(inst.provider);
     switch (inst.status) {
       case 'waiting_for_input':
-        return 'Claude is waiting for your response...';
+        return `${providerName} is waiting for your response...`;
       case 'busy':
         return 'Processing...';
       case 'terminated':
         return 'Instance terminated';
       default:
-        return 'Send a message to Claude...';
+        return `Send a message to ${providerName}...`;
     }
   });
+
+  getProviderDisplayName(provider: string): string {
+    switch (provider) {
+      case 'claude':
+        return 'Claude';
+      case 'codex':
+        return 'Codex';
+      case 'gemini':
+        return 'Gemini';
+      case 'ollama':
+        return 'Ollama';
+      default:
+        return 'AI';
+    }
+  }
+
+  getProviderColor(provider: string): string {
+    switch (provider) {
+      case 'claude':
+        return '#D97706';
+      case 'codex':
+        return '#10A37F';
+      case 'gemini':
+        return '#4285F4';
+      case 'ollama':
+        return '#888888';
+      default:
+        return '#888888';
+    }
+  }
 
   onSendMessage(message: string): void {
     const inst = this.instance();
@@ -822,7 +911,9 @@ export class InstanceDetailComponent {
 
       // Create a File object from the blob
       const fileName = filePath.split('/').pop() || 'file';
-      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
+      const file = new File([blob], fileName, {
+        type: blob.type || 'application/octet-stream'
+      });
 
       this.draftService.addPendingFiles(inst.id, [file]);
     } catch (error) {
@@ -881,6 +972,13 @@ export class InstanceDetailComponent {
     const inst = this.instance();
     if (!inst) return;
 
+    if (!inst.yoloMode) {
+      const confirmed = confirm(
+        'Enable YOLO mode? This will auto-approve all tool calls for this instance.'
+      );
+      if (!confirmed) return;
+    }
+
     // Prevent rapid clicks from spawning multiple instances
     if (this.isTogglingYolo()) return;
 
@@ -914,17 +1012,23 @@ export class InstanceDetailComponent {
 
   getAgentModeIcon(agentId?: string): string {
     switch (agentId) {
-      case 'plan': return '🗺️';
-      case 'review': return '👁️';
-      default: return '🔨';
+      case 'plan':
+        return '🗺️';
+      case 'review':
+        return '👁️';
+      default:
+        return '🔨';
     }
   }
 
   getAgentModeName(agentId?: string): string {
     switch (agentId) {
-      case 'plan': return 'Plan';
-      case 'review': return 'Review';
-      default: return 'Build';
+      case 'plan':
+        return 'Plan';
+      case 'review':
+        return 'Review';
+      default:
+        return 'Build';
     }
   }
 
@@ -952,10 +1056,16 @@ export class InstanceDetailComponent {
   onWelcomeSendMessage(message: string): void {
     const workingDir = this.welcomeWorkingDirectory() || '.';
     this.isCreatingInstance.set(true);
-    this.store.createInstanceWithMessage(message, this.welcomePendingFiles(), workingDir);
+    this.store.createInstanceWithMessage(
+      message,
+      this.welcomePendingFiles(),
+      workingDir
+    );
     this.welcomePendingFiles.set([]);
     // Reset to default for next time
-    this.welcomeWorkingDirectory.set(this.settingsStore.defaultWorkingDirectory() || null);
+    this.welcomeWorkingDirectory.set(
+      this.settingsStore.defaultWorkingDirectory() || null
+    );
   }
 
   async onSelectWelcomeFolder(): Promise<void> {
@@ -1006,7 +1116,9 @@ export class InstanceDetailComponent {
         const response = await fetch(`file://${filePath}`);
         const blob = await response.blob();
         const fileName = filePath.split('/').pop() || 'file';
-        const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
+        const file = new File([blob], fileName, {
+          type: blob.type || 'application/octet-stream'
+        });
         files.push(file);
       } catch (error) {
         console.warn(`Failed to load file: ${filePath}`, error);

@@ -5,6 +5,14 @@
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { ClaudeCliAdapter } from '../cli/claude-cli-adapter';
+import {
+  createCliAdapter,
+  resolveCliType,
+  getCliDisplayName,
+  type UnifiedSpawnOptions,
+  type CliAdapter
+} from '../cli/adapters/adapter-factory';
+import type { CliType } from '../cli/cli-detection';
 import { OrchestrationHandler } from '../orchestration/orchestration-handler';
 import { generateChildPrompt } from '../orchestration/orchestration-protocol';
 import {
@@ -99,7 +107,7 @@ type FastPathResult = {
 
 export class InstanceManager extends EventEmitter {
   private instances: Map<string, Instance> = new Map();
-  private adapters: Map<string, ClaudeCliAdapter> = new Map();
+  private adapters: Map<string, CliAdapter> = new Map();
   private pendingUpdates: Map<string, InstanceStateUpdatePayload> = new Map();
   private batchTimer: NodeJS.Timeout | null = null;
   private idleCheckTimer: NodeJS.Timeout | null = null;
@@ -350,15 +358,22 @@ export class InstanceManager extends EventEmitter {
             );
           }
 
+          // Resolve provider: use command.provider, or inherit from parent, or use settings
+          // Map 'codex' to 'openai' for settings compatibility
+          const commandProvider =
+            command.provider === 'codex' ? 'openai' : command.provider;
+          const resolvedProvider = commandProvider || parent.provider || 'auto';
+
           const child = await this.createInstance({
             workingDirectory:
               command.workingDirectory || parent.workingDirectory,
             displayName: command.name || `Child of ${parent.displayName}`,
             parentId: parentId,
             initialPrompt: childPrompt,
-            yoloMode: parent.yoloMode,
+            yoloMode: command.yoloMode === true,
             agentId: childAgentId,
-            modelOverride: selectedModel
+            modelOverride: selectedModel,
+            provider: resolvedProvider
           });
 
           // Mark this child as already having received its first message (the child prompt)
@@ -618,7 +633,8 @@ export class InstanceManager extends EventEmitter {
       processId: null,
       sessionId: config.sessionId || generateId(),
       workingDirectory: config.workingDirectory,
-      yoloMode: config.yoloMode ?? true, // Default to YOLO mode
+      yoloMode: config.yoloMode ?? false, // Default to YOLO mode
+      provider: config.provider || 'auto', // Will be resolved below
 
       outputBuffer: config.initialOutputBuffer || [],
       outputBufferMaxSize: LIMITS.OUTPUT_BUFFER_MAX_SIZE,
@@ -631,6 +647,14 @@ export class InstanceManager extends EventEmitter {
       errorCount: 0,
       restartCount: 0
     };
+
+    if (instance.yoloMode) {
+      console.warn('[Security] YOLO mode enabled for instance', {
+        instanceId: instance.id,
+        parentId: instance.parentId,
+        provider: instance.provider
+      });
+    }
 
     // Store instance
     this.instances.set(instance.id, instance);
@@ -645,17 +669,20 @@ export class InstanceManager extends EventEmitter {
 
     // Initialize RLM store and session for this instance
     try {
-      const rlmStore = this.rlm.createStore(instance.id);
+      const rlmStore = this.rlm.createStore(instance.sessionId);
       this.instanceRlmStores.set(instance.id, rlmStore.id);
       console.log(
-        `[RLM] Created store ${rlmStore.id} for instance ${instance.id}`
+        `[RLM] Created store ${rlmStore.id} for session ${instance.sessionId}`
       );
 
       // Start an RLM session for this instance
-      const rlmSession = await this.rlm.startSession(rlmStore.id, instance.id);
+      const rlmSession = await this.rlm.startSession(
+        rlmStore.id,
+        instance.sessionId
+      );
       this.instanceRlmSessions.set(instance.id, rlmSession.id);
       console.log(
-        `[RLM] Started session ${rlmSession.id} for instance ${instance.id}`
+        `[RLM] Started session ${rlmSession.id} for session ${instance.sessionId}`
       );
     } catch (error) {
       console.error('[RLM] Failed to initialize RLM for instance:', error);
@@ -665,17 +692,32 @@ export class InstanceManager extends EventEmitter {
     // Get disallowed tools based on agent permissions
     const disallowedTools = getDisallowedTools(resolvedAgent.permissions);
 
+    // Resolve CLI provider type
+    const settings = this.settings.getAll();
+    console.log(
+      `[InstanceManager] Requested provider: ${config.provider}, default: ${settings.defaultCli}`
+    );
+    const resolvedCliType = await resolveCliType(
+      config.provider,
+      settings.defaultCli
+    );
+    instance.provider = resolvedCliType as any; // Update with resolved type
+    console.log(
+      `[InstanceManager] Resolved CLI provider: ${resolvedCliType} (${getCliDisplayName(resolvedCliType)})`
+    );
+
     // Create CLI adapter with agent's system prompt and tool restrictions
     const modelOverride = config.modelOverride || resolvedAgent.modelOverride;
-    const adapter = new ClaudeCliAdapter({
-      workingDirectory: config.workingDirectory,
+    const spawnOptions: UnifiedSpawnOptions = {
       sessionId: instance.sessionId,
-      resume: config.resume, // Resume previous session if restoring from history
-      yoloMode: instance.yoloMode,
+      workingDirectory: config.workingDirectory,
       systemPrompt: resolvedAgent.systemPrompt,
-      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      model: modelOverride
-    });
+      model: modelOverride,
+      yoloMode: instance.yoloMode,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined
+    };
+
+    const adapter = createCliAdapter(resolvedCliType, spawnOptions);
 
     // Set up adapter events
     this.setupAdapterEvents(instance.id, adapter);
@@ -989,12 +1031,21 @@ export class InstanceManager extends EventEmitter {
     // Reset first message tracking so orchestration prompt gets injected again
     this.hasReceivedFirstMessage.delete(instanceId);
 
-    // Create new adapter with new session ID
-    const adapter = new ClaudeCliAdapter({
-      workingDirectory: instance.workingDirectory,
+    // Create new adapter with new session ID, using the same provider as before
+    const cliType =
+      instance.provider === 'auto' || instance.provider === 'openai'
+        ? instance.provider === 'openai'
+          ? 'codex'
+          : 'claude'
+        : (instance.provider as CliType);
+
+    const spawnOptions: UnifiedSpawnOptions = {
       sessionId: newSessionId,
+      workingDirectory: instance.workingDirectory,
       yoloMode: instance.yoloMode
-    });
+    };
+
+    const adapter = createCliAdapter(cliType, spawnOptions);
 
     this.setupAdapterEvents(instanceId, adapter);
     this.adapters.set(instanceId, adapter);
@@ -1115,17 +1166,36 @@ export class InstanceManager extends EventEmitter {
 
     // Create new adapter with --resume and --fork-session to continue conversation
     // with a new session ID (avoids "session already in use" error)
+    // Note: Resume/fork features are Claude CLI specific - other providers will just restart fresh
     const newSessionId = generateId();
     instance.sessionId = newSessionId; // Update instance with new session ID
 
-    const adapter = new ClaudeCliAdapter({
-      workingDirectory: instance.workingDirectory,
-      sessionId: sessionId, // Original session to resume from
-      yoloMode: instance.yoloMode,
-      resume: true,
-      forkSession: true // Creates new session ID while preserving history
-    });
+    const cliType =
+      instance.provider === 'auto' || instance.provider === 'openai'
+        ? instance.provider === 'openai'
+          ? 'codex'
+          : 'claude'
+        : (instance.provider as CliType);
 
+    // For Claude, we can use resume/fork. For others, just restart.
+    let adapter: CliAdapter;
+    if (cliType === 'claude') {
+      adapter = new ClaudeCliAdapter({
+        workingDirectory: instance.workingDirectory,
+        sessionId: sessionId, // Original session to resume from
+        yoloMode: instance.yoloMode,
+        resume: true,
+        forkSession: true // Creates new session ID while preserving history
+      });
+    } else {
+      // Other CLIs don't support resume, just create fresh adapter
+      const spawnOptions: UnifiedSpawnOptions = {
+        sessionId: newSessionId,
+        workingDirectory: instance.workingDirectory,
+        yoloMode: instance.yoloMode
+      };
+      adapter = createCliAdapter(cliType, spawnOptions);
+    }
     this.setupAdapterEvents(instanceId, adapter);
     this.adapters.set(instanceId, adapter);
 
@@ -1163,10 +1233,7 @@ export class InstanceManager extends EventEmitter {
   /**
    * Set up event handlers for a CLI adapter
    */
-  private setupAdapterEvents(
-    instanceId: string,
-    adapter: ClaudeCliAdapter
-  ): void {
+  private setupAdapterEvents(instanceId: string, adapter: CliAdapter): void {
     adapter.on('output', (message: OutputMessage) => {
       const instance = this.instances.get(instanceId);
       if (instance) {

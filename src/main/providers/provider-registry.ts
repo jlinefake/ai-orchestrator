@@ -2,10 +2,12 @@
  * Provider Registry - Manages available AI providers
  */
 
-import type {
-  ProviderType,
-  ProviderConfig,
-  ProviderStatus,
+import {
+  CLAUDE_MODELS,
+  OPENAI_MODELS,
+  type ProviderType,
+  type ProviderConfig,
+  type ProviderStatus,
 } from '../../shared/types/provider.types';
 import { BaseProvider, ProviderFactory } from './provider-interface';
 import { ClaudeCliProvider } from './claude-cli-provider';
@@ -21,13 +23,13 @@ const DEFAULT_PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
     type: 'claude-cli',
     name: 'Claude Code CLI',
     enabled: true,
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: CLAUDE_MODELS.SONNET,
   },
   'anthropic-api': {
     type: 'anthropic-api',
     name: 'Anthropic API',
     enabled: false,
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: CLAUDE_MODELS.SONNET,
   },
   'openai': {
     type: 'openai',
@@ -40,7 +42,7 @@ const DEFAULT_PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
     type: 'openai-compatible',
     name: 'OpenAI Compatible',
     enabled: false,
-    defaultModel: 'gpt-4o',
+    defaultModel: OPENAI_MODELS.GPT4O,
   },
   'ollama': {
     type: 'ollama',
@@ -66,7 +68,7 @@ const DEFAULT_PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
     type: 'azure',
     name: 'Azure OpenAI',
     enabled: false,
-    defaultModel: 'gpt-4o',
+    defaultModel: OPENAI_MODELS.GPT4O,
   },
 };
 

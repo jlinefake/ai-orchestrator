@@ -18,6 +18,7 @@ import {
   AlternativeStrategy,
   PatternType,
 } from '../../shared/types/self-improvement.types';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 import { OutcomeTracker } from './outcome-tracker';
 
 interface StrategyScore {
@@ -263,37 +264,37 @@ export class StrategyLearner extends EventEmitter {
     const defaults: Record<string, { agent: string; model: string; workflow?: string }> = {
       'feature-development': {
         agent: 'default',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
         workflow: 'feature-development',
       },
       'bug-fix': {
         agent: 'default',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
         workflow: 'bug-investigation',
       },
       review: {
         agent: 'review-specialist',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
         workflow: 'code-review',
       },
       'security-review': {
         agent: 'security-specialist',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
       },
       refactor: {
         agent: 'default',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
         workflow: 'refactoring',
       },
       testing: {
         agent: 'test-specialist',
-        model: 'claude-sonnet-4-20250514',
+        model: CLAUDE_MODELS.SONNET,
       },
     };
 
     const defaultConfig = defaults[taskType] || {
       agent: 'default',
-      model: 'claude-sonnet-4-20250514',
+      model: CLAUDE_MODELS.SONNET,
     };
 
     return {

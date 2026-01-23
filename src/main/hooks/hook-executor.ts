@@ -5,6 +5,8 @@
 
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Local types for hook execution
 export interface CommandHook {
@@ -12,6 +14,8 @@ export interface CommandHook {
   command: string;
   timeout?: number;
   captureOutput?: boolean;
+  /** Allow shell features like pipes/redirects (disabled by default) */
+  allowShell?: boolean;
 }
 
 export interface PromptHook {
@@ -63,7 +67,7 @@ export class HookExecutor extends EventEmitter {
   private defaultConfig: HookExecutorConfig = {
     defaultTimeout: 30000,
     shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/bash',
-    maxOutputSize: 1024 * 1024, // 1MB
+    maxOutputSize: 1024 * 1024 // 1MB
   };
 
   static getInstance(): HookExecutor {
@@ -84,21 +88,32 @@ export class HookExecutor extends EventEmitter {
 
   // ============ Hook Execution ============
 
-  async execute(hook: HookConfig, context: HookExecutionContext): Promise<HookExecutorResult> {
+  async execute(
+    hook: HookConfig,
+    context: HookExecutionContext
+  ): Promise<HookExecutorResult> {
     const startTime = Date.now();
 
     try {
       if (hook.handler.type === 'command') {
-        return await this.executeCommand(hook, hook.handler as CommandHook, context);
+        return await this.executeCommand(
+          hook,
+          hook.handler as CommandHook,
+          context
+        );
       } else if (hook.handler.type === 'prompt') {
-        return await this.executePrompt(hook, hook.handler as PromptHook, context);
+        return await this.executePrompt(
+          hook,
+          hook.handler as PromptHook,
+          context
+        );
       } else {
         return {
           hookId: hook.id,
           success: false,
           error: `Unknown handler type: ${(hook.handler as { type: string }).type}`,
           duration: Date.now() - startTime,
-          timestamp: startTime,
+          timestamp: startTime
         };
       }
     } catch (error) {
@@ -107,7 +122,7 @@ export class HookExecutor extends EventEmitter {
         success: false,
         error: (error as Error).message,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
   }
@@ -131,20 +146,143 @@ export class HookExecutor extends EventEmitter {
         success: true,
         output: `[DRY RUN] Would execute: ${command}`,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
-    return new Promise<HookExecutorResult>(resolve => {
+    if (!command.trim()) {
+      return {
+        hookId: hook.id,
+        success: false,
+        error: 'Empty command',
+        duration: Date.now() - startTime,
+        timestamp: startTime
+      };
+    }
+
+    const containsShellMetachars = /[|&;<>()`$\n\r]/.test(command);
+    if (containsShellMetachars && !handler.allowShell) {
+      return {
+        hookId: hook.id,
+        success: false,
+        error:
+          'Shell features are disabled for hooks. Set allowShell: true to enable.',
+        duration: Date.now() - startTime,
+        timestamp: startTime
+      };
+    }
+
+    if (!containsShellMetachars) {
+      const parsed = this.parseCommand(command);
+      if (!parsed) {
+        return {
+          hookId: hook.id,
+          success: false,
+          error: 'Failed to parse command',
+          duration: Date.now() - startTime,
+          timestamp: startTime
+        };
+      }
+
+      const cwd = context.workingDirectory || process.cwd();
+      const resolvedExecutable = this.resolveExecutable(parsed.command, cwd);
+      if (!resolvedExecutable) {
+        return {
+          hookId: hook.id,
+          success: false,
+          error: `Executable not found: ${parsed.command}`,
+          duration: Date.now() - startTime,
+          timestamp: startTime
+        };
+      }
+
+      return new Promise<HookExecutorResult>((resolve) => {
+        let output = '';
+        let error = '';
+        let timedOut = false;
+
+        const proc = spawn(resolvedExecutable, parsed.args, {
+          cwd,
+          env: { ...process.env, ...context.env }
+        });
+
+        const timeoutId = setTimeout(() => {
+          timedOut = true;
+          proc.kill('SIGTERM');
+        }, timeout);
+
+        proc.stdout.on('data', (data) => {
+          const chunk = data.toString();
+          if (output.length + chunk.length <= this.config.maxOutputSize) {
+            output += chunk;
+          }
+        });
+
+        proc.stderr.on('data', (data) => {
+          const chunk = data.toString();
+          if (error.length + chunk.length <= this.config.maxOutputSize) {
+            error += chunk;
+          }
+        });
+
+        proc.on('close', (code) => {
+          clearTimeout(timeoutId);
+
+          const duration = Date.now() - startTime;
+
+          if (timedOut) {
+            resolve({
+              hookId: hook.id,
+              success: false,
+              error: `Command timed out after ${timeout}ms`,
+              output,
+              duration,
+              timestamp: startTime
+            });
+          } else if (code === 0) {
+            resolve({
+              hookId: hook.id,
+              success: true,
+              output: handler.captureOutput ? output : undefined,
+              duration,
+              timestamp: startTime
+            });
+          } else {
+            resolve({
+              hookId: hook.id,
+              success: false,
+              error: error || `Command exited with code ${code}`,
+              output: handler.captureOutput ? output : undefined,
+              duration,
+              timestamp: startTime
+            });
+          }
+        });
+
+        proc.on('error', (err) => {
+          clearTimeout(timeoutId);
+          resolve({
+            hookId: hook.id,
+            success: false,
+            error: `Failed to execute command: ${err.message}`,
+            duration: Date.now() - startTime,
+            timestamp: startTime
+          });
+        });
+      });
+    }
+
+    return new Promise<HookExecutorResult>((resolve) => {
       let output = '';
       let error = '';
       let timedOut = false;
 
-      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
+      const shellArgs =
+        process.platform === 'win32' ? ['/c', command] : ['-c', command];
 
       const proc = spawn(this.config.shell, shellArgs, {
         cwd: context.workingDirectory || process.cwd(),
-        env: { ...process.env, ...context.env },
+        env: { ...process.env, ...context.env }
       });
 
       const timeoutId = setTimeout(() => {
@@ -152,21 +290,21 @@ export class HookExecutor extends EventEmitter {
         proc.kill('SIGTERM');
       }, timeout);
 
-      proc.stdout.on('data', data => {
+      proc.stdout.on('data', (data) => {
         const chunk = data.toString();
         if (output.length + chunk.length <= this.config.maxOutputSize) {
           output += chunk;
         }
       });
 
-      proc.stderr.on('data', data => {
+      proc.stderr.on('data', (data) => {
         const chunk = data.toString();
         if (error.length + chunk.length <= this.config.maxOutputSize) {
           error += chunk;
         }
       });
 
-      proc.on('close', code => {
+      proc.on('close', (code) => {
         clearTimeout(timeoutId);
 
         const duration = Date.now() - startTime;
@@ -178,7 +316,7 @@ export class HookExecutor extends EventEmitter {
             error: `Command timed out after ${timeout}ms`,
             output,
             duration,
-            timestamp: startTime,
+            timestamp: startTime
           });
         } else if (code === 0) {
           resolve({
@@ -186,7 +324,7 @@ export class HookExecutor extends EventEmitter {
             success: true,
             output: handler.captureOutput ? output : undefined,
             duration,
-            timestamp: startTime,
+            timestamp: startTime
           });
         } else {
           resolve({
@@ -195,31 +333,102 @@ export class HookExecutor extends EventEmitter {
             error: error || `Command exited with code ${code}`,
             output: handler.captureOutput ? output : undefined,
             duration,
-            timestamp: startTime,
+            timestamp: startTime
           });
         }
       });
 
-      proc.on('error', err => {
+      proc.on('error', (err) => {
         clearTimeout(timeoutId);
         resolve({
           hookId: hook.id,
           success: false,
           error: `Failed to execute command: ${err.message}`,
           duration: Date.now() - startTime,
-          timestamp: startTime,
+          timestamp: startTime
         });
       });
     });
   }
 
-  private interpolateCommand(command: string, context: HookExecutionContext): string {
+  private interpolateCommand(
+    command: string,
+    context: HookExecutionContext
+  ): string {
     return command
       .replace(/\$\{file\}/g, context.filePath || '')
       .replace(/\$\{tool\}/g, context.toolName || '')
       .replace(/\$\{command\}/g, context.command || '')
       .replace(/\$\{cwd\}/g, context.workingDirectory || process.cwd())
       .replace(/\$\{instanceId\}/g, context.instanceId || '');
+  }
+
+  private parseCommand(
+    command: string
+  ): { command: string; args: string[] } | null {
+    const args: string[] = [];
+    let current = '';
+    let inSingle = false;
+    let inDouble = false;
+    let escaped = false;
+
+    for (let i = 0; i < command.length; i++) {
+      const ch = command[i];
+      if (escaped) {
+        current += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\' && !inSingle) {
+        escaped = true;
+        continue;
+      }
+      if (ch === "'" && !inDouble) {
+        inSingle = !inSingle;
+        continue;
+      }
+      if (ch === '"' && !inSingle) {
+        inDouble = !inDouble;
+        continue;
+      }
+      if (!inSingle && !inDouble && /\s/.test(ch)) {
+        if (current) {
+          args.push(current);
+          current = '';
+        }
+        continue;
+      }
+      current += ch;
+    }
+
+    if (escaped || inSingle || inDouble) {
+      return null;
+    }
+
+    if (current) args.push(current);
+    if (args.length === 0) return null;
+    const [cmd, ...rest] = args;
+    return { command: cmd, args: rest };
+  }
+
+  private resolveExecutable(command: string, cwd: string): string | null {
+    const hasPath = command.includes('/') || command.includes('\\');
+    const candidate = hasPath ? path.resolve(cwd, command) : command;
+    if (hasPath && fs.existsSync(candidate)) {
+      return candidate;
+    }
+
+    const pathEntries = (process.env['PATH'] || '')
+      .split(path.delimiter)
+      .filter(Boolean);
+    for (const entry of pathEntries) {
+      const fullPath = path.join(entry, command);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+
+    return null;
   }
 
   // ============ Prompt Execution ============
@@ -240,7 +449,7 @@ export class HookExecutor extends EventEmitter {
         success: true,
         output: `[DRY RUN] Would evaluate prompt: ${prompt.slice(0, 100)}...`,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
@@ -254,7 +463,7 @@ export class HookExecutor extends EventEmitter {
         success: result.approved,
         output: result.reasoning,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     } catch (error) {
       return {
@@ -262,12 +471,15 @@ export class HookExecutor extends EventEmitter {
         success: false,
         error: (error as Error).message,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
   }
 
-  private interpolatePrompt(prompt: string, context: HookExecutionContext): string {
+  private interpolatePrompt(
+    prompt: string,
+    context: HookExecutionContext
+  ): string {
     return prompt
       .replace(/\$\{file\}/g, context.filePath || '')
       .replace(/\$\{tool\}/g, context.toolName || '')
@@ -284,7 +496,7 @@ export class HookExecutor extends EventEmitter {
     // For now, return a default approval
     return {
       approved: true,
-      reasoning: `Prompt evaluation: ${prompt.slice(0, 50)}... (LLM evaluation not implemented)`,
+      reasoning: `Prompt evaluation: ${prompt.slice(0, 50)}... (LLM evaluation not implemented)`
     };
   }
 }

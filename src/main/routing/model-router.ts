@@ -7,6 +7,7 @@
  */
 
 import { getModelDiscoveryService, type DiscoveredModel, type ModelPricing } from '../providers/model-discovery';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
 /**
  * Task complexity level
@@ -45,10 +46,10 @@ export interface ModelRoutingConfig {
  */
 export const DEFAULT_ROUTING_CONFIG: ModelRoutingConfig = {
   enabled: true,
-  defaultModel: 'claude-sonnet-4-20250514',
-  fastModel: 'claude-3-5-haiku-20241022',
-  balancedModel: 'claude-sonnet-4-20250514',
-  powerfulModel: 'claude-opus-4-20250514',
+  defaultModel: CLAUDE_MODELS.BALANCED,
+  fastModel: CLAUDE_MODELS.FAST,
+  balancedModel: CLAUDE_MODELS.BALANCED,
+  powerfulModel: CLAUDE_MODELS.POWERFUL,
   minTaskLength: 20,
   complexKeywords: [
     // Architecture & Design

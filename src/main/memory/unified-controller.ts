@@ -23,10 +23,13 @@ import type {
   UnifiedMemorySnapshot,
   UnifiedRetrievalResult,
   RetrievalOptions,
-  SessionOutcome,
+  SessionOutcome
 } from '../../shared/types/unified-memory.types';
 import type { MemoryEntry } from '../../shared/types/memory-r1.types';
-import { MemoryManagerAgent, getMemoryManager } from '../memory-r1/memory-manager';
+import {
+  MemoryManagerAgent,
+  getMemoryManager
+} from '../memory-r1/memory-manager';
 import { RLMContextManager } from '../rlm/context-manager';
 
 export class UnifiedMemoryController extends EventEmitter {
@@ -35,6 +38,10 @@ export class UnifiedMemoryController extends EventEmitter {
   private state!: UnifiedMemoryState; // Initialized in initializeState()
   private memoryR1: MemoryManagerAgent;
   private rlmContext: RLMContextManager;
+  private semanticCache: Map<
+    string,
+    { result: UnifiedRetrievalResult; expiresAt: number }
+  > = new Map();
 
   private defaultConfig: UnifiedMemoryConfig = {
     shortTermMaxTokens: 50000,
@@ -45,10 +52,15 @@ export class UnifiedMemoryController extends EventEmitter {
     contextBudgetSplit: {
       shortTerm: 0.6,
       longTerm: 0.3,
-      procedural: 0.1,
+      procedural: 0.1
     },
+    qualityCostProfile: 'balanced',
+    diversityThreshold: 0.35,
+    rlmMaxResults: 6,
+    semanticCacheMaxEntries: 120,
+    semanticCacheTtlMs: 10 * 60 * 1000,
     trainingStage: 1,
-    enableGRPO: false,
+    enableGRPO: false
   };
 
   static getInstance(): UnifiedMemoryController {
@@ -63,6 +75,7 @@ export class UnifiedMemoryController extends EventEmitter {
     this.config = { ...this.defaultConfig };
     this.memoryR1 = getMemoryManager();
     this.rlmContext = RLMContextManager.getInstance();
+    this.applyQualityCostProfile(this.config.qualityCostProfile);
     this.initializeState();
   }
 
@@ -71,38 +84,92 @@ export class UnifiedMemoryController extends EventEmitter {
       shortTerm: {
         buffer: [],
         summaries: [],
-        currentTokens: 0,
+        currentTokens: 0
       },
       longTerm: {
         entries: new Map(),
         index: {
           embeddings: new Map(),
           clusters: new Map(),
-          lastRebuilt: 0,
-        },
+          lastRebuilt: 0
+        }
       },
       episodic: {
         sessions: [],
-        patterns: [],
+        patterns: []
       },
       procedural: {
         workflows: [],
-        strategies: [],
-      },
+        strategies: []
+      }
     };
   }
 
   configure(config: Partial<UnifiedMemoryConfig>): void {
     this.config = { ...this.config, ...config };
+    this.applyQualityCostProfile(this.config.qualityCostProfile);
   }
 
   getConfig(): UnifiedMemoryConfig {
     return { ...this.config };
   }
 
+  private applyQualityCostProfile(
+    profile?: UnifiedMemoryConfig['qualityCostProfile']
+  ): void {
+    if (!profile) return;
+
+    switch (profile) {
+      case 'quality':
+        this.config.retrievalBlend = 0.5;
+        this.config.contextBudgetSplit = {
+          shortTerm: 0.7,
+          longTerm: 0.2,
+          procedural: 0.1
+        };
+        this.config.shortTermSummarizeAt = Math.floor(
+          this.config.shortTermMaxTokens * 0.9
+        );
+        this.config.diversityThreshold = 0.4;
+        this.config.rlmMaxResults = 10;
+        break;
+      case 'cost':
+        this.config.retrievalBlend = 0.2;
+        this.config.contextBudgetSplit = {
+          shortTerm: 0.5,
+          longTerm: 0.3,
+          procedural: 0.2
+        };
+        this.config.shortTermSummarizeAt = Math.floor(
+          this.config.shortTermMaxTokens * 0.6
+        );
+        this.config.diversityThreshold = 0.3;
+        this.config.rlmMaxResults = 4;
+        break;
+      case 'balanced':
+      default:
+        this.config.retrievalBlend = 0.3;
+        this.config.contextBudgetSplit = {
+          shortTerm: 0.6,
+          longTerm: 0.3,
+          procedural: 0.1
+        };
+        this.config.shortTermSummarizeAt = Math.floor(
+          this.config.shortTermMaxTokens * 0.8
+        );
+        this.config.diversityThreshold = 0.35;
+        this.config.rlmMaxResults = 6;
+        break;
+    }
+  }
+
   // ============ Unified Memory Operations ============
 
-  async processInput(input: string, sessionId: string, taskId: string): Promise<void> {
+  async processInput(
+    input: string,
+    sessionId: string,
+    taskId: string
+  ): Promise<void> {
     const taggedInput = this.ensureSessionTag(input, sessionId);
     const plainInput = this.stripMemoryTags(taggedInput);
 
@@ -111,7 +178,11 @@ export class UnifiedMemoryController extends EventEmitter {
 
     // 2. Decide if long-term storage needed (Memory-R1)
     if (this.config.trainingStage >= 2) {
-      const decision = await this.memoryR1.decideOperation(this.getShortTermContext(), taggedInput, taskId);
+      const decision = await this.memoryR1.decideOperation(
+        this.getShortTermContext(),
+        taggedInput,
+        taskId
+      );
 
       if (decision.operation !== 'NOOP') {
         await this.memoryR1.executeOperation(decision);
@@ -129,49 +200,102 @@ export class UnifiedMemoryController extends EventEmitter {
     this.emit('input:processed', { input, sessionId, taskId });
   }
 
-  async retrieve(query: string, taskId: string, options?: RetrievalOptions): Promise<UnifiedRetrievalResult> {
+  async retrieve(
+    query: string,
+    taskId: string,
+    options?: RetrievalOptions
+  ): Promise<UnifiedRetrievalResult> {
     const types = options?.types || ['short_term', 'long_term', 'procedural'];
     const maxTokens = options?.maxTokens || this.config.shortTermMaxTokens;
     const filterTags = this.getFilterTags(options);
+
+    const cacheKey = this.buildCacheKey(query, options);
+    const cached = this.getCachedResult(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const results: UnifiedRetrievalResult = {
       shortTerm: [],
       longTerm: [],
       procedural: [],
-      totalTokens: 0,
+      totalTokens: 0
     };
 
     // Calculate token budgets
     const budgets = {
-      shortTerm: Math.floor(maxTokens * this.config.contextBudgetSplit.shortTerm),
+      shortTerm: Math.floor(
+        maxTokens * this.config.contextBudgetSplit.shortTerm
+      ),
       longTerm: Math.floor(maxTokens * this.config.contextBudgetSplit.longTerm),
-      procedural: Math.floor(maxTokens * this.config.contextBudgetSplit.procedural),
+      procedural: Math.floor(
+        maxTokens * this.config.contextBudgetSplit.procedural
+      )
     };
 
     // Short-term fetching (recency-based + keyword match)
     if (types.includes('short_term')) {
-      results.shortTerm = this.fetchShortTerm(query, budgets.shortTerm, filterTags);
-      results.totalTokens += this.estimateTokens(results.shortTerm.join(' '));
+      results.shortTerm = this.fetchShortTerm(
+        query,
+        budgets.shortTerm,
+        filterTags
+      );
     }
 
     // Long-term fetching (semantic similarity via Memory-R1)
     if (types.includes('long_term') && this.config.trainingStage >= 2) {
       const entries = await this.memoryR1.retrieve(query, taskId);
-      const filteredEntries = this.filterEntriesByTags(entries, filterTags, options);
-      results.longTerm = filteredEntries.map(e => this.stripMemoryTags(e.content));
-      results.totalTokens += filteredEntries.reduce(
-        (sum, e) => sum + this.estimateTokens(this.stripMemoryTags(e.content)),
-        0
+      const filteredEntries = this.filterEntriesByTags(
+        entries,
+        filterTags,
+        options
+      );
+      results.longTerm = filteredEntries.map((e) =>
+        this.stripMemoryTags(e.content)
       );
     }
 
     // Procedural fetching (matching workflows/strategies)
     if (types.includes('procedural')) {
       results.procedural = this.fetchProcedural(query, budgets.procedural);
-      results.totalTokens += this.estimateTokens(results.procedural.join(' '));
     }
 
+    // RLM integration (tiered by section type/depth)
+    const rlmResults = this.fetchRlmContext(query, budgets, options);
+    if (types.includes('short_term') && rlmResults.shortTerm.length > 0) {
+      results.shortTerm = this.mergeResults(
+        results.shortTerm,
+        rlmResults.shortTerm,
+        budgets.shortTerm
+      );
+    }
+    if (types.includes('long_term') && rlmResults.longTerm.length > 0) {
+      results.longTerm = this.mergeResults(
+        results.longTerm,
+        rlmResults.longTerm,
+        budgets.longTerm
+      );
+    }
+    if (types.includes('procedural') && rlmResults.procedural.length > 0) {
+      results.procedural = this.mergeResults(
+        results.procedural,
+        rlmResults.procedural,
+        budgets.procedural
+      );
+    }
+
+    // Position-bias mitigation (place top chunk at both ends)
+    results.shortTerm = this.applyPositionBiasMitigation(results.shortTerm);
+    results.longTerm = this.applyPositionBiasMitigation(results.longTerm);
+    results.procedural = this.applyPositionBiasMitigation(results.procedural);
+
+    results.totalTokens =
+      this.estimateTokens(results.shortTerm.join(' ')) +
+      this.estimateTokens(results.longTerm.join(' ')) +
+      this.estimateTokens(results.procedural.join(' '));
+
     this.emit('fetch:completed', { query, taskId, results });
+    this.setCachedResult(cacheKey, results);
     return results;
   }
 
@@ -184,7 +308,9 @@ export class UnifiedMemoryController extends EventEmitter {
     this.state.shortTerm.currentTokens += tokens;
 
     // Evict oldest if over budget
-    while (this.state.shortTerm.currentTokens > this.config.shortTermMaxTokens) {
+    while (
+      this.state.shortTerm.currentTokens > this.config.shortTermMaxTokens
+    ) {
       const removed = this.state.shortTerm.buffer.shift();
       if (removed) {
         this.state.shortTerm.currentTokens -= this.estimateTokens(removed);
@@ -192,56 +318,69 @@ export class UnifiedMemoryController extends EventEmitter {
     }
   }
 
-  private fetchShortTerm(query: string, maxTokens: number, filterTags: string[]): string[] {
-    const queryTerms = query.toLowerCase().split(/\s+/);
-    const results: string[] = [];
-    let usedTokens = 0;
-    const buffer = this.filterShortTermBuffer(this.state.shortTerm.buffer, filterTags);
+  private fetchShortTerm(
+    query: string,
+    maxTokens: number,
+    filterTags: string[]
+  ): string[] {
+    const queryTerms = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 0);
+    const buffer = this.filterShortTermBuffer(
+      this.state.shortTerm.buffer,
+      filterTags
+    );
 
-    // Prioritize recent and keyword-matching entries
+    // Prioritize recent and keyword-matching entries with diversity
     const scored = buffer.map((content, index) => {
       const sanitized = this.stripMemoryTags(content);
       const lowerContent = sanitized.toLowerCase();
-      const matches = queryTerms.filter(term => lowerContent.includes(term)).length;
-      const recency = buffer.length > 0 ? index / buffer.length : 0; // 0-1
+      const matches = queryTerms.filter((term) =>
+        lowerContent.includes(term)
+      ).length;
+      const recency = buffer.length > 0 ? (index + 1) / buffer.length : 0; // 0-1
       return {
         content: sanitized,
-        score: matches * 0.6 + recency * 0.4,
+        score: matches * 0.65 + recency * 0.35,
+        tokens: this.estimateTokens(sanitized)
       };
     });
 
-    scored.sort((a, b) => b.score - a.score);
-
-    for (const { content } of scored) {
-      const tokens = this.estimateTokens(content);
-      if (usedTokens + tokens > maxTokens) break;
-      results.push(content);
-      usedTokens += tokens;
-    }
-
-    return results;
+    return this.selectDiverseCandidates(scored, maxTokens).map(
+      (candidate) => candidate.content
+    );
   }
 
   getShortTermContext(): string {
     return this.state.shortTerm.buffer
       .slice(-10)
-      .map(entry => this.stripMemoryTags(entry))
+      .map((entry) => this.stripMemoryTags(entry))
       .join('\n\n');
   }
 
   private async summarizeShortTerm(): Promise<void> {
     // Take oldest 50% of buffer
-    const toSummarize = this.state.shortTerm.buffer.splice(0, Math.floor(this.state.shortTerm.buffer.length / 2));
+    const toSummarize = this.state.shortTerm.buffer.splice(
+      0,
+      Math.floor(this.state.shortTerm.buffer.length / 2)
+    );
 
-    const content = toSummarize.map(entry => this.stripMemoryTags(entry)).join('\n\n');
+    const content = toSummarize
+      .map((entry) => this.stripMemoryTags(entry))
+      .join('\n\n');
 
     // Call summarization (placeholder - actual impl uses LLM)
     const summary = await this.callSummarizer(content);
 
     this.state.shortTerm.summaries.push(summary);
-    this.state.shortTerm.currentTokens = this.estimateTokens(this.state.shortTerm.buffer.join(' '));
+    this.state.shortTerm.currentTokens = this.estimateTokens(
+      this.state.shortTerm.buffer.join(' ')
+    );
 
-    this.emit('shortTerm:summarized', { originalTokens: this.estimateTokens(content) });
+    this.emit('shortTerm:summarized', {
+      originalTokens: this.estimateTokens(content)
+    });
   }
 
   // ============ Episodic Memory ============
@@ -258,7 +397,7 @@ export class UnifiedMemoryController extends EventEmitter {
       keyEvents: this.extractKeyEvents(),
       outcome,
       lessonsLearned: lessons,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     };
 
     this.state.episodic.sessions.push(sessionMemory);
@@ -277,9 +416,9 @@ export class UnifiedMemoryController extends EventEmitter {
   private extractKeyEvents(): string[] {
     // Extract significant events from short-term buffer
     return this.state.shortTerm.buffer
-      .filter(b => b.length > 100)
+      .filter((b) => b.length > 100)
       .slice(-5)
-      .map(entry => this.stripMemoryTags(entry));
+      .map((entry) => this.stripMemoryTags(entry));
   }
 
   private async extractPatterns(session: SessionMemory): Promise<void> {
@@ -289,22 +428,29 @@ export class UnifiedMemoryController extends EventEmitter {
       pattern: session.summary,
       successRate: 1.0,
       usageCount: 1,
-      contexts: [session.sessionId],
+      contexts: [session.sessionId]
     };
 
     // Check for similar patterns
-    const existing = this.state.episodic.patterns.find(p => this.patternSimilarity(p.pattern, pattern.pattern) > 0.8);
+    const existing = this.state.episodic.patterns.find(
+      (p) => this.patternSimilarity(p.pattern, pattern.pattern) > 0.8
+    );
 
     if (existing) {
       existing.usageCount++;
-      existing.successRate = (existing.successRate * (existing.usageCount - 1) + 1) / existing.usageCount;
+      existing.successRate =
+        (existing.successRate * (existing.usageCount - 1) + 1) /
+        existing.usageCount;
       existing.contexts.push(session.sessionId);
     } else {
       this.state.episodic.patterns.push(pattern);
     }
   }
 
-  private async detectPatterns(input: string, sessionId: string): Promise<void> {
+  private async detectPatterns(
+    input: string,
+    sessionId: string
+  ): Promise<void> {
     // Simple pattern detection - look for matching patterns
     for (const pattern of this.state.episodic.patterns) {
       if (this.patternSimilarity(input, pattern.pattern) > 0.6) {
@@ -319,18 +465,26 @@ export class UnifiedMemoryController extends EventEmitter {
   // ============ Procedural Memory ============
 
   private fetchProcedural(query: string, maxTokens: number): string[] {
-    const results: string[] = [];
-    let usedTokens = 0;
+    const queryLower = query.toLowerCase();
+    const candidates: Array<{
+      content: string;
+      score: number;
+      tokens: number;
+    }> = [];
 
     // Find matching workflows
     for (const workflow of this.state.procedural.workflows) {
       if (this.workflowMatches(workflow, query)) {
         const content = `Workflow: ${workflow.name}\nSteps:\n${workflow.steps.join('\n')}`;
-        const tokens = this.estimateTokens(content);
-        if (usedTokens + tokens <= maxTokens) {
-          results.push(content);
-          usedTokens += tokens;
-        }
+        const relevance = queryLower.includes(workflow.name.toLowerCase())
+          ? 1
+          : 0.6;
+        const score = relevance + workflow.successRate;
+        candidates.push({
+          content,
+          score,
+          tokens: this.estimateTokens(content)
+        });
       }
     }
 
@@ -338,24 +492,37 @@ export class UnifiedMemoryController extends EventEmitter {
     for (const strategy of this.state.procedural.strategies) {
       if (this.strategyMatches(strategy, query)) {
         const content = `Strategy: ${strategy.strategy}\nConditions: ${strategy.conditions.join(', ')}`;
-        const tokens = this.estimateTokens(content);
-        if (usedTokens + tokens <= maxTokens) {
-          results.push(content);
-          usedTokens += tokens;
-        }
+        const outcomes = strategy.outcomes || [];
+        const successRate =
+          outcomes.length === 0
+            ? 0.5
+            : outcomes.filter((outcome) => outcome.success).length /
+              outcomes.length;
+        const score = 0.6 + successRate;
+        candidates.push({
+          content,
+          score,
+          tokens: this.estimateTokens(content)
+        });
       }
     }
 
-    return results;
+    return this.selectDiverseCandidates(candidates, maxTokens).map(
+      (candidate) => candidate.content
+    );
   }
 
-  async recordWorkflow(name: string, steps: string[], applicableContexts: string[]): Promise<WorkflowMemory> {
+  async recordWorkflow(
+    name: string,
+    steps: string[],
+    applicableContexts: string[]
+  ): Promise<WorkflowMemory> {
     const workflow: WorkflowMemory = {
       id: `wf-${Date.now()}`,
       name,
       steps,
       successRate: 0,
-      applicableContexts,
+      applicableContexts
     };
 
     this.state.procedural.workflows.push(workflow);
@@ -372,7 +539,9 @@ export class UnifiedMemoryController extends EventEmitter {
   ): Promise<StrategyMemory> {
     // Find existing or create new
     let existing = this.state.procedural.strategies.find(
-      s => s.strategy === strategy && s.conditions.join(',') === conditions.join(',')
+      (s) =>
+        s.strategy === strategy &&
+        s.conditions.join(',') === conditions.join(',')
     );
 
     if (!existing) {
@@ -380,7 +549,7 @@ export class UnifiedMemoryController extends EventEmitter {
         id: `strat-${Date.now()}`,
         strategy,
         conditions,
-        outcomes: [],
+        outcomes: []
       };
       this.state.procedural.strategies.push(existing);
     }
@@ -389,7 +558,7 @@ export class UnifiedMemoryController extends EventEmitter {
       taskId,
       success,
       score,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     });
 
     this.emit('strategy:recorded', existing);
@@ -404,7 +573,7 @@ export class UnifiedMemoryController extends EventEmitter {
 
     // Update procedural memory
     for (const strategy of this.state.procedural.strategies) {
-      const outcome = strategy.outcomes.find(o => o.taskId === taskId);
+      const outcome = strategy.outcomes.find((o) => o.taskId === taskId);
       if (outcome) {
         outcome.success = success;
         outcome.score = score;
@@ -415,6 +584,192 @@ export class UnifiedMemoryController extends EventEmitter {
   }
 
   // ============ Utilities ============
+
+  private buildCacheKey(query: string, options?: RetrievalOptions): string {
+    const keyPayload = {
+      query,
+      types: options?.types || ['short_term', 'long_term', 'procedural'],
+      maxTokens: options?.maxTokens || this.config.shortTermMaxTokens,
+      sessionId: options?.sessionId || null,
+      instanceId: options?.instanceId || null
+    };
+
+    return JSON.stringify(keyPayload);
+  }
+
+  private getCachedResult(key: string): UnifiedRetrievalResult | null {
+    const cached = this.semanticCache.get(key);
+    if (!cached) return null;
+    if (cached.expiresAt < Date.now()) {
+      this.semanticCache.delete(key);
+      return null;
+    }
+    return cached.result;
+  }
+
+  private setCachedResult(key: string, result: UnifiedRetrievalResult): void {
+    const maxEntries = this.config.semanticCacheMaxEntries ?? 0;
+    const ttlMs = this.config.semanticCacheTtlMs ?? 0;
+    if (maxEntries <= 0 || ttlMs <= 0) return;
+
+    if (this.semanticCache.size >= maxEntries) {
+      const oldestKey = this.semanticCache.keys().next().value;
+      if (oldestKey) {
+        this.semanticCache.delete(oldestKey);
+      }
+    }
+
+    this.semanticCache.set(key, {
+      result,
+      expiresAt: Date.now() + ttlMs
+    });
+  }
+
+  private applyPositionBiasMitigation(items: string[]): string[] {
+    if (items.length <= 2) return items;
+    const [first, second, ...rest] = items;
+    return [first, ...rest, second];
+  }
+
+  private selectDiverseCandidates(
+    candidates: Array<{ content: string; score: number; tokens: number }>,
+    maxTokens: number,
+    maxItems?: number
+  ): Array<{ content: string; score: number; tokens: number }> {
+    const threshold = this.config.diversityThreshold ?? 0.35;
+    const sorted = [...candidates].sort((a, b) => b.score - a.score);
+    const selected: Array<{ content: string; score: number; tokens: number }> =
+      [];
+    let usedTokens = 0;
+
+    for (const candidate of sorted) {
+      if (maxItems && selected.length >= maxItems) break;
+      if (usedTokens + candidate.tokens > maxTokens) continue;
+
+      const similarity = this.maxSimilarity(
+        candidate.content,
+        selected.map((s) => s.content)
+      );
+      if (similarity > threshold && selected.length > 0) {
+        continue;
+      }
+
+      selected.push(candidate);
+      usedTokens += candidate.tokens;
+    }
+
+    return selected;
+  }
+
+  private maxSimilarity(content: string, others: string[]): number {
+    let max = 0;
+    for (const other of others) {
+      max = Math.max(max, this.patternSimilarity(content, other));
+    }
+    return max;
+  }
+
+  private mergeResults(
+    existing: string[],
+    incoming: string[],
+    maxTokens: number
+  ): string[] {
+    const merged: string[] = [...existing];
+    const seen = new Set(existing);
+    let usedTokens = this.estimateTokens(existing.join(' '));
+
+    for (const item of incoming) {
+      if (seen.has(item)) continue;
+      const tokens = this.estimateTokens(item);
+      if (usedTokens + tokens > maxTokens) break;
+      merged.push(item);
+      seen.add(item);
+      usedTokens += tokens;
+    }
+
+    return merged;
+  }
+
+  private fetchRlmContext(
+    query: string,
+    budgets: { shortTerm: number; longTerm: number; procedural: number },
+    options?: RetrievalOptions
+  ): { shortTerm: string[]; longTerm: string[]; procedural: string[] } {
+    const instanceKey = options?.sessionId || options?.instanceId;
+    if (!instanceKey) {
+      return { shortTerm: [], longTerm: [], procedural: [] };
+    }
+
+    const store = this.rlmContext.getStoreByInstance(instanceKey);
+    if (!store) {
+      return { shortTerm: [], longTerm: [], procedural: [] };
+    }
+
+    const queryTerms = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 0);
+    const totalSections = store.sections.length || 1;
+    const maxItems = this.config.rlmMaxResults ?? 6;
+
+    const tierCandidates = {
+      shortTerm: [] as Array<{
+        content: string;
+        score: number;
+        tokens: number;
+      }>,
+      longTerm: [] as Array<{ content: string; score: number; tokens: number }>,
+      procedural: [] as Array<{
+        content: string;
+        score: number;
+        tokens: number;
+      }>
+    };
+
+    store.sections.forEach((section, index) => {
+      const content = section.content;
+      if (!content) return;
+
+      const lowerContent = content.toLowerCase();
+      const matches = queryTerms.filter((term) =>
+        lowerContent.includes(term)
+      ).length;
+      const recency = (index + 1) / totalSections;
+      const baseScore =
+        matches * 0.7 + recency * 0.3 + (section.depth > 0 ? 0.05 : 0);
+      const candidate = {
+        content,
+        score: baseScore,
+        tokens: this.estimateTokens(content)
+      };
+
+      if (section.depth > 0 || section.type === 'summary') {
+        tierCandidates.longTerm.push(candidate);
+      } else if (section.type === 'file') {
+        tierCandidates.procedural.push(candidate);
+      } else {
+        tierCandidates.shortTerm.push(candidate);
+      }
+    });
+
+    return {
+      shortTerm: this.selectDiverseCandidates(
+        tierCandidates.shortTerm,
+        budgets.shortTerm,
+        maxItems
+      ).map((candidate) => candidate.content),
+      longTerm: this.selectDiverseCandidates(
+        tierCandidates.longTerm,
+        budgets.longTerm,
+        maxItems
+      ).map((candidate) => candidate.content),
+      procedural: this.selectDiverseCandidates(
+        tierCandidates.procedural,
+        budgets.procedural,
+        maxItems
+      ).map((candidate) => candidate.content)
+    };
+  }
 
   private ensureSessionTag(input: string, sessionId: string): string {
     if (/^\s*\[(?:instance|session):/i.test(input)) {
@@ -440,7 +795,7 @@ export class UnifiedMemoryController extends EventEmitter {
 
   private filterShortTermBuffer(buffer: string[], tags: string[]): string[] {
     if (tags.length === 0) return buffer;
-    return buffer.filter(content => this.matchesFilterTags(content, tags));
+    return buffer.filter((content) => this.matchesFilterTags(content, tags));
   }
 
   private filterEntriesByTags(
@@ -450,7 +805,7 @@ export class UnifiedMemoryController extends EventEmitter {
   ): MemoryEntry[] {
     if (tags.length === 0) return entries;
 
-    return entries.filter(entry => {
+    return entries.filter((entry) => {
       if (options?.sessionId && entry.sourceSessionId === options.sessionId) {
         return true;
       }
@@ -459,11 +814,13 @@ export class UnifiedMemoryController extends EventEmitter {
   }
 
   private matchesFilterTags(content: string, tags: string[]): boolean {
-    return tags.every(tag => content.includes(tag));
+    return tags.every((tag) => content.includes(tag));
   }
 
   private stripMemoryTags(content: string): string {
-    return content.replace(/^\s*(\[(?:instance|session):[^\]]+\]\s*)+/i, '').trim();
+    return content
+      .replace(/^\s*(\[(?:instance|session):[^\]]+\]\s*)+/i, '')
+      .trim();
   }
 
   private estimateTokens(text: string): number {
@@ -474,7 +831,7 @@ export class UnifiedMemoryController extends EventEmitter {
     // Simple Jaccard similarity
     const wordsA = new Set(a.toLowerCase().split(/\s+/));
     const wordsB = new Set(b.toLowerCase().split(/\s+/));
-    const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
+    const intersection = new Set([...wordsA].filter((x) => wordsB.has(x)));
     const union = new Set([...wordsA, ...wordsB]);
     return union.size > 0 ? intersection.size / union.size : 0;
   }
@@ -482,14 +839,17 @@ export class UnifiedMemoryController extends EventEmitter {
   private workflowMatches(workflow: WorkflowMemory, query: string): boolean {
     const queryLower = query.toLowerCase();
     return (
-      workflow.applicableContexts.some(ctx => queryLower.includes(ctx.toLowerCase())) ||
-      queryLower.includes(workflow.name.toLowerCase())
+      workflow.applicableContexts.some((ctx) =>
+        queryLower.includes(ctx.toLowerCase())
+      ) || queryLower.includes(workflow.name.toLowerCase())
     );
   }
 
   private strategyMatches(strategy: StrategyMemory, query: string): boolean {
     const queryLower = query.toLowerCase();
-    return strategy.conditions.some(cond => queryLower.includes(cond.toLowerCase()));
+    return strategy.conditions.some((cond) =>
+      queryLower.includes(cond.toLowerCase())
+    );
   }
 
   private async callSummarizer(content: string): Promise<string> {
@@ -505,16 +865,16 @@ export class UnifiedMemoryController extends EventEmitter {
       timestamp: Date.now(),
       shortTerm: {
         buffer: this.state.shortTerm.buffer,
-        summaries: this.state.shortTerm.summaries,
+        summaries: this.state.shortTerm.summaries
       },
       episodic: {
         sessions: this.state.episodic.sessions,
-        patterns: this.state.episodic.patterns,
+        patterns: this.state.episodic.patterns
       },
       procedural: {
         workflows: this.state.procedural.workflows,
-        strategies: this.state.procedural.strategies,
-      },
+        strategies: this.state.procedural.strategies
+      }
     };
 
     this.emit('state:saved', snapshot);
@@ -524,7 +884,9 @@ export class UnifiedMemoryController extends EventEmitter {
   async load(snapshot: UnifiedMemorySnapshot): Promise<void> {
     this.state.shortTerm.buffer = snapshot.shortTerm.buffer;
     this.state.shortTerm.summaries = snapshot.shortTerm.summaries;
-    this.state.shortTerm.currentTokens = this.estimateTokens(snapshot.shortTerm.buffer.join(' '));
+    this.state.shortTerm.currentTokens = this.estimateTokens(
+      snapshot.shortTerm.buffer.join(' ')
+    );
 
     this.state.episodic.sessions = snapshot.episodic.sessions;
     this.state.episodic.patterns = snapshot.episodic.patterns;
@@ -544,7 +906,7 @@ export class UnifiedMemoryController extends EventEmitter {
       episodicSessions: this.state.episodic.sessions.length,
       learnedPatterns: this.state.episodic.patterns.length,
       workflows: this.state.procedural.workflows.length,
-      strategies: this.state.procedural.strategies.length,
+      strategies: this.state.procedural.strategies.length
     };
   }
 
@@ -557,7 +919,7 @@ export class UnifiedMemoryController extends EventEmitter {
   getPatterns(minSuccessRate?: number): LearnedPattern[] {
     const patterns = [...this.state.episodic.patterns];
     if (minSuccessRate !== undefined) {
-      return patterns.filter(p => p.successRate >= minSuccessRate);
+      return patterns.filter((p) => p.successRate >= minSuccessRate);
     }
     return patterns;
   }

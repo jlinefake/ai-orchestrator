@@ -100,6 +100,7 @@ export class ElectronIpcService {
     initialPrompt?: string;
     yoloMode?: boolean;
     agentId?: string;
+    provider?: 'claude' | 'openai' | 'gemini' | 'auto';
   }) {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.createInstance(config);

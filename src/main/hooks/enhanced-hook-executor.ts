@@ -10,8 +10,11 @@
 
 import { EventEmitter } from 'events';
 import { spawn, ChildProcess } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
+import { dialog, BrowserWindow } from 'electron';
 import Anthropic from '@anthropic-ai/sdk';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
 export type HookTiming = 'pre' | 'post';
 export type HookAction = 'allow' | 'block' | 'modify' | 'skip';
@@ -33,6 +36,10 @@ export interface EnhancedHookConfig {
   blocking?: boolean;
   /** Timeout in milliseconds */
   timeout?: number;
+  /** Require explicit approval before execution */
+  approvalRequired?: boolean;
+  /** Whether this hook has been approved */
+  approved?: boolean;
 }
 
 export interface EnhancedHookHandler {
@@ -53,6 +60,14 @@ export interface EnhancedHookHandler {
   env?: Record<string, string>;
   /** Working directory */
   workingDirectory?: string;
+  /** Allow shell features like pipes/redirects (disabled by default) */
+  allowShell?: boolean;
+  /** Allow script execution (disabled by default) */
+  allowScript?: boolean;
+  /** Allowed executables (absolute paths or basenames) */
+  allowedExecutables?: string[];
+  /** Allowed script directories (absolute paths) */
+  allowedScriptDirs?: string[];
 }
 
 export interface HookCondition {
@@ -105,15 +120,53 @@ export interface BlockingResult {
 
 const DEFAULT_TIMEOUT = 30000;
 const MAX_OUTPUT_SIZE = 1024 * 1024; // 1MB
+const SHELL_METACHAR_PATTERN = /[|&;<>()`$\n\r]/;
+
+const DEFAULT_ALLOWED_EXEC_DIRS = (() => {
+  const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '';
+  return [
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    `${homeDir}/.local/bin`,
+    `${homeDir}/.npm-global/bin`,
+    `${homeDir}/.nvm/versions/node/current/bin`,
+    '/usr/bin',
+    '/bin'
+  ].filter(Boolean);
+})();
 
 export class EnhancedHookExecutor extends EventEmitter {
   private static instance: EnhancedHookExecutor | null = null;
   private anthropic: Anthropic | null = null;
-  private registeredFunctions: Map<string, (context: HookExecutionContext) => Promise<HookExecutionResult>> = new Map();
+  private registeredFunctions: Map<
+    string,
+    (context: HookExecutionContext) => Promise<HookExecutionResult>
+  > = new Map();
   private activeProcesses: Map<string, ChildProcess> = new Map();
+  private allowedExecutableDirs: string[] = [...DEFAULT_ALLOWED_EXEC_DIRS];
+  private allowedScriptDirs: string[] = [];
 
   private constructor() {
     super();
+  }
+
+  /**
+   * Configure security allowlists
+   */
+  configureSecurity(options: {
+    allowedExecutableDirs?: string[];
+    allowedScriptDirs?: string[];
+  }): void {
+    if (options.allowedExecutableDirs) {
+      this.allowedExecutableDirs = [...options.allowedExecutableDirs];
+    }
+    if (options.allowedScriptDirs) {
+      this.allowedScriptDirs = [...options.allowedScriptDirs];
+    }
+    this.emit('security:configured', {
+      allowedExecutableDirs: this.allowedExecutableDirs,
+      allowedScriptDirs: this.allowedScriptDirs
+    });
   }
 
   static getInstance(): EnhancedHookExecutor {
@@ -166,7 +219,7 @@ export class EnhancedHookExecutor extends EventEmitter {
     const baseResult = {
       hookId: hook.id,
       hookName: hook.name,
-      timestamp: startTime,
+      timestamp: startTime
     };
 
     // Check conditions
@@ -176,8 +229,32 @@ export class EnhancedHookExecutor extends EventEmitter {
         success: true,
         action: 'skip',
         output: 'Conditions not met',
-        duration: Date.now() - startTime,
+        duration: Date.now() - startTime
       };
+    }
+
+    if (hook.approvalRequired && !hook.approved) {
+      const approved = this.requestApproval(hook, context);
+      if (!approved.approved) {
+        this.emit('hook:approval-denied', { hookId: hook.id, hook, context });
+        return {
+          ...baseResult,
+          success: false,
+          action: hook.blocking ? 'block' : 'skip',
+          error: 'Approval denied',
+          duration: Date.now() - startTime
+        };
+      }
+
+      if (approved.remember) {
+        hook.approved = true;
+      }
+      this.emit('hook:approved', {
+        hookId: hook.id,
+        hook,
+        context,
+        remember: approved.remember
+      });
     }
 
     try {
@@ -196,7 +273,7 @@ export class EnhancedHookExecutor extends EventEmitter {
             success: false,
             action: 'skip',
             error: `Unknown handler type: ${(hook.handler as { type: string }).type}`,
-            duration: Date.now() - startTime,
+            duration: Date.now() - startTime
           };
       }
     } catch (error) {
@@ -205,7 +282,7 @@ export class EnhancedHookExecutor extends EventEmitter {
         success: false,
         action: 'skip',
         error: (error as Error).message,
-        duration: Date.now() - startTime,
+        duration: Date.now() - startTime
       };
     }
   }
@@ -223,7 +300,9 @@ export class EnhancedHookExecutor extends EventEmitter {
     modifiedData?: Record<string, unknown>;
   }> {
     // Sort by priority
-    const sortedHooks = [...hooks].sort((a, b) => (a.priority || 0) - (b.priority || 0));
+    const sortedHooks = [...hooks].sort(
+      (a, b) => (a.priority || 0) - (b.priority || 0)
+    );
 
     // Resolve dependencies
     const orderedHooks = this.resolveDependencies(sortedHooks);
@@ -235,8 +314,8 @@ export class EnhancedHookExecutor extends EventEmitter {
     for (const hook of orderedHooks) {
       // Check if dependencies succeeded
       if (hook.dependsOn && hook.dependsOn.length > 0) {
-        const depsFailed = hook.dependsOn.some(depId => {
-          const depResult = results.find(r => r.hookId === depId);
+        const depsFailed = hook.dependsOn.some((depId) => {
+          const depResult = results.find((r) => r.hookId === depId);
           return !depResult || !depResult.success;
         });
 
@@ -248,7 +327,7 @@ export class EnhancedHookExecutor extends EventEmitter {
             action: 'skip',
             error: 'Dependency failed',
             duration: 0,
-            timestamp: Date.now(),
+            timestamp: Date.now()
           });
           continue;
         }
@@ -257,7 +336,7 @@ export class EnhancedHookExecutor extends EventEmitter {
       const result = await this.execute(hook, {
         ...context,
         previousResults: results,
-        toolInput: modifiedData || context.toolInput,
+        toolInput: modifiedData || context.toolInput
       });
 
       results.push(result);
@@ -280,7 +359,7 @@ export class EnhancedHookExecutor extends EventEmitter {
       results,
       finalAction,
       blocked: finalAction === 'block',
-      modifiedData,
+      modifiedData
     };
   }
 
@@ -311,11 +390,19 @@ export class EnhancedHookExecutor extends EventEmitter {
 
   // ============ Condition Checking ============
 
-  private checkConditions(conditions: HookCondition[], context: HookExecutionContext): boolean {
-    return conditions.every(condition => this.checkCondition(condition, context));
+  private checkConditions(
+    conditions: HookCondition[],
+    context: HookExecutionContext
+  ): boolean {
+    return conditions.every((condition) =>
+      this.checkCondition(condition, context)
+    );
   }
 
-  private checkCondition(condition: HookCondition, context: HookExecutionContext): boolean {
+  private checkCondition(
+    condition: HookCondition,
+    context: HookExecutionContext
+  ): boolean {
     const operator = condition.operator || 'equals';
 
     switch (condition.type) {
@@ -355,7 +442,11 @@ export class EnhancedHookExecutor extends EventEmitter {
     }
   }
 
-  private matchPattern(value: string, pattern: string, operator: string): boolean {
+  private matchPattern(
+    value: string,
+    pattern: string,
+    operator: string
+  ): boolean {
     switch (operator) {
       case 'equals':
         return value === pattern;
@@ -382,7 +473,9 @@ export class EnhancedHookExecutor extends EventEmitter {
   ): Promise<HookExecutionResult> {
     const startTime = Date.now();
     const handler = hook.handler;
-    const command = this.interpolateString(handler.command || '', context);
+    const command = this.interpolateString(handler.command || '', context, {
+      escapeShell: true
+    });
     const timeout = hook.timeout || DEFAULT_TIMEOUT;
 
     if (context.dryRun) {
@@ -393,21 +486,212 @@ export class EnhancedHookExecutor extends EventEmitter {
         action: 'allow',
         output: `[DRY RUN] Would execute: ${command}`,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
-    return new Promise<HookExecutionResult>(resolve => {
+    if (!command.trim()) {
+      return {
+        hookId: hook.id,
+        hookName: hook.name,
+        success: false,
+        action: 'skip',
+        error: 'Empty command',
+        duration: Date.now() - startTime,
+        timestamp: startTime
+      };
+    }
+
+    const containsShellMetachars = SHELL_METACHAR_PATTERN.test(command);
+    if (containsShellMetachars && !handler.allowShell) {
+      return {
+        hookId: hook.id,
+        hookName: hook.name,
+        success: false,
+        action: hook.blocking ? 'block' : 'skip',
+        error:
+          'Shell features are disabled for hooks. Set allowShell: true to enable.',
+        duration: Date.now() - startTime,
+        timestamp: startTime
+      };
+    }
+
+    const cwd =
+      handler.workingDirectory || context.workingDirectory || process.cwd();
+    const env = { ...process.env, ...context.env, ...handler.env };
+
+    if (!containsShellMetachars) {
+      const parsed = this.parseCommand(command);
+      if (!parsed) {
+        return {
+          hookId: hook.id,
+          hookName: hook.name,
+          success: false,
+          action: 'skip',
+          error: 'Failed to parse command',
+          duration: Date.now() - startTime,
+          timestamp: startTime
+        };
+      }
+
+      const resolvedExecutable = this.resolveExecutable(parsed.command, cwd);
+      if (!resolvedExecutable) {
+        return {
+          hookId: hook.id,
+          hookName: hook.name,
+          success: false,
+          action: hook.blocking ? 'block' : 'skip',
+          error: `Executable not found: ${parsed.command}`,
+          duration: Date.now() - startTime,
+          timestamp: startTime
+        };
+      }
+
+      if (
+        !this.isExecutableAllowed(
+          resolvedExecutable,
+          handler.allowedExecutables
+        )
+      ) {
+        return {
+          hookId: hook.id,
+          hookName: hook.name,
+          success: false,
+          action: hook.blocking ? 'block' : 'skip',
+          error: `Executable not allowed: ${resolvedExecutable}`,
+          duration: Date.now() - startTime,
+          timestamp: startTime
+        };
+      }
+
+      return new Promise<HookExecutionResult>((resolve) => {
+        let output = '';
+        let errorOutput = '';
+        let timedOut = false;
+        const streamChunks: string[] = [];
+
+        const proc = spawn(resolvedExecutable, parsed.args, { cwd, env });
+
+        this.activeProcesses.set(hook.id, proc);
+
+        const timeoutId = setTimeout(() => {
+          timedOut = true;
+          proc.kill('SIGTERM');
+        }, timeout);
+
+        proc.stdout.on('data', (data) => {
+          const chunk = data.toString();
+          if (output.length + chunk.length <= MAX_OUTPUT_SIZE) {
+            output += chunk;
+          }
+          if (handler.streamOutput) {
+            streamChunks.push(chunk);
+            this.emit('hook-output', {
+              hookId: hook.id,
+              chunk,
+              stream: 'stdout'
+            });
+          }
+        });
+
+        proc.stderr.on('data', (data) => {
+          const chunk = data.toString();
+          if (errorOutput.length + chunk.length <= MAX_OUTPUT_SIZE) {
+            errorOutput += chunk;
+          }
+          if (handler.streamOutput) {
+            streamChunks.push(chunk);
+            this.emit('hook-output', {
+              hookId: hook.id,
+              chunk,
+              stream: 'stderr'
+            });
+          }
+        });
+
+        proc.on('close', (code) => {
+          clearTimeout(timeoutId);
+          this.activeProcesses.delete(hook.id);
+
+          const duration = Date.now() - startTime;
+
+          if (timedOut) {
+            resolve({
+              hookId: hook.id,
+              hookName: hook.name,
+              success: false,
+              action: 'skip',
+              error: `Command timed out after ${timeout}ms`,
+              output,
+              duration,
+              timestamp: startTime,
+              streamChunks: handler.streamOutput ? streamChunks : undefined
+            });
+            return;
+          }
+
+          // Parse blocking result from output if blocking hook
+          let action: HookAction = 'allow';
+          let blockReason: string | undefined;
+          let modifiedData: Record<string, unknown> | undefined;
+
+          if (hook.blocking && code !== 0) {
+            action = 'block';
+            blockReason = errorOutput || `Hook exited with code ${code}`;
+          } else if (output.includes('HOOK_BLOCK:')) {
+            action = 'block';
+            blockReason = output.split('HOOK_BLOCK:')[1]?.trim();
+          } else if (output.includes('HOOK_MODIFY:')) {
+            action = 'modify';
+            try {
+              const jsonStr = output.split('HOOK_MODIFY:')[1]?.trim();
+              modifiedData = JSON.parse(jsonStr);
+            } catch {
+              // Invalid JSON, ignore modification
+            }
+          }
+
+          resolve({
+            hookId: hook.id,
+            hookName: hook.name,
+            success: code === 0 || action === 'allow',
+            action,
+            output,
+            error: code !== 0 ? errorOutput || `Exit code ${code}` : undefined,
+            duration,
+            timestamp: startTime,
+            blockReason,
+            modifiedData,
+            streamChunks: handler.streamOutput ? streamChunks : undefined
+          });
+        });
+
+        proc.on('error', (err) => {
+          clearTimeout(timeoutId);
+          this.activeProcesses.delete(hook.id);
+
+          resolve({
+            hookId: hook.id,
+            hookName: hook.name,
+            success: false,
+            action: 'skip',
+            error: `Failed to execute: ${err.message}`,
+            duration: Date.now() - startTime,
+            timestamp: startTime
+          });
+        });
+      });
+    }
+
+    return new Promise<HookExecutionResult>((resolve) => {
       let output = '';
       let errorOutput = '';
       let timedOut = false;
       const streamChunks: string[] = [];
 
       const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
-      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
-
-      const cwd = handler.workingDirectory || context.workingDirectory || process.cwd();
-      const env = { ...process.env, ...context.env, ...handler.env };
+      const shellArgs =
+        process.platform === 'win32' ? ['/c', command] : ['-c', command];
 
       const proc = spawn(shell, shellArgs, { cwd, env });
 
@@ -418,29 +702,37 @@ export class EnhancedHookExecutor extends EventEmitter {
         proc.kill('SIGTERM');
       }, timeout);
 
-      proc.stdout.on('data', data => {
+      proc.stdout.on('data', (data) => {
         const chunk = data.toString();
         if (output.length + chunk.length <= MAX_OUTPUT_SIZE) {
           output += chunk;
         }
         if (handler.streamOutput) {
           streamChunks.push(chunk);
-          this.emit('hook-output', { hookId: hook.id, chunk, stream: 'stdout' });
+          this.emit('hook-output', {
+            hookId: hook.id,
+            chunk,
+            stream: 'stdout'
+          });
         }
       });
 
-      proc.stderr.on('data', data => {
+      proc.stderr.on('data', (data) => {
         const chunk = data.toString();
         if (errorOutput.length + chunk.length <= MAX_OUTPUT_SIZE) {
           errorOutput += chunk;
         }
         if (handler.streamOutput) {
           streamChunks.push(chunk);
-          this.emit('hook-output', { hookId: hook.id, chunk, stream: 'stderr' });
+          this.emit('hook-output', {
+            hookId: hook.id,
+            chunk,
+            stream: 'stderr'
+          });
         }
       });
 
-      proc.on('close', code => {
+      proc.on('close', (code) => {
         clearTimeout(timeoutId);
         this.activeProcesses.delete(hook.id);
 
@@ -456,7 +748,7 @@ export class EnhancedHookExecutor extends EventEmitter {
             output,
             duration,
             timestamp: startTime,
-            streamChunks: handler.streamOutput ? streamChunks : undefined,
+            streamChunks: handler.streamOutput ? streamChunks : undefined
           });
           return;
         }
@@ -488,16 +780,16 @@ export class EnhancedHookExecutor extends EventEmitter {
           success: code === 0 || action === 'allow',
           action,
           output,
-          error: code !== 0 ? (errorOutput || `Exit code ${code}`) : undefined,
+          error: code !== 0 ? errorOutput || `Exit code ${code}` : undefined,
           duration,
           timestamp: startTime,
           blockReason,
           modifiedData,
-          streamChunks: handler.streamOutput ? streamChunks : undefined,
+          streamChunks: handler.streamOutput ? streamChunks : undefined
         });
       });
 
-      proc.on('error', err => {
+      proc.on('error', (err) => {
         clearTimeout(timeoutId);
         this.activeProcesses.delete(hook.id);
 
@@ -508,7 +800,7 @@ export class EnhancedHookExecutor extends EventEmitter {
           action: 'skip',
           error: `Failed to execute: ${err.message}`,
           duration: Date.now() - startTime,
-          timestamp: startTime,
+          timestamp: startTime
         });
       });
     });
@@ -521,7 +813,52 @@ export class EnhancedHookExecutor extends EventEmitter {
     context: HookExecutionContext
   ): Promise<HookExecutionResult> {
     const handler = hook.handler;
-    const scriptPath = this.interpolateString(handler.scriptPath || '', context);
+    if (!handler.allowScript) {
+      return {
+        hookId: hook.id,
+        hookName: hook.name,
+        success: false,
+        action: hook.blocking ? 'block' : 'skip',
+        error:
+          'Script execution is disabled for hooks. Set allowScript: true to enable.',
+        duration: 0,
+        timestamp: Date.now()
+      };
+    }
+
+    const scriptPath = this.interpolateString(
+      handler.scriptPath || '',
+      context
+    );
+    const cwd =
+      handler.workingDirectory || context.workingDirectory || process.cwd();
+    const resolvedScriptPath = path.resolve(cwd, scriptPath);
+
+    if (!fs.existsSync(resolvedScriptPath)) {
+      return {
+        hookId: hook.id,
+        hookName: hook.name,
+        success: false,
+        action: hook.blocking ? 'block' : 'skip',
+        error: `Script not found: ${resolvedScriptPath}`,
+        duration: 0,
+        timestamp: Date.now()
+      };
+    }
+
+    if (
+      !this.isScriptAllowed(resolvedScriptPath, handler.allowedScriptDirs, cwd)
+    ) {
+      return {
+        hookId: hook.id,
+        hookName: hook.name,
+        success: false,
+        action: hook.blocking ? 'block' : 'skip',
+        error: `Script path not allowed: ${resolvedScriptPath}`,
+        duration: 0,
+        timestamp: Date.now()
+      };
+    }
 
     // Determine script type by extension
     const ext = path.extname(scriptPath).toLowerCase();
@@ -553,8 +890,9 @@ export class EnhancedHookExecutor extends EventEmitter {
       handler: {
         ...handler,
         type: 'command',
-        command: `${interpreter} "${scriptPath}"`,
-      },
+        command: `${interpreter} "${resolvedScriptPath}"`,
+        allowShell: false
+      }
     };
 
     return this.executeCommand(commandHook, context);
@@ -578,7 +916,7 @@ export class EnhancedHookExecutor extends EventEmitter {
         action: 'allow',
         output: `[DRY RUN] Would evaluate prompt: ${prompt.slice(0, 100)}...`,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
@@ -590,13 +928,13 @@ export class EnhancedHookExecutor extends EventEmitter {
         action: 'skip',
         error: 'Anthropic client not initialized for prompt hooks',
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
     try {
       const response = await this.anthropic.messages.create({
-        model: handler.model || 'claude-3-haiku-20240307',
+        model: handler.model || CLAUDE_MODELS.HAIKU,
         max_tokens: 1024,
         system: `You are a security and code review assistant evaluating whether a tool call should be allowed.
 
@@ -609,12 +947,13 @@ Be concise and security-focused.`,
         messages: [
           {
             role: 'user',
-            content: prompt,
-          },
-        ],
+            content: prompt
+          }
+        ]
       });
 
-      const responseText = response.content[0].type === 'text' ? response.content[0].text : '';
+      const responseText =
+        response.content[0].type === 'text' ? response.content[0].text : '';
 
       // Parse response
       try {
@@ -628,7 +967,7 @@ Be concise and security-focused.`,
           blockReason: parsed.action === 'block' ? parsed.reason : undefined,
           modifiedData: parsed.modification,
           duration: Date.now() - startTime,
-          timestamp: startTime,
+          timestamp: startTime
         };
       } catch {
         // Non-JSON response, assume allow
@@ -639,7 +978,7 @@ Be concise and security-focused.`,
           action: 'allow',
           output: responseText,
           duration: Date.now() - startTime,
-          timestamp: startTime,
+          timestamp: startTime
         };
       }
     } catch (error) {
@@ -650,7 +989,7 @@ Be concise and security-focused.`,
         action: 'skip',
         error: (error as Error).message,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
   }
@@ -672,7 +1011,7 @@ Be concise and security-focused.`,
         action: 'skip',
         error: 'No function name specified',
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
@@ -685,7 +1024,7 @@ Be concise and security-focused.`,
         action: 'skip',
         error: `Function not registered: ${functionName}`,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
 
@@ -696,7 +1035,7 @@ Be concise and security-focused.`,
         hookId: hook.id,
         hookName: hook.name,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     } catch (error) {
       return {
@@ -706,14 +1045,16 @@ Be concise and security-focused.`,
         action: 'skip',
         error: (error as Error).message,
         duration: Date.now() - startTime,
-        timestamp: startTime,
+        timestamp: startTime
       };
     }
   }
 
   // ============ Dependency Resolution ============
 
-  private resolveDependencies(hooks: EnhancedHookConfig[]): EnhancedHookConfig[] {
+  private resolveDependencies(
+    hooks: EnhancedHookConfig[]
+  ): EnhancedHookConfig[] {
     const resolved: EnhancedHookConfig[] = [];
     const seen = new Set<string>();
     const visiting = new Set<string>();
@@ -729,7 +1070,7 @@ Be concise and security-focused.`,
       // Visit dependencies first
       if (hook.dependsOn) {
         for (const depId of hook.dependsOn) {
-          const depHook = hooks.find(h => h.id === depId);
+          const depHook = hooks.find((h) => h.id === depId);
           if (depHook) {
             visit(depHook);
           }
@@ -750,16 +1091,180 @@ Be concise and security-focused.`,
 
   // ============ String Interpolation ============
 
-  private interpolateString(str: string, context: HookExecutionContext): string {
+  private interpolateString(
+    str: string,
+    context: HookExecutionContext,
+    options: { escapeShell?: boolean } = {}
+  ): string {
+    const apply = (value: string): string => {
+      if (!options.escapeShell) return value;
+      return this.escapeShellValue(value);
+    };
+
     return str
-      .replace(/\$\{file\}/g, context.filePath || '')
-      .replace(/\$\{tool\}/g, context.toolName || '')
-      .replace(/\$\{command\}/g, context.command || '')
-      .replace(/\$\{content\}/g, context.content || '')
-      .replace(/\$\{cwd\}/g, context.workingDirectory || process.cwd())
-      .replace(/\$\{instanceId\}/g, context.instanceId || '')
-      .replace(/\$\{toolInput\}/g, JSON.stringify(context.toolInput || {}))
-      .replace(/\$\{env\.(\w+)\}/g, (_, name) => context.env?.[name] || process.env[name] || '');
+      .replace(/\$\{file\}/g, apply(context.filePath || ''))
+      .replace(/\$\{tool\}/g, apply(context.toolName || ''))
+      .replace(/\$\{command\}/g, apply(context.command || ''))
+      .replace(/\$\{content\}/g, apply(context.content || ''))
+      .replace(/\$\{cwd\}/g, apply(context.workingDirectory || process.cwd()))
+      .replace(/\$\{instanceId\}/g, apply(context.instanceId || ''))
+      .replace(
+        /\$\{toolInput\}/g,
+        apply(JSON.stringify(context.toolInput || {}))
+      )
+      .replace(/\$\{env\.(\w+)\}/g, (_, name) =>
+        apply(context.env?.[name] || process.env[name] || '')
+      );
+  }
+
+  private escapeShellValue(value: string): string {
+    if (value === '') return "''";
+    return `'${value.replace(/'/g, `'"'"'`)}'`;
+  }
+
+  private parseCommand(
+    command: string
+  ): { command: string; args: string[] } | null {
+    const args: string[] = [];
+    let current = '';
+    let inSingle = false;
+    let inDouble = false;
+    let escaped = false;
+
+    for (let i = 0; i < command.length; i++) {
+      const ch = command[i];
+      if (escaped) {
+        current += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\' && !inSingle) {
+        escaped = true;
+        continue;
+      }
+      if (ch === "'" && !inDouble) {
+        inSingle = !inSingle;
+        continue;
+      }
+      if (ch === '"' && !inSingle) {
+        inDouble = !inDouble;
+        continue;
+      }
+      if (!inSingle && !inDouble && /\s/.test(ch)) {
+        if (current) {
+          args.push(current);
+          current = '';
+        }
+        continue;
+      }
+      current += ch;
+    }
+
+    if (escaped || inSingle || inDouble) {
+      return null;
+    }
+
+    if (current) args.push(current);
+    if (args.length === 0) return null;
+    const [cmd, ...rest] = args;
+    return { command: cmd, args: rest };
+  }
+
+  private resolveExecutable(command: string, cwd: string): string | null {
+    const hasPath = command.includes('/') || command.includes('\\');
+    const candidate = hasPath ? path.resolve(cwd, command) : command;
+    if (hasPath && fs.existsSync(candidate)) {
+      return candidate;
+    }
+
+    const pathEntries = (process.env['PATH'] || '')
+      .split(path.delimiter)
+      .filter(Boolean);
+    for (const entry of pathEntries) {
+      const fullPath = path.join(entry, command);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+
+    return null;
+  }
+
+  private isExecutableAllowed(
+    resolvedPath: string,
+    allowedExecutables?: string[]
+  ): boolean {
+    if (allowedExecutables && allowedExecutables.length > 0) {
+      const baseName = path.basename(resolvedPath);
+      return allowedExecutables.some((allowed) => {
+        if (allowed === baseName) return true;
+        return path.resolve(allowed) === path.resolve(resolvedPath);
+      });
+    }
+
+    return this.allowedExecutableDirs.some((dir) =>
+      resolvedPath.startsWith(path.resolve(dir) + path.sep)
+    );
+  }
+
+  private isScriptAllowed(
+    resolvedPath: string,
+    allowedDirs: string[] | undefined,
+    cwd: string
+  ): boolean {
+    const dirs =
+      allowedDirs && allowedDirs.length > 0
+        ? allowedDirs
+        : this.allowedScriptDirs.length > 0
+          ? this.allowedScriptDirs
+          : [cwd];
+
+    return dirs.some((dir) => {
+      const base = path.resolve(dir) + path.sep;
+      return resolvedPath.startsWith(base);
+    });
+  }
+
+  private requestApproval(
+    hook: EnhancedHookConfig,
+    context: HookExecutionContext
+  ): { approved: boolean; remember: boolean } {
+    this.emit('hook:approval-required', { hookId: hook.id, hook, context });
+
+    const window =
+      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!window) {
+      return { approved: false, remember: false };
+    }
+
+    const detailLines = [
+      `Hook: ${hook.name}`,
+      `Type: ${hook.handler.type}`,
+      hook.handler.command ? `Command: ${hook.handler.command}` : undefined,
+      hook.handler.scriptPath
+        ? `Script: ${hook.handler.scriptPath}`
+        : undefined,
+      context.toolName ? `Tool: ${context.toolName}` : undefined,
+      context.filePath ? `File: ${context.filePath}` : undefined
+    ].filter(Boolean);
+
+    const result = dialog.showMessageBoxSync(window, {
+      type: 'warning',
+      title: 'Approve hook execution',
+      message: 'A hook requires approval before it can run.',
+      detail: detailLines.join('\n'),
+      buttons: ['Approve once', 'Always allow', 'Deny'],
+      defaultId: 0,
+      cancelId: 2
+    });
+
+    if (result === 0) {
+      return { approved: true, remember: false };
+    }
+    if (result === 1) {
+      return { approved: true, remember: true };
+    }
+    return { approved: false, remember: false };
   }
 }
 

@@ -10,6 +10,7 @@ import {
   getDefaultAgent,
   getAgentById,
 } from '../../../../shared/types/agent.types';
+import { CLAUDE_MODELS } from '../../../../shared/types/provider.types';
 
 // ============================================
 // Types
@@ -34,7 +35,7 @@ const STORAGE_KEY = 'agent-store';
 const DEFAULT_PREFERENCES: Record<string, AgentPreference> = {
   claude: {
     command: 'claude',
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: CLAUDE_MODELS.SONNET,
     defaultTimeout: 300,
     autoApprove: false,
     personality: 'methodical-analyst',

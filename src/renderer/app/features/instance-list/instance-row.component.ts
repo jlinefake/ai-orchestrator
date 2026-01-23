@@ -56,9 +56,16 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
 
       <div class="instance-info">
         <div class="instance-name-row">
-          <span class="agent-badge" [style.background-color]="agent().color" [title]="agent().description">
-            {{ agent().name.charAt(0) }}
-          </span>
+          <div class="badges">
+            <span class="agent-badge" [style.background-color]="agent().color" [title]="agent().description">
+              {{ agent().name.charAt(0) }}
+            </span>
+            <span
+              class="provider-dot"
+              [style.background-color]="getProviderColor(instance().provider)"
+              [title]="getProviderDisplayName(instance().provider)"
+            ></span>
+          </div>
           @if (isEditingName()) {
             <input
               type="text"
@@ -257,6 +264,11 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       gap: 10px;
     }
 
+    .badges {
+      position: relative;
+      flex-shrink: 0;
+    }
+
     .agent-badge {
       display: flex;
       align-items: center;
@@ -270,6 +282,17 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       color: white;
       flex-shrink: 0;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .provider-dot {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 2px solid var(--bg-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     }
 
     .instance-name {
@@ -428,6 +451,26 @@ export class InstanceRowComponent {
     const agentId = this.instance().agentId;
     return agentId ? getAgentById(agentId) || getDefaultAgent() : getDefaultAgent();
   });
+
+  getProviderDisplayName(provider: string): string {
+    switch (provider) {
+      case 'claude': return 'Claude';
+      case 'codex': return 'Codex';
+      case 'gemini': return 'Gemini';
+      case 'ollama': return 'Ollama';
+      default: return 'AI';
+    }
+  }
+
+  getProviderColor(provider: string): string {
+    switch (provider) {
+      case 'claude': return '#D97706';
+      case 'codex': return '#10A37F';
+      case 'gemini': return '#4285F4';
+      case 'ollama': return '#888888';
+      default: return '#888888';
+    }
+  }
 
   onTerminate(event: Event): void {
     event.stopPropagation();

@@ -2,7 +2,8 @@
  * Codex CLI Adapter - Spawns and manages OpenAI Codex CLI processes
  * https://github.com/openai/codex
  *
- * Uses `codex exec` for non-interactive execution with JSONL output
+ * Uses `codex exec` for non-interactive execution with JSONL output.
+ * Also provides spawn/sendInput interface for compatibility with InstanceManager.
  */
 
 import {
@@ -15,6 +16,8 @@ import {
   CliToolCall,
   CliUsage,
 } from './base-cli-adapter';
+import type { OutputMessage, ContextUsage, InstanceStatus } from '../../../shared/types/instance.types';
+import { generateId } from '../../../shared/utils/id-generator';
 
 /**
  * Codex CLI specific configuration
@@ -30,6 +33,20 @@ export interface CodexCliConfig {
   workingDir?: string;
   /** Timeout in milliseconds */
   timeout?: number;
+  /** System prompt */
+  systemPrompt?: string;
+}
+
+/**
+ * Events emitted by CodexCliAdapter (for InstanceManager compatibility)
+ */
+export interface CodexCliAdapterEvents {
+  'output': (message: OutputMessage) => void;
+  'status': (status: InstanceStatus) => void;
+  'context': (usage: ContextUsage) => void;
+  'error': (error: Error) => void;
+  'exit': (code: number | null, signal: string | null) => void;
+  'spawned': (pid: number) => void;
 }
 
 /**
@@ -400,5 +417,120 @@ export class CodexCliAdapter extends BaseCliAdapter {
       outputTokens: tokens,
       totalTokens: tokens,
     };
+  }
+
+  // ============ InstanceManager Compatibility API ============
+  // These methods provide the spawn/sendInput pattern expected by InstanceManager
+  // Unlike Claude CLI which maintains a persistent process, Codex runs exec per message
+
+  private isSpawned: boolean = false;
+  private totalTokensUsed: number = 0;
+
+  /**
+   * "Spawn" the CLI adapter - marks it as ready to receive messages.
+   * Unlike Claude CLI, Codex doesn't maintain a persistent process.
+   * Each sendInput() will exec a new command.
+   */
+  async spawn(): Promise<number> {
+    if (this.isSpawned) {
+      throw new Error('Adapter already spawned');
+    }
+
+    this.isSpawned = true;
+    // Generate a fake PID to maintain API compatibility
+    const fakePid = Math.floor(Math.random() * 100000) + 10000;
+    this.emit('spawned', fakePid);
+    this.emit('status', 'idle' as InstanceStatus);
+
+    return fakePid;
+  }
+
+  /**
+   * Send a message to Codex via exec command.
+   * Each call spawns a new process.
+   */
+  async sendInput(message: string, attachments?: any[]): Promise<void> {
+    if (!this.isSpawned) {
+      throw new Error('Adapter not spawned - call spawn() first');
+    }
+
+    this.emit('status', 'busy' as InstanceStatus);
+
+    try {
+      // Build attachments for CliMessage format
+      const cliAttachments = attachments?.map(a => ({
+        type: a.type?.startsWith('image/') ? 'image' as const : 'file' as const,
+        path: a.path,
+        content: a.data,
+        mimeType: a.type,
+        name: a.name,
+      }));
+
+      const cliMessage: CliMessage = {
+        role: 'user',
+        content: message,
+        attachments: cliAttachments,
+      };
+
+      // Execute the command
+      const response = await this.sendMessage(cliMessage);
+
+      // Emit output as OutputMessage for InstanceManager
+      if (response.content) {
+        const outputMessage: OutputMessage = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'assistant',
+          content: response.content,
+        };
+        this.emit('output', outputMessage);
+      }
+
+      // Emit tool uses if any
+      if (response.toolCalls) {
+        for (const tool of response.toolCalls) {
+          const toolMessage: OutputMessage = {
+            id: generateId(),
+            timestamp: Date.now(),
+            type: 'tool_use',
+            content: `Using tool: ${tool.name}`,
+            metadata: { ...tool } as Record<string, unknown>,
+          };
+          this.emit('output', toolMessage);
+        }
+      }
+
+      // Update context/usage tracking
+      if (response.usage) {
+        this.totalTokensUsed += response.usage.totalTokens || 0;
+        const contextUsage: ContextUsage = {
+          used: this.totalTokensUsed,
+          total: 128000, // GPT-4 context window
+          percentage: Math.min((this.totalTokensUsed / 128000) * 100, 100),
+        };
+        this.emit('context', contextUsage);
+      }
+
+      this.emit('status', 'idle' as InstanceStatus);
+    } catch (error) {
+      const errorMessage: OutputMessage = {
+        id: generateId(),
+        timestamp: Date.now(),
+        type: 'error',
+        content: error instanceof Error ? error.message : String(error),
+      };
+      this.emit('output', errorMessage);
+      this.emit('status', 'error' as InstanceStatus);
+      this.emit('error', error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * Override terminate to clean up spawned state
+   */
+  override async terminate(graceful: boolean = true): Promise<void> {
+    await super.terminate(graceful);
+    this.isSpawned = false;
+    this.totalTokensUsed = 0;
   }
 }

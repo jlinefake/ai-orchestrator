@@ -2,9 +2,19 @@
  * Instance Store - Angular Signals-based state management
  */
 
-import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
+import {
+  Injectable,
+  inject,
+  signal,
+  computed,
+  OnDestroy,
+  NgZone
+} from '@angular/core';
 import { ElectronIpcService } from '../services/electron-ipc.service';
-import { UpdateBatcherService, StateUpdate } from '../services/update-batcher.service';
+import {
+  UpdateBatcherService,
+  StateUpdate
+} from '../services/update-batcher.service';
 import { ActivityDebouncerService } from '../services/activity-debouncer.service';
 import { generateActivityStatus } from '../utils/tool-activity-map';
 import { LIMITS } from '../../../../shared/constants/limits';
@@ -24,7 +34,7 @@ export interface ContextUsage {
   used: number;
   total: number;
   percentage: number;
-  costEstimate?: number;  // Estimated cost in dollars
+  costEstimate?: number; // Estimated cost in dollars
 }
 
 export interface OutputMessage {
@@ -37,19 +47,22 @@ export interface OutputMessage {
   attachments?: FileAttachment[];
 }
 
+export type InstanceProvider = 'claude' | 'codex' | 'gemini' | 'ollama';
+
 export interface Instance {
   id: string;
   displayName: string;
   createdAt: number;
   parentId: string | null;
   childrenIds: string[];
-  agentId: string;           // Agent profile ID ('build', 'plan', 'review', etc.)
-  agentMode: AgentMode;      // Agent mode type
+  agentId: string; // Agent profile ID ('build', 'plan', 'review', etc.)
+  agentMode: AgentMode; // Agent mode type
+  provider: InstanceProvider; // CLI provider being used
   status: InstanceStatus;
   contextUsage: ContextUsage;
   lastActivity: number;
-  currentActivity?: string;  // Human-readable activity description
-  currentTool?: string;       // Current tool being used
+  currentActivity?: string; // Human-readable activity description
+  currentTool?: string; // Current tool being used
   sessionId: string;
   workingDirectory: string;
   yoloMode: boolean;
@@ -68,21 +81,27 @@ export class InstanceStore implements OnDestroy {
   private ipc = inject(ElectronIpcService);
   private batcher = inject(UpdateBatcherService);
   private activityDebouncer = inject(ActivityDebouncerService);
+  private ngZone = inject(NgZone);
   private unsubscribes: (() => void)[] = [];
 
   // Output throttling state
-  private outputThrottleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private outputThrottleTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private pendingOutputMessages = new Map<string, OutputMessage[]>();
 
   // Message queue for when instance is busy (signal for reactivity)
-  private messageQueueSignal = signal(new Map<string, Array<{ message: string; files?: File[] }>>());
+  private messageQueueSignal = signal(
+    new Map<string, Array<{ message: string; files?: File[] }>>()
+  );
 
   // Private mutable state
   private state = signal<StoreState>({
     instances: new Map(),
     selectedInstanceId: null,
     loading: false,
-    error: null,
+    error: null
   });
 
   // ============================================
@@ -98,9 +117,7 @@ export class InstanceStore implements OnDestroy {
   readonly instancesMap = computed(() => this.state().instances);
 
   /** Selected instance ID */
-  readonly selectedInstanceId = computed(() =>
-    this.state().selectedInstanceId
-  );
+  readonly selectedInstanceId = computed(() => this.state().selectedInstanceId);
 
   /** Selected instance object */
   readonly selectedInstance = computed(() => {
@@ -143,7 +160,7 @@ export class InstanceStore implements OnDestroy {
       total,
       // Cap at 100% - used can exceed total in long sessions due to context truncation
       percentage: total > 0 ? Math.min((used / total) * 100, 100) : 0,
-      costEstimate: costEstimate > 0 ? costEstimate : undefined,
+      costEstimate: costEstimate > 0 ? costEstimate : undefined
     };
   });
 
@@ -258,7 +275,10 @@ export class InstanceStore implements OnDestroy {
     this.state.update((s) => ({ ...s, loading: true }));
 
     try {
-      const response = await this.ipc.listInstances() as { success: boolean; data?: unknown[] };
+      const response = (await this.ipc.listInstances()) as {
+        success: boolean;
+        data?: unknown[];
+      };
       if (response.success && response.data && Array.isArray(response.data)) {
         const instances = new Map<string, Instance>();
         for (const data of response.data) {
@@ -268,14 +288,14 @@ export class InstanceStore implements OnDestroy {
         this.state.update((s) => ({
           ...s,
           instances,
-          loading: false,
+          loading: false
         }));
       }
     } catch (error) {
       this.state.update((s) => ({
         ...s,
         loading: false,
-        error: 'Failed to load instances',
+        error: 'Failed to load instances'
       }));
     }
   }
@@ -299,7 +319,9 @@ export class InstanceStore implements OnDestroy {
         ...current,
         instances: newMap,
         loading: false,
-        selectedInstanceId: shouldAutoSelect ? instance.id : current.selectedInstanceId,
+        selectedInstanceId: shouldAutoSelect
+          ? instance.id
+          : current.selectedInstanceId
       };
     });
   }
@@ -324,7 +346,7 @@ export class InstanceStore implements OnDestroy {
         selectedInstanceId:
           current.selectedInstanceId === instanceId
             ? null
-            : current.selectedInstanceId,
+            : current.selectedInstanceId
       };
     });
   }
@@ -352,7 +374,7 @@ export class InstanceStore implements OnDestroy {
           ...instance,
           status: newStatus || instance.status,
           contextUsage: update.contextUsage || instance.contextUsage,
-          lastActivity: Date.now(),
+          lastActivity: Date.now()
         });
       }
 
@@ -384,7 +406,7 @@ export class InstanceStore implements OnDestroy {
             ...instance,
             status: (update.status as InstanceStatus) || instance.status,
             contextUsage: update.contextUsage || instance.contextUsage,
-            lastActivity: Date.now(),
+            lastActivity: Date.now()
           });
         }
       }
@@ -405,7 +427,10 @@ export class InstanceStore implements OnDestroy {
     // If no timer exists, start one
     if (!this.outputThrottleTimers.has(instanceId)) {
       const timer = setTimeout(() => {
-        this.flushOutput(instanceId);
+        // Run inside NgZone to trigger Angular change detection
+        this.ngZone.run(() => {
+          this.flushOutput(instanceId);
+        });
       }, LIMITS.TEXT_THROTTLE_MS);
       this.outputThrottleTimers.set(instanceId, timer);
     }
@@ -430,14 +455,13 @@ export class InstanceStore implements OnDestroy {
       if (instance) {
         const outputBuffer = [...instance.outputBuffer, ...pending];
         // Keep buffer trimmed
-        const trimmed = outputBuffer.length > 1000
-          ? outputBuffer.slice(-1000)
-          : outputBuffer;
+        const trimmed =
+          outputBuffer.length > 1000 ? outputBuffer.slice(-1000) : outputBuffer;
 
         newMap.set(instanceId, {
           ...instance,
           outputBuffer: trimmed,
-          lastActivity: Date.now(),
+          lastActivity: Date.now()
         });
       }
 
@@ -478,6 +502,7 @@ export class InstanceStore implements OnDestroy {
     parentId?: string;
     yoloMode?: boolean;
     agentId?: string;
+    provider?: 'claude' | 'openai' | 'gemini' | 'auto';
   }): Promise<void> {
     console.log('InstanceStore: createInstance called with:', config);
     this.state.update((s) => ({ ...s, loading: true }));
@@ -489,6 +514,7 @@ export class InstanceStore implements OnDestroy {
         parentInstanceId: config.parentId,
         yoloMode: config.yoloMode,
         agentId: config.agentId,
+        provider: config.provider
       });
       console.log('InstanceStore: createInstance result:', result);
     } catch (error) {
@@ -496,26 +522,35 @@ export class InstanceStore implements OnDestroy {
       this.state.update((s) => ({
         ...s,
         loading: false,
-        error: 'Failed to create instance',
+        error: 'Failed to create instance'
       }));
     }
   }
 
   /** Create instance and immediately send a message */
-  async createInstanceWithMessage(message: string, files?: File[], workingDirectory?: string): Promise<void> {
-    console.log('InstanceStore: createInstanceWithMessage called with:', { message, filesCount: files?.length, workingDirectory });
+  async createInstanceWithMessage(
+    message: string,
+    files?: File[],
+    workingDirectory?: string
+  ): Promise<void> {
+    console.log('InstanceStore: createInstanceWithMessage called with:', {
+      message,
+      filesCount: files?.length,
+      workingDirectory
+    });
     this.state.update((s) => ({ ...s, loading: true }));
 
     try {
       // Convert files to base64 for IPC
-      const attachments = files && files.length > 0
-        ? await Promise.all(files.map((f) => this.fileToAttachment(f)))
-        : undefined;
+      const attachments =
+        files && files.length > 0
+          ? await Promise.all(files.map((f) => this.fileToAttachment(f)))
+          : undefined;
 
       const result = await this.ipc.createInstanceWithMessage({
         workingDirectory: workingDirectory || '.',
         message,
-        attachments,
+        attachments
       });
       console.log('InstanceStore: createInstanceWithMessage result:', result);
     } catch (error) {
@@ -523,7 +558,7 @@ export class InstanceStore implements OnDestroy {
       this.state.update((s) => ({
         ...s,
         loading: false,
-        error: 'Failed to create instance',
+        error: 'Failed to create instance'
       }));
     }
   }
@@ -536,13 +571,21 @@ export class InstanceStore implements OnDestroy {
     await this.createInstance({
       workingDirectory: parent.workingDirectory,
       displayName: `${parent.displayName} > Child`,
-      parentId,
+      parentId
     });
   }
 
   /** Send input to an instance (queues if busy) */
-  async sendInput(instanceId: string, message: string, files?: File[]): Promise<void> {
-    console.log('InstanceStore: sendInput called', { instanceId, message, filesCount: files?.length });
+  async sendInput(
+    instanceId: string,
+    message: string,
+    files?: File[]
+  ): Promise<void> {
+    console.log('InstanceStore: sendInput called', {
+      instanceId,
+      message,
+      filesCount: files?.length
+    });
 
     const instance = this.getInstance(instanceId);
     if (!instance) return;
@@ -550,7 +593,7 @@ export class InstanceStore implements OnDestroy {
     // If instance is busy, queue the message instead of sending immediately
     if (instance.status === 'busy') {
       console.log('InstanceStore: Instance busy, queuing message');
-      this.messageQueueSignal.update(currentMap => {
+      this.messageQueueSignal.update((currentMap) => {
         const newMap = new Map(currentMap);
         const queue = newMap.get(instanceId) || [];
         queue.push({ message, files });
@@ -565,11 +608,16 @@ export class InstanceStore implements OnDestroy {
   }
 
   /** Internal method to send input immediately (bypasses queue check) */
-  private async sendInputImmediate(instanceId: string, message: string, files?: File[]): Promise<void> {
+  private async sendInputImmediate(
+    instanceId: string,
+    message: string,
+    files?: File[]
+  ): Promise<void> {
     // Convert files to base64 for IPC
-    const attachments = files && files.length > 0
-      ? await Promise.all(files.map((f) => this.fileToAttachment(f)))
-      : undefined;
+    const attachments =
+      files && files.length > 0
+        ? await Promise.all(files.map((f) => this.fileToAttachment(f)))
+        : undefined;
 
     // Optimistically update status
     this.state.update((current) => {
@@ -609,7 +657,7 @@ export class InstanceStore implements OnDestroy {
     const remainingQueue = queue.slice(1);
 
     // Update the signal with the new queue state
-    this.messageQueueSignal.update(map => {
+    this.messageQueueSignal.update((map) => {
       const newMap = new Map(map);
       if (remainingQueue.length === 0) {
         newMap.delete(instanceId);
@@ -620,17 +668,24 @@ export class InstanceStore implements OnDestroy {
     });
 
     if (nextMessage) {
-      console.log('InstanceStore: Processing queued message', { instanceId, queueRemaining: remainingQueue.length });
+      console.log('InstanceStore: Processing queued message', {
+        instanceId,
+        queueRemaining: remainingQueue.length
+      });
       // Use setTimeout to avoid state update conflicts
       setTimeout(() => {
-        this.sendInputImmediate(instanceId, nextMessage.message, nextMessage.files);
+        this.sendInputImmediate(
+          instanceId,
+          nextMessage.message,
+          nextMessage.files
+        );
       }, 100);
     }
   }
 
   /** Clear the message queue for an instance */
   clearMessageQueue(instanceId: string): void {
-    this.messageQueueSignal.update(map => {
+    this.messageQueueSignal.update((map) => {
       const newMap = new Map(map);
       newMap.delete(instanceId);
       return newMap;
@@ -670,7 +725,7 @@ export class InstanceStore implements OnDestroy {
           newMap.set(instanceId, {
             ...instance,
             outputBuffer: [],
-            status: 'idle',
+            status: 'idle'
           });
         }
         return { ...current, instances: newMap };
@@ -715,7 +770,7 @@ export class InstanceStore implements OnDestroy {
       workingDirectory: folder,
       displayName,
       parentId: parentId || undefined,
-      yoloMode,
+      yoloMode
     });
   }
 
@@ -733,7 +788,7 @@ export class InstanceStore implements OnDestroy {
       workingDirectory,
       displayName,
       parentId: parentId || undefined,
-      yoloMode: !yoloMode,
+      yoloMode: !yoloMode
     });
   }
 
@@ -755,7 +810,7 @@ export class InstanceStore implements OnDestroy {
       displayName,
       parentId: parentId || undefined,
       yoloMode,
-      agentId: newAgentId,
+      agentId: newAgentId
     });
   }
 
@@ -773,7 +828,7 @@ export class InstanceStore implements OnDestroy {
       if (instance) {
         newMap.set(instanceId, {
           ...instance,
-          outputBuffer: messages,
+          outputBuffer: messages
         });
       }
 
@@ -794,13 +849,18 @@ export class InstanceStore implements OnDestroy {
       childrenIds: data.childrenIds || [],
       agentId: data.agentId || 'build',
       agentMode: data.agentMode || 'build',
+      provider: data.provider || 'claude',
       status: data.status,
-      contextUsage: data.contextUsage || { used: 0, total: 200000, percentage: 0 },
+      contextUsage: data.contextUsage || {
+        used: 0,
+        total: 200000,
+        percentage: 0
+      },
       lastActivity: data.lastActivity,
       sessionId: data.sessionId,
       workingDirectory: data.workingDirectory,
-      yoloMode: data.yoloMode ?? true,
-      outputBuffer: data.outputBuffer || [],
+      yoloMode: data.yoloMode ?? false,
+      outputBuffer: data.outputBuffer || []
     };
   }
 
@@ -817,7 +877,7 @@ export class InstanceStore implements OnDestroy {
           name: file.name,
           type: file.type,
           size: file.size,
-          data: reader.result as string,
+          data: reader.result as string
         });
       };
       reader.readAsDataURL(file);

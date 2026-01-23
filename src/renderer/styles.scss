@@ -16,19 +16,19 @@
   // ============================================
 
   // Background layers - subtle gradation for depth
-  --bg-primary: #09090b;      // True black with slight warmth
-  --bg-secondary: #0c0c0f;    // Panel backgrounds
-  --bg-tertiary: #111114;     // Elevated surfaces
-  --bg-elevated: #18181b;     // Cards and modals
-  --bg-hover: #1f1f23;        // Interactive hover states
-  --bg-selected: #262629;     // Active/selected states
-  --bg-active: #2d2d31;       // Pressed states
+  --bg-primary: #09090b; // True black with slight warmth
+  --bg-secondary: #0c0c0f; // Panel backgrounds
+  --bg-tertiary: #111114; // Elevated surfaces
+  --bg-elevated: #18181b; // Cards and modals
+  --bg-hover: #1f1f23; // Interactive hover states
+  --bg-selected: #262629; // Active/selected states
+  --bg-active: #2d2d31; // Pressed states
 
   // Text hierarchy - warm whites (brightened for better readability)
-  --text-primary: #fafaf9;    // High contrast, warm white
-  --text-secondary: #c4c4c9;  // Secondary information (brighter)
-  --text-muted: #9a9aa0;      // Subtle text (brighter)
-  --text-disabled: #6b6b73;   // Disabled states (brighter)
+  --text-primary: #fafaf9; // High contrast, warm white
+  --text-secondary: #c4c4c9; // Secondary information (brighter)
+  --text-muted: #9a9aa0; // Subtle text (brighter)
+  --text-disabled: #6b6b73; // Disabled states (brighter)
 
   // Borders - subtle definition
   --border-color: #27272a;
@@ -155,7 +155,7 @@
 // ============================================
 // LIGHT THEME
 // ============================================
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   --bg-primary: #fafafa;
   --bg-secondary: #f5f5f4;
   --bg-tertiary: #e7e5e4;
@@ -240,7 +240,9 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  font-feature-settings: 'kern' 1, 'liga' 1;
+  font-feature-settings:
+    'kern' 1,
+    'liga' 1;
 }
 
 // ============================================
@@ -298,21 +300,40 @@ body {
 // ============================================
 // TYPOGRAPHY
 // ============================================
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--font-display);
   font-weight: 600;
   line-height: var(--leading-tight);
   letter-spacing: -0.01em;
 }
 
-h1 { font-size: var(--text-3xl); }
-h2 { font-size: var(--text-2xl); }
-h3 { font-size: var(--text-xl); }
-h4 { font-size: var(--text-lg); }
-h5 { font-size: var(--text-md); }
-h6 { font-size: var(--text-base); }
+h1 {
+  font-size: var(--text-3xl);
+}
+h2 {
+  font-size: var(--text-2xl);
+}
+h3 {
+  font-size: var(--text-xl);
+}
+h4 {
+  font-size: var(--text-lg);
+}
+h5 {
+  font-size: var(--text-md);
+}
+h6 {
+  font-size: var(--text-base);
+}
 
-code, pre, .mono {
+code,
+pre,
+.mono {
   font-family: var(--font-mono);
 }
 
@@ -439,28 +460,51 @@ select {
 // ============================================
 // STATUS COLORS
 // ============================================
-.status-idle { color: var(--status-idle); }
-.status-busy { color: var(--status-busy); }
-.status-waiting { color: var(--status-waiting); }
-.status-error { color: var(--status-error); }
-.status-initializing { color: var(--status-initializing); }
-.status-terminated { color: var(--text-muted); }
+.status-idle {
+  color: var(--status-idle);
+}
+.status-busy {
+  color: var(--status-busy);
+}
+.status-waiting {
+  color: var(--status-waiting);
+}
+.status-error {
+  color: var(--status-error);
+}
+.status-initializing {
+  color: var(--status-initializing);
+}
+.status-terminated {
+  color: var(--text-muted);
+}
 
 // ============================================
 // ANIMATIONS
 // ============================================
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes fadeInUp {
@@ -497,13 +541,24 @@ select {
 }
 
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @keyframes glow {
-  0%, 100% { box-shadow: 0 0 5px var(--primary-glow); }
-  50% { box-shadow: 0 0 20px var(--primary-glow), 0 0 30px var(--primary-glow); }
+  0%,
+  100% {
+    box-shadow: 0 0 5px var(--primary-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 20px var(--primary-glow),
+      0 0 30px var(--primary-glow);
+  }
 }
 
 // Utility animation classes
@@ -542,7 +597,12 @@ select {
   word-break: break-word;
 
   // Headings
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     margin-top: 1.5em;
     margin-bottom: 0.5em;
     font-family: var(--font-display);
@@ -555,23 +615,41 @@ select {
     }
   }
 
-  h1 { font-size: 1.5em; }
-  h2 { font-size: 1.35em; }
-  h3 { font-size: 1.2em; }
-  h4 { font-size: 1.1em; }
-  h5 { font-size: 1em; }
-  h6 { font-size: 0.9em; color: var(--text-secondary); }
+  h1 {
+    font-size: 1.5em;
+  }
+  h2 {
+    font-size: 1.35em;
+  }
+  h3 {
+    font-size: 1.2em;
+  }
+  h4 {
+    font-size: 1.1em;
+  }
+  h5 {
+    font-size: 1em;
+  }
+  h6 {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+  }
 
   // Paragraphs
   p {
     margin: 0.75em 0;
 
-    &:first-child { margin-top: 0; }
-    &:last-child { margin-bottom: 0; }
+    &:first-child {
+      margin-top: 0;
+    }
+    &:last-child {
+      margin-bottom: 0;
+    }
   }
 
   // Lists
-  ul, ol {
+  ul,
+  ol {
     margin: 0.75em 0;
     padding-left: 1.5em;
   }
@@ -638,12 +716,14 @@ select {
   }
 
   // Strong and emphasis
-  strong, b {
+  strong,
+  b {
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  em, i {
+  em,
+  i {
     font-style: italic;
   }
 }
@@ -659,8 +739,12 @@ select {
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
 
-  &:first-child { margin-top: 0; }
-  &:last-child { margin-bottom: 0; }
+  &:first-child {
+    margin-top: 0;
+  }
+  &:last-child {
+    margin-bottom: 0;
+  }
 }
 
 .code-block-header {
@@ -750,7 +834,8 @@ select {
   border-collapse: collapse;
   font-size: var(--text-sm);
 
-  th, td {
+  th,
+  td {
     padding: var(--spacing-sm) var(--spacing-md);
     text-align: left;
     border-bottom: 1px solid var(--border-color);
@@ -854,7 +939,7 @@ select {
 }
 
 // Light theme syntax highlighting
-:root[data-theme="light"],
+:root[data-theme='light'],
 :root:not([data-theme]) {
   @media (prefers-color-scheme: light) {
     .hljs-comment,
@@ -899,7 +984,7 @@ select {
   }
 }
 
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   .hljs-comment,
   .hljs-quote {
     color: #6b7280;
@@ -963,8 +1048,16 @@ select {
 // Subtle gradient backgrounds
 .gradient-mesh {
   background:
-    radial-gradient(ellipse at 20% 0%, rgba(245, 158, 11, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 100%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+    radial-gradient(
+      ellipse at 20% 0%,
+      rgba(245, 158, 11, 0.08) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 80% 100%,
+      rgba(6, 182, 212, 0.06) 0%,
+      transparent 50%
+    ),
     var(--bg-primary);
 }
 
@@ -975,7 +1068,9 @@ select {
   border-radius: 50%;
   flex-shrink: 0;
 
-  &.idle { background: var(--status-idle); }
+  &.idle {
+    background: var(--status-idle);
+  }
   &.busy {
     background: var(--status-busy);
     animation: pulse 1.5s ease-in-out infinite;
@@ -984,12 +1079,16 @@ select {
     background: var(--status-waiting);
     animation: pulse 2s ease-in-out infinite;
   }
-  &.error { background: var(--status-error); }
+  &.error {
+    background: var(--status-error);
+  }
   &.initializing {
     background: var(--status-initializing);
     animation: pulse 1s ease-in-out infinite;
   }
-  &.terminated { background: var(--text-muted); }
+  &.terminated {
+    background: var(--text-muted);
+  }
 }
 
 // Button styles
@@ -1072,6 +1171,10 @@ select {
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
+
+  &.new-instance {
+    width: auto;
+  }
 
   &:hover:not(:disabled) {
     background: var(--bg-hover);

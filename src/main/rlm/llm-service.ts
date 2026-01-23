@@ -10,6 +10,7 @@
 
 import { EventEmitter } from 'events';
 import { getTokenCounter, TokenCounter } from './token-counter';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
 export interface LLMServiceConfig {
   provider: 'anthropic' | 'ollama' | 'openai' | 'local';
@@ -452,7 +453,7 @@ Answer:`;
       throw new Error('Anthropic API key not configured');
     }
 
-    const model = this.config.model || 'claude-3-haiku-20240307';
+    const model = this.config.model || CLAUDE_MODELS.HAIKU;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -704,7 +705,7 @@ Answer:`;
       throw new Error('Anthropic API key not configured');
     }
 
-    const model = this.config.model || 'claude-3-haiku-20240307'; // Use Haiku for speed
+    const model = this.config.model || CLAUDE_MODELS.HAIKU; // Use Haiku for speed
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

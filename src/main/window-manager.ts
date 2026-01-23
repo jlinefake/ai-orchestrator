@@ -26,11 +26,13 @@ export class WindowManager {
 
       // Native appearance - hiddenInset shows traffic lights, hides title
       titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
-      titleBarOverlay: !isMac ? {
-        color: '#1a1a2e',
-        symbolColor: '#e4e4e7',
-        height: 40,
-      } : undefined,
+      titleBarOverlay: !isMac
+        ? {
+            color: '#1a1a2e',
+            symbolColor: '#e4e4e7',
+            height: 40
+          }
+        : undefined,
       trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
 
       // Visual
@@ -50,8 +52,8 @@ export class WindowManager {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
-        devTools: true, // Always enable devtools for debugging
-      },
+        devTools: true // Always enable devtools for debugging
+      }
     });
 
     // Remove menu bar entirely on Windows/Linux for cleaner look
@@ -114,8 +116,8 @@ export class WindowManager {
           { role: 'hideOthers' },
           { role: 'unhide' },
           { type: 'separator' },
-          { role: 'quit' },
-        ],
+          { role: 'quit' }
+        ]
       },
       {
         label: 'File',
@@ -125,11 +127,11 @@ export class WindowManager {
             accelerator: 'CmdOrCtrl+N',
             click: () => {
               this.mainWindow?.webContents.send('menu:new-instance');
-            },
+            }
           },
           { type: 'separator' },
-          { role: 'close' },
-        ],
+          { role: 'close' }
+        ]
       },
       {
         label: 'Edit',
@@ -140,8 +142,8 @@ export class WindowManager {
           { role: 'cut' },
           { role: 'copy' },
           { role: 'paste' },
-          { role: 'selectAll' },
-        ],
+          { role: 'selectAll' }
+        ]
       },
       {
         label: 'View',
@@ -154,8 +156,8 @@ export class WindowManager {
           { role: 'zoomIn' },
           { role: 'zoomOut' },
           { type: 'separator' },
-          { role: 'togglefullscreen' },
-        ],
+          { role: 'togglefullscreen' }
+        ]
       },
       {
         label: 'Window',
@@ -163,9 +165,9 @@ export class WindowManager {
           { role: 'minimize' },
           { role: 'zoom' },
           { type: 'separator' },
-          { role: 'front' },
-        ],
-      },
+          { role: 'front' }
+        ]
+      }
     ];
 
     const menu = Menu.buildFromTemplate(template);

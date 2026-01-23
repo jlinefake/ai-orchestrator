@@ -13,7 +13,12 @@ import type { MemoryEntry } from './memory-r1.types';
 
 // ============ Memory Categories ============
 
-export type MemoryType = 'short_term' | 'long_term' | 'episodic' | 'semantic' | 'procedural';
+export type MemoryType =
+  | 'short_term'
+  | 'long_term'
+  | 'episodic'
+  | 'semantic'
+  | 'procedural';
 
 export type TrainingStage = 1 | 2 | 3;
 
@@ -36,6 +41,15 @@ export interface UnifiedMemoryConfig {
     procedural: number; // Fraction for procedural
   };
 
+  // Retrieval tuning
+  qualityCostProfile?: 'quality' | 'balanced' | 'cost';
+  diversityThreshold?: number; // 0-1, higher means more diversity
+  rlmMaxResults?: number; // max RLM chunks per tier
+
+  // Semantic cache
+  semanticCacheMaxEntries?: number;
+  semanticCacheTtlMs?: number;
+
   // Training settings (Three-Stage Progressive Training)
   trainingStage: TrainingStage;
   enableGRPO: boolean;
@@ -43,7 +57,13 @@ export interface UnifiedMemoryConfig {
 
 // ============ Tool Actions ============
 
-export type MemoryToolType = 'store' | 'retrieve' | 'update' | 'delete' | 'summarize' | 'link';
+export type MemoryToolType =
+  | 'store'
+  | 'retrieve'
+  | 'update'
+  | 'delete'
+  | 'summarize'
+  | 'link';
 
 export interface MemoryToolAction {
   tool: MemoryToolType;

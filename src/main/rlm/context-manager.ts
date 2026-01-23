@@ -24,12 +24,13 @@ import {
   SummaryLevel,
   RLMStoreStats,
   RLMSessionStats,
-  BloomFilter,
+  BloomFilter
 } from '../../shared/types/rlm.types';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
 import { ContextSectionRow } from '../persistence/rlm-database.types';
 import { VectorStore, getVectorStore } from './vector-store';
 import { LLMService, getLLMService } from './llm-service';
+import { HyDEService, getHyDEService } from './hyde-service';
 
 export class RLMContextManager extends EventEmitter {
   private static instance: RLMContextManager;
@@ -39,6 +40,7 @@ export class RLMContextManager extends EventEmitter {
   private db: RLMDatabase | null = null;
   private vectorStore: VectorStore | null = null;
   private llmService: LLMService | null = null;
+  private hydeService: HyDEService | null = null;
   private persistenceEnabled = true;
 
   private defaultConfig: RLMConfig = {
@@ -49,7 +51,7 @@ export class RLMContextManager extends EventEmitter {
     maxSubQueries: 10,
     subQueryTimeout: 30000,
     summaryTargetRatio: 0.2,
-    enableCostTracking: true,
+    enableCostTracking: true
   };
 
   static getInstance(): RLMContextManager {
@@ -73,6 +75,7 @@ export class RLMContextManager extends EventEmitter {
       this.db = getRLMDatabase();
       this.vectorStore = getVectorStore();
       this.llmService = getLLMService();
+      this.hydeService = getHyDEService();
       this.loadFromPersistence();
       this.setupLLMHandlers();
       this.emit('persistence:initialized', { success: true });
@@ -90,55 +93,66 @@ export class RLMContextManager extends EventEmitter {
     if (!this.llmService) return;
 
     // Handle summarization requests
-    this.on('summarize:request', async (request: {
-      sessionId: string;
-      content: string;
-      targetTokens: number;
-      callback: (summary: string) => void;
-    }) => {
-      try {
-        const summary = await this.llmService!.summarize({
-          requestId: `sum-${Date.now()}`,
-          content: request.content,
-          targetTokens: request.targetTokens,
-          preserveKeyPoints: true,
-        });
+    this.on(
+      'summarize:request',
+      async (request: {
+        sessionId: string;
+        content: string;
+        targetTokens: number;
+        callback: (summary: string) => void;
+      }) => {
+        try {
+          const summary = await this.llmService!.summarize({
+            requestId: `sum-${Date.now()}`,
+            content: request.content,
+            targetTokens: request.targetTokens,
+            preserveKeyPoints: true
+          });
 
-        request.callback(summary);
-      } catch (error) {
-        console.error('[RLM] LLM summarization failed:', error);
-        // Fallback handled internally by LLMService
+          request.callback(summary);
+        } catch (error) {
+          console.error('[RLM] LLM summarization failed:', error);
+          // Fallback handled internally by LLMService
+        }
       }
-    });
+    );
 
     // Handle sub-query requests
-    this.on('sub_query:request', async (request: {
-      sessionId: string;
-      callId: string;
-      prompt: string;
-      context: string;
-      depth: number;
-      callback: (response: string, tokens: { input: number; output: number }) => void;
-    }) => {
-      try {
-        const response = await this.llmService!.subQuery({
-          requestId: request.callId,
-          prompt: request.prompt,
-          context: request.context,
-          depth: request.depth,
-        });
+    this.on(
+      'sub_query:request',
+      async (request: {
+        sessionId: string;
+        callId: string;
+        prompt: string;
+        context: string;
+        depth: number;
+        callback: (
+          response: string,
+          tokens: { input: number; output: number }
+        ) => void;
+      }) => {
+        try {
+          const response = await this.llmService!.subQuery({
+            requestId: request.callId,
+            prompt: request.prompt,
+            context: request.context,
+            depth: request.depth
+          });
 
-        const tokens = {
-          input: Math.ceil((request.context.length + request.prompt.length) / 4),
-          output: Math.ceil(response.length / 4),
-        };
+          const tokens = {
+            input: Math.ceil(
+              (request.context.length + request.prompt.length) / 4
+            ),
+            output: Math.ceil(response.length / 4)
+          };
 
-        request.callback(response, tokens);
-      } catch (error) {
-        console.error('[RLM] LLM sub-query failed:', error);
-        request.callback('[Sub-query failed]', { input: 0, output: 0 });
+          request.callback(response, tokens);
+        } catch (error) {
+          console.error('[RLM] LLM sub-query failed:', error);
+          request.callback('[Sub-query failed]', { input: 0, output: 0 });
+        }
       }
-    });
+    );
   }
 
   /**
@@ -157,13 +171,17 @@ export class RLMContextManager extends EventEmitter {
       const store: ContextStore = {
         id: row.id,
         instanceId: row.instance_id,
-        sections: sectionRows.map(s => this.rowToSection(s)),
+        sections: sectionRows.map((s) => this.rowToSection(s)),
         totalTokens: row.total_tokens,
         totalSize: row.total_size,
-        searchIndex: { terms: new Map(), sectionBoundaries: [], lastRebuilt: Date.now() },
+        searchIndex: {
+          terms: new Map(),
+          sectionBoundaries: [],
+          lastRebuilt: Date.now()
+        },
         createdAt: row.created_at,
         lastAccessed: row.last_accessed,
-        accessCount: row.access_count,
+        accessCount: row.access_count
       };
 
       // Rebuild in-memory search index
@@ -187,19 +205,24 @@ export class RLMContextManager extends EventEmitter {
           storeId: row.store_id,
           instanceId: row.instance_id,
           queries: row.queries_json ? JSON.parse(row.queries_json) : [],
-          recursiveCalls: row.recursive_calls_json ? JSON.parse(row.recursive_calls_json) : [],
+          recursiveCalls: row.recursive_calls_json
+            ? JSON.parse(row.recursive_calls_json)
+            : [],
           totalRootTokens: row.total_root_tokens,
           totalSubQueryTokens: row.total_sub_query_tokens,
           estimatedDirectTokens: row.estimated_direct_tokens,
           tokenSavingsPercent: row.token_savings_percent,
           startedAt: row.started_at,
-          lastActivityAt: row.last_activity_at,
+          lastActivityAt: row.last_activity_at
         };
         this.sessions.set(row.id, session);
       }
     }
 
-    this.emit('persistence:loaded', { storeCount: loadedStores, sectionCount: loadedSections });
+    this.emit('persistence:loaded', {
+      storeCount: loadedStores,
+      sectionCount: loadedSections
+    });
   }
 
   /**
@@ -221,8 +244,10 @@ export class RLMContextManager extends EventEmitter {
       filePath: row.file_path || undefined,
       language: row.language || undefined,
       sourceUrl: row.source_url || undefined,
-      summarizes: row.summarizes_json ? JSON.parse(row.summarizes_json) : undefined,
-      parentSummaryId: row.parent_summary_id || undefined,
+      summarizes: row.summarizes_json
+        ? JSON.parse(row.summarizes_json)
+        : undefined,
+      parentSummaryId: row.parent_summary_id || undefined
     };
   }
 
@@ -265,7 +290,7 @@ export class RLMContextManager extends EventEmitter {
       totalSize: 0,
       createdAt: Date.now(),
       lastAccessed: Date.now(),
-      accessCount: 0,
+      accessCount: 0
     };
 
     // Persist to database
@@ -273,7 +298,7 @@ export class RLMContextManager extends EventEmitter {
       try {
         this.db.createStore({
           id: store.id,
-          instanceId: store.instanceId,
+          instanceId: store.instanceId
         });
       } catch (error) {
         console.error('[RLM] Failed to persist store:', error);
@@ -312,7 +337,7 @@ export class RLMContextManager extends EventEmitter {
       endOffset: store.totalSize + content.length,
       checksum: this.computeChecksum(content),
       depth: 0,
-      ...metadata,
+      ...metadata
     };
 
     store.sections.push(section);
@@ -337,7 +362,7 @@ export class RLMContextManager extends EventEmitter {
           filePath: section.filePath,
           language: section.language,
           sourceUrl: section.sourceUrl,
-          content: section.content,
+          content: section.content
         });
         // Also index the section for search
         this.db.indexSection(storeId, section.id, section.content);
@@ -351,14 +376,16 @@ export class RLMContextManager extends EventEmitter {
 
     // Add vector for semantic search (async, don't await)
     if (this.vectorStore) {
-      this.vectorStore.addSection(storeId, section.id, section.content, {
-        type: section.type,
-        name: section.name,
-        filePath: section.filePath,
-        language: section.language,
-      }).catch(error => {
-        console.error('[RLM] Failed to add vector for section:', error);
-      });
+      this.vectorStore
+        .addSection(storeId, section.id, section.content, {
+          type: section.type,
+          name: section.name,
+          filePath: section.filePath,
+          language: section.language
+        })
+        .catch((error) => {
+          console.error('[RLM] Failed to add vector for section:', error);
+        });
     }
 
     // Check if summarization needed
@@ -392,7 +419,7 @@ export class RLMContextManager extends EventEmitter {
         endOffset: store.totalSize + chunks[i].length,
         checksum: this.computeChecksum(chunks[i]),
         depth: 0,
-        ...metadata,
+        ...metadata
       };
 
       store.sections.push(chunkSection);
@@ -415,7 +442,7 @@ export class RLMContextManager extends EventEmitter {
             filePath: chunkSection.filePath,
             language: chunkSection.language,
             sourceUrl: chunkSection.sourceUrl,
-            content: chunkSection.content,
+            content: chunkSection.content
           });
           this.db.indexSection(store.id, chunkSection.id, chunkSection.content);
         } catch (error) {
@@ -425,14 +452,19 @@ export class RLMContextManager extends EventEmitter {
 
       // Add vector for semantic search (async, don't await)
       if (this.vectorStore) {
-        this.vectorStore.addSection(store.id, chunkSection.id, chunkSection.content, {
-          type: chunkSection.type,
-          name: chunkSection.name,
-          filePath: chunkSection.filePath,
-          language: chunkSection.language,
-        }).catch(error => {
-          console.error('[RLM] Failed to add vector for chunk section:', error);
-        });
+        this.vectorStore
+          .addSection(store.id, chunkSection.id, chunkSection.content, {
+            type: chunkSection.type,
+            name: chunkSection.name,
+            filePath: chunkSection.filePath,
+            language: chunkSection.language
+          })
+          .catch((error) => {
+            console.error(
+              '[RLM] Failed to add vector for chunk section:',
+              error
+            );
+          });
       }
 
       this.updateSearchIndex(store, chunkSection);
@@ -464,7 +496,7 @@ export class RLMContextManager extends EventEmitter {
     if (currentChunk) chunks.push(currentChunk);
 
     // If still too large, force split
-    return chunks.flatMap(chunk => {
+    return chunks.flatMap((chunk) => {
       if (this.estimateTokens(chunk) > maxChunkTokens) {
         return this.forceSplit(chunk, maxChunkTokens);
       }
@@ -508,7 +540,7 @@ export class RLMContextManager extends EventEmitter {
       estimatedDirectTokens: store.totalTokens,
       tokenSavingsPercent: 0,
       startedAt: Date.now(),
-      lastActivityAt: Date.now(),
+      lastActivityAt: Date.now()
     };
 
     // Persist session to database
@@ -518,7 +550,7 @@ export class RLMContextManager extends EventEmitter {
           id: session.id,
           storeId: session.storeId,
           instanceId: session.instanceId,
-          estimatedDirectTokens: session.estimatedDirectTokens,
+          estimatedDirectTokens: session.estimatedDirectTokens
         });
       } catch (error) {
         console.error('[RLM] Failed to persist session:', error);
@@ -578,7 +610,8 @@ export class RLMContextManager extends EventEmitter {
           store,
           query.params as { sectionIds: string[] }
         );
-        sectionsAccessed = (query.params as { sectionIds: string[] }).sectionIds;
+        sectionsAccessed = (query.params as { sectionIds: string[] })
+          .sectionIds;
         break;
 
       case 'sub_query':
@@ -604,7 +637,8 @@ export class RLMContextManager extends EventEmitter {
         throw new Error(`Unknown query type: ${query.type}`);
     }
 
-    const tokensUsed = query.type === 'sub_query' ? 0 : this.estimateTokens(result);
+    const tokensUsed =
+      query.type === 'sub_query' ? 0 : this.estimateTokens(result);
     const queryResult: ContextQueryResult = {
       query,
       result,
@@ -612,7 +646,7 @@ export class RLMContextManager extends EventEmitter {
       sectionsAccessed,
       duration: Date.now() - startTime,
       subQueries,
-      depth,
+      depth
     };
 
     // Track costs
@@ -625,7 +659,9 @@ export class RLMContextManager extends EventEmitter {
     const totalUsed = session.totalRootTokens + session.totalSubQueryTokens;
     session.tokenSavingsPercent = Math.max(
       0,
-      ((session.estimatedDirectTokens - totalUsed) / session.estimatedDirectTokens) * 100
+      ((session.estimatedDirectTokens - totalUsed) /
+        session.estimatedDirectTokens) *
+        100
     );
 
     session.queries.push(queryResult);
@@ -639,11 +675,11 @@ export class RLMContextManager extends EventEmitter {
           totalSubQueryTokens: session.totalSubQueryTokens,
           tokenSavingsPercent: session.tokenSavingsPercent,
           queriesJson: JSON.stringify(session.queries),
-          recursiveCallsJson: JSON.stringify(session.recursiveCalls),
+          recursiveCallsJson: JSON.stringify(session.recursiveCalls)
         });
         // Also update store access stats
         this.db.updateStoreStats(store.id, {
-          accessCount: store.accessCount,
+          accessCount: store.accessCount
         });
       } catch (error) {
         console.error('[RLM] Failed to persist session update:', error);
@@ -666,12 +702,19 @@ export class RLMContextManager extends EventEmitter {
     try {
       regex = new RegExp(pattern, 'gi');
     } catch (error) {
-      console.warn('[RLM] Invalid regex pattern, falling back to literal search:', error);
+      console.warn(
+        '[RLM] Invalid regex pattern, falling back to literal search:',
+        error
+      );
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       regex = new RegExp(escaped, 'gi');
     }
 
-    const matches: { section: ContextSection; match: RegExpMatchArray; context: string }[] = [];
+    const matches: {
+      section: ContextSection;
+      match: RegExpMatchArray;
+      context: string;
+    }[] = [];
     const sectionsAccessed: string[] = [];
 
     for (const section of store.sections) {
@@ -685,7 +728,10 @@ export class RLMContextManager extends EventEmitter {
         // Extract context around match
         const windowSize = this.config.searchWindowSize;
         const start = Math.max(0, match.index! - windowSize);
-        const end = Math.min(section.content.length, match.index! + match[0].length + windowSize);
+        const end = Math.min(
+          section.content.length,
+          match.index! + match[0].length + windowSize
+        );
         const context = section.content.slice(start, end);
 
         matches.push({ section, match, context });
@@ -698,7 +744,10 @@ export class RLMContextManager extends EventEmitter {
     }
 
     const result = matches
-      .map((m, i) => `[Match ${i + 1}] ${m.section.name} (${m.section.type}):\n...${m.context}...`)
+      .map(
+        (m, i) =>
+          `[Match ${i + 1}] ${m.section.name} (${m.section.type}):\n...${m.context}...`
+      )
       .join('\n\n---\n\n');
 
     return { result: result || 'No matches found.', sectionsAccessed };
@@ -718,7 +767,10 @@ export class RLMContextManager extends EventEmitter {
       if (section.startOffset > end) break;
 
       const sliceStart = Math.max(0, start - section.startOffset);
-      const sliceEnd = Math.min(section.content.length, end - section.startOffset);
+      const sliceEnd = Math.min(
+        section.content.length,
+        end - section.startOffset
+      );
 
       result += section.content.slice(sliceStart, sliceEnd);
       sectionsAccessed.push(section.id);
@@ -731,14 +783,17 @@ export class RLMContextManager extends EventEmitter {
     store: ContextStore,
     params: { sectionId: string }
   ): { result: string; sectionsAccessed: string[] } {
-    const section = store.sections.find(s => s.id === params.sectionId);
+    const section = store.sections.find((s) => s.id === params.sectionId);
     if (!section) {
-      return { result: `Section not found: ${params.sectionId}`, sectionsAccessed: [] };
+      return {
+        result: `Section not found: ${params.sectionId}`,
+        sectionsAccessed: []
+      };
     }
 
     return {
       result: `[${section.name}] (${section.tokens} tokens)\n\n${section.content}`,
-      sectionsAccessed: [section.id],
+      sectionsAccessed: [section.id]
     };
   }
 
@@ -747,14 +802,20 @@ export class RLMContextManager extends EventEmitter {
     store: ContextStore,
     params: { sectionIds: string[] }
   ): Promise<string> {
-    const sections = store.sections.filter(s => params.sectionIds.includes(s.id));
-    const content = sections.map(s => `## ${s.name}\n${s.content}`).join('\n\n---\n\n');
+    const sections = store.sections.filter((s) =>
+      params.sectionIds.includes(s.id)
+    );
+    const content = sections
+      .map((s) => `## ${s.name}\n${s.content}`)
+      .join('\n\n---\n\n');
 
     const totalTokens = sections.reduce((sum, s) => sum + s.tokens, 0);
-    const targetTokens = Math.ceil(totalTokens * this.config.summaryTargetRatio);
+    const targetTokens = Math.ceil(
+      totalTokens * this.config.summaryTargetRatio
+    );
 
     // Emit event for LLM to summarize
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       let resolved = false;
 
       this.emit('summarize:request', {
@@ -769,7 +830,7 @@ export class RLMContextManager extends EventEmitter {
           this.persistSummary(store, summary, params.sectionIds, sections);
 
           resolve(summary);
-        },
+        }
       });
 
       // Fallback if not handled
@@ -777,10 +838,15 @@ export class RLMContextManager extends EventEmitter {
         if (resolved) return;
         resolved = true;
 
-        const fallbackSummary = `[Summary of ${sections.length} sections, ~${totalTokens} tokens → ~${targetTokens} target tokens]\n\nKey content from: ${sections.map(s => s.name).join(', ')}`;
+        const fallbackSummary = `[Summary of ${sections.length} sections, ~${totalTokens} tokens → ~${targetTokens} target tokens]\n\nKey content from: ${sections.map((s) => s.name).join(', ')}`;
 
         // Store even the fallback summary
-        this.persistSummary(store, fallbackSummary, params.sectionIds, sections);
+        this.persistSummary(
+          store,
+          fallbackSummary,
+          params.sectionIds,
+          sections
+        );
 
         resolve(fallbackSummary);
       }, 5000);
@@ -799,7 +865,10 @@ export class RLMContextManager extends EventEmitter {
     try {
       const summaryTokens = this.estimateTokens(summaryContent);
 
-      const summaryDepth = Math.max(1, ...summarizedSections.map(s => s.depth + 1));
+      const summaryDepth = Math.max(
+        1,
+        ...summarizedSections.map((s) => s.depth + 1)
+      );
       const summarySection: ContextSection = {
         id: `sum-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         type: 'summary',
@@ -810,7 +879,7 @@ export class RLMContextManager extends EventEmitter {
         endOffset: store.totalSize + summaryContent.length,
         checksum: this.computeChecksum(summaryContent),
         depth: summaryDepth,
-        summarizes: summarizedSectionIds,
+        summarizes: summarizedSectionIds
       };
 
       store.sections.push(summarySection);
@@ -830,7 +899,7 @@ export class RLMContextManager extends EventEmitter {
           checksum: summarySection.checksum,
           depth: summarySection.depth,
           summarizes: summarySection.summarizes,
-          content: summarySection.content,
+          content: summarySection.content
         });
       }
 
@@ -842,8 +911,13 @@ export class RLMContextManager extends EventEmitter {
         store.summaryIndex.sectionToSummary.set(sectionId, summarySection.id);
       }
 
-      this.emit('summary:created', { storeId: store.id, section: summarySection });
-      console.log(`[RLM] Created summary section ${summarySection.id} for ${summarizedSectionIds.length} sections`);
+      this.emit('summary:created', {
+        storeId: store.id,
+        section: summarySection
+      });
+      console.log(
+        `[RLM] Created summary section ${summarySection.id} for ${summarizedSectionIds.length} sections`
+      );
     } catch (error) {
       console.error('[RLM] Failed to persist summary:', error);
     }
@@ -854,11 +928,15 @@ export class RLMContextManager extends EventEmitter {
     store: ContextStore,
     params: { prompt: string; contextHints?: string[] },
     depth: number
-  ): Promise<{ result: string; sectionsAccessed: string[]; subQueries?: ContextQueryResult[] }> {
+  ): Promise<{
+    result: string;
+    sectionsAccessed: string[];
+    subQueries?: ContextQueryResult[];
+  }> {
     if (depth >= this.config.maxRecursionDepth) {
       return {
         result: '[Max recursion depth reached. Please refine your query.]',
-        sectionsAccessed: [],
+        sectionsAccessed: []
       };
     }
 
@@ -869,21 +947,26 @@ export class RLMContextManager extends EventEmitter {
     if (params.contextHints && params.contextHints.length > 0) {
       // Search for relevant context based on hints
       for (const hint of params.contextHints.slice(0, 3)) {
-        const grepResult = this.executeGrep(store, { pattern: hint, maxResults: 3 });
+        const grepResult = this.executeGrep(store, {
+          pattern: hint,
+          maxResults: 3
+        });
         contextWindow += grepResult.result + '\n\n';
         sectionsAccessed.push(...grepResult.sectionsAccessed);
       }
     } else {
       // Use top-level summaries if available
-      const summaries = store.sections.filter(s => s.type === 'summary' && s.depth === 1);
+      const summaries = store.sections.filter(
+        (s) => s.type === 'summary' && s.depth === 1
+      );
       if (summaries.length > 0) {
-        contextWindow = summaries.map(s => s.content).join('\n\n---\n\n');
-        sectionsAccessed = summaries.map(s => s.id);
+        contextWindow = summaries.map((s) => s.content).join('\n\n---\n\n');
+        sectionsAccessed = summaries.map((s) => s.id);
       } else {
         // Fall back to section names overview
         const overview = store.sections
-          .filter(s => s.depth === 0)
-          .map(s => `- ${s.name} (${s.tokens} tokens, ${s.type})`)
+          .filter((s) => s.depth === 0)
+          .map((s) => `- ${s.name} (${s.tokens} tokens, ${s.type})`)
           .join('\n');
         contextWindow = `Available sections:\n${overview}`;
       }
@@ -901,12 +984,12 @@ export class RLMContextManager extends EventEmitter {
       contextWindow: contextWindow.slice(0, 2000), // Store sample
       tokens: { input: 0, output: 0 },
       duration: 0,
-      status: 'pending',
+      status: 'pending'
     };
     session.recursiveCalls.push(recursiveCall);
 
     // Emit event for recursive LLM call
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       recursiveCall.status = 'running';
       const startTime = Date.now();
 
@@ -916,7 +999,10 @@ export class RLMContextManager extends EventEmitter {
         prompt: params.prompt,
         context: contextWindow,
         depth: depth + 1,
-        callback: (response: string, tokens: { input: number; output: number }) => {
+        callback: (
+          response: string,
+          tokens: { input: number; output: number }
+        ) => {
           recursiveCall.response = response;
           recursiveCall.tokens = tokens;
           recursiveCall.duration = Date.now() - startTime;
@@ -926,9 +1012,9 @@ export class RLMContextManager extends EventEmitter {
 
           resolve({
             result: response,
-            sectionsAccessed,
+            sectionsAccessed
           });
-        },
+        }
       });
 
       // Timeout handler
@@ -937,7 +1023,7 @@ export class RLMContextManager extends EventEmitter {
           recursiveCall.status = 'failed';
           resolve({
             result: '[Sub-query timed out]',
-            sectionsAccessed,
+            sectionsAccessed
           });
         }
       }, this.config.subQueryTimeout);
@@ -946,39 +1032,99 @@ export class RLMContextManager extends EventEmitter {
 
   private async executeSemanticSearch(
     store: ContextStore,
-    params: { query: string; topK?: number; minSimilarity?: number }
+    params: {
+      query: string;
+      topK?: number;
+      minSimilarity?: number;
+      useHyDE?: boolean;
+    }
   ): Promise<{ result: string; sectionsAccessed: string[] }> {
-    const { query, topK = 5, minSimilarity = 0.5 } = params;
+    const { query, topK = 5, minSimilarity = 0.5, useHyDE = true } = params;
 
     // Use vector store for semantic search if available
     if (this.vectorStore) {
       try {
-        const searchResults = await this.vectorStore.search(store.id, query, {
-          topK,
-          minSimilarity,
-        });
+        // Use HyDE (Hypothetical Document Embeddings) for better search on vague queries
+        // HyDE generates a hypothetical answer, embeds it, and uses that for search
+        let searchEmbedding: number[] | undefined;
+        let hydeInfo: { used: boolean; generationTimeMs: number } = {
+          used: false,
+          generationTimeMs: 0
+        };
+
+        if (useHyDE && this.hydeService) {
+          try {
+            const hydeResult = await this.hydeService.embed(query);
+            if (hydeResult.hydeUsed) {
+              searchEmbedding = hydeResult.embedding;
+              hydeInfo = {
+                used: true,
+                generationTimeMs: hydeResult.generationTimeMs
+              };
+              this.emit('semantic:hyde', {
+                query,
+                hydeResult: {
+                  used: hydeResult.hydeUsed,
+                  cached: hydeResult.cached,
+                  generationTimeMs: hydeResult.generationTimeMs,
+                  hypotheticalPreview:
+                    hydeResult.hypotheticalDocuments[0]?.substring(0, 200)
+                }
+              });
+            }
+          } catch (hydeError) {
+            console.warn(
+              '[RLM] HyDE failed, using direct query embedding:',
+              hydeError
+            );
+          }
+        }
+
+        // If HyDE provided an embedding, search using the precomputed embedding
+        // Otherwise fall back to standard search which embeds the query directly
+        let searchResults;
+        if (searchEmbedding) {
+          // Use the HyDE embedding for vector search
+          searchResults = await this.vectorStoreSearchWithEmbedding(
+            store.id,
+            searchEmbedding,
+            { topK, minSimilarity }
+          );
+        } else {
+          // Standard search - embeds the query directly
+          searchResults = await this.vectorStore.search(store.id, query, {
+            topK,
+            minSimilarity
+          });
+        }
 
         if (searchResults.length > 0) {
           const sectionsAccessed: string[] = [];
           const matches: string[] = [];
 
           for (const result of searchResults) {
-            const section = store.sections.find(s => s.id === result.entry.sectionId);
+            const section = store.sections.find(
+              (s) => s.id === result.entry.sectionId
+            );
             if (section) {
               sectionsAccessed.push(section.id);
+              const hydeTag = hydeInfo.used ? ' [HyDE]' : '';
               matches.push(
-                `[Similarity: ${(result.similarity * 100).toFixed(1)}%] ${section.name} (${section.type}):\n...${result.entry.contentPreview}...`
+                `[Similarity: ${(result.similarity * 100).toFixed(1)}%${hydeTag}] ${section.name} (${section.type}):\n...${result.entry.contentPreview}...`
               );
             }
           }
 
           return {
             result: matches.join('\n\n---\n\n') || 'No matches found.',
-            sectionsAccessed,
+            sectionsAccessed
           };
         }
       } catch (error) {
-        console.error('[RLM] Semantic search failed, falling back to keyword search:', error);
+        console.error(
+          '[RLM] Semantic search failed, falling back to keyword search:',
+          error
+        );
       }
     }
 
@@ -986,20 +1132,123 @@ export class RLMContextManager extends EventEmitter {
     const keywords = query
       .toLowerCase()
       .split(/\s+/)
-      .filter(w => w.length > 3);
+      .filter((w) => w.length > 3);
     const pattern = keywords.join('|');
 
     return this.executeGrep(store, { pattern, maxResults: topK });
   }
 
+  /**
+   * Search vector store using a precomputed embedding (used with HyDE)
+   */
+  private async vectorStoreSearchWithEmbedding(
+    storeId: string,
+    embedding: number[],
+    options: { topK: number; minSimilarity: number }
+  ): Promise<
+    Array<{
+      entry: { sectionId: string; contentPreview: string };
+      similarity: number;
+    }>
+  > {
+    if (!this.vectorStore) {
+      return [];
+    }
+
+    // Access the vector store's internal cache to find matches
+    // This is a workaround since VectorStore.search() always embeds the query
+    const vectorStore = this.vectorStore as unknown as {
+      storeVectorIds: Map<string, Set<string>>;
+      vectorCache: Map<
+        string,
+        {
+          id: string;
+          sectionId: string;
+          embedding: number[];
+          contentPreview: string;
+        }
+      >;
+    };
+
+    const storeVectors = vectorStore.storeVectorIds.get(storeId);
+    if (!storeVectors || storeVectors.size === 0) {
+      return [];
+    }
+
+    // Collect candidates
+    const candidates: Array<{
+      id: string;
+      sectionId: string;
+      embedding: number[];
+      contentPreview: string;
+    }> = [];
+    for (const vectorId of storeVectors) {
+      const entry = vectorStore.vectorCache.get(vectorId);
+      if (entry) {
+        candidates.push(entry);
+      }
+    }
+
+    // Calculate similarities
+    const results: Array<{
+      entry: { sectionId: string; contentPreview: string };
+      similarity: number;
+    }> = [];
+    for (const candidate of candidates) {
+      const similarity = this.cosineSimilarity(embedding, candidate.embedding);
+      if (similarity >= options.minSimilarity) {
+        results.push({
+          entry: {
+            sectionId: candidate.sectionId,
+            contentPreview: candidate.contentPreview
+          },
+          similarity
+        });
+      }
+    }
+
+    // Sort by similarity and take top K
+    results.sort((a, b) => b.similarity - a.similarity);
+    return results.slice(0, options.topK);
+  }
+
+  /**
+   * Calculate cosine similarity between two vectors
+   */
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      return 0;
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    if (denominator === 0) {
+      return 0;
+    }
+
+    return dotProduct / denominator;
+  }
+
   // ============ Indexing ============
 
-  private updateSearchIndex(store: ContextStore, section: ContextSection): void {
+  private updateSearchIndex(
+    store: ContextStore,
+    section: ContextSection
+  ): void {
     if (!store.searchIndex) {
       store.searchIndex = {
         terms: new Map(),
         sectionBoundaries: [],
-        lastRebuilt: Date.now(),
+        lastRebuilt: Date.now()
       };
     }
 
@@ -1015,11 +1264,13 @@ export class RLMContextManager extends EventEmitter {
       const nextIndex = contentLower.indexOf(word, charIndex);
 
       if (nextIndex >= 0) {
-        lineNumber += (section.content.slice(charIndex, nextIndex).match(/\n/g) || []).length;
+        lineNumber += (
+          section.content.slice(charIndex, nextIndex).match(/\n/g) || []
+        ).length;
         const location: TermLocation = {
           sectionId: section.id,
           offset: nextIndex,
-          lineNumber,
+          lineNumber
         };
         locations.push(location);
         store.searchIndex.terms.set(word, locations);
@@ -1035,13 +1286,13 @@ export class RLMContextManager extends EventEmitter {
     if (!store.summaryIndex) {
       store.summaryIndex = {
         levels: [],
-        sectionToSummary: new Map(),
+        sectionToSummary: new Map()
       };
     }
 
     // Group original sections for potential summarization
     // (Actual summarization is lazy - done only when needed)
-    const originalSections = store.sections.filter(s => s.depth === 0);
+    const originalSections = store.sections.filter((s) => s.depth === 0);
     const groupSize = 10;
 
     for (let i = 0; i < originalSections.length; i += groupSize) {
@@ -1059,8 +1310,8 @@ export class RLMContextManager extends EventEmitter {
           startOffset: 0,
           endOffset: 0,
           checksum: '',
-          summarizes: group.map(s => s.id),
-          depth: 1,
+          summarizes: group.map((s) => s.id),
+          depth: 1
         };
 
         // Track in summary index
@@ -1068,7 +1319,7 @@ export class RLMContextManager extends EventEmitter {
           depth: 1,
           sections: [placeholder],
           totalTokens: 100,
-          compressionRatio: groupTokens / 100,
+          compressionRatio: groupTokens / 100
         };
         store.summaryIndex.levels.push(level);
 
@@ -1105,7 +1356,7 @@ export class RLMContextManager extends EventEmitter {
     return {
       bits: new Uint8Array(Math.ceil(size / 8)),
       size,
-      hashCount,
+      hashCount
     };
   }
 
@@ -1114,7 +1365,7 @@ export class RLMContextManager extends EventEmitter {
     for (const hash of hashes) {
       const byteIndex = Math.floor(hash / 8);
       const bitIndex = hash % 8;
-      filter.bits[byteIndex] |= (1 << bitIndex);
+      filter.bits[byteIndex] |= 1 << bitIndex;
     }
   }
 
@@ -1175,7 +1426,7 @@ export class RLMContextManager extends EventEmitter {
         endOffset: store.totalSize + input.content.length,
         checksum: this.computeChecksum(input.content),
         depth: 0,
-        ...input.metadata,
+        ...input.metadata
       };
 
       store.sections.push(section);
@@ -1200,7 +1451,7 @@ export class RLMContextManager extends EventEmitter {
             filePath: section.filePath,
             language: section.language,
             sourceUrl: section.sourceUrl,
-            content: section.content,
+            content: section.content
           });
         } catch (error) {
           console.error('[RLM] Failed to persist batch section:', error);
@@ -1229,14 +1480,18 @@ export class RLMContextManager extends EventEmitter {
       try {
         await this.vectorStore.indexStore(
           storeId,
-          addedSections.map(s => ({ id: s.id, content: s.content }))
+          addedSections.map((s) => ({ id: s.id, content: s.content }))
         );
       } catch (error) {
         console.error('[RLM] Failed to batch index vectors:', error);
       }
     }
 
-    this.emit('sections:batch_added', { storeId, count: addedSections.length, ids });
+    this.emit('sections:batch_added', {
+      storeId,
+      count: addedSections.length,
+      ids
+    });
     return ids;
   }
 
@@ -1248,7 +1503,7 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) return '';
 
-    const section = store.sections.find(s => s.id === sectionId);
+    const section = store.sections.find((s) => s.id === sectionId);
     if (!section) return '';
 
     // If content is already loaded, return it
@@ -1319,7 +1574,7 @@ export class RLMContextManager extends EventEmitter {
 
     // Quick check with bloom filter
     if (store.bloomFilter) {
-      const possibleTerms = terms.filter(term =>
+      const possibleTerms = terms.filter((term) =>
         this.bloomMightContain(store.bloomFilter!, term.toLowerCase())
       );
 
@@ -1341,7 +1596,9 @@ export class RLMContextManager extends EventEmitter {
   }
 
   getStoreByInstance(instanceId: string): ContextStore | undefined {
-    return Array.from(this.stores.values()).find(s => s.instanceId === instanceId);
+    return Array.from(this.stores.values()).find(
+      (s) => s.instanceId === instanceId
+    );
   }
 
   listStores(): ContextStore[] {
@@ -1362,7 +1619,8 @@ export class RLMContextManager extends EventEmitter {
 
     const avgDuration =
       session.queries.length > 0
-        ? session.queries.reduce((sum, q) => sum + q.duration, 0) / session.queries.length
+        ? session.queries.reduce((sum, q) => sum + q.duration, 0) /
+          session.queries.length
         : 0;
 
     return {
@@ -1371,7 +1629,7 @@ export class RLMContextManager extends EventEmitter {
       rootTokens: session.totalRootTokens,
       subQueryTokens: session.totalSubQueryTokens,
       estimatedSavings: session.tokenSavingsPercent,
-      avgQueryDuration: avgDuration,
+      avgQueryDuration: avgDuration
     };
   }
 
@@ -1379,9 +1637,9 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) return undefined;
 
-    const originalSections = store.sections.filter(s => s.depth === 0).length;
-    const summaries = store.sections.filter(s => s.depth > 0).length;
-    const maxDepth = Math.max(0, ...store.sections.map(s => s.depth));
+    const originalSections = store.sections.filter((s) => s.depth === 0).length;
+    const summaries = store.sections.filter((s) => s.depth > 0).length;
+    const maxDepth = Math.max(0, ...store.sections.map((s) => s.depth));
 
     return {
       sections: store.sections.length,
@@ -1389,7 +1647,7 @@ export class RLMContextManager extends EventEmitter {
       summaries,
       totalTokens: store.totalTokens,
       summaryLevels: maxDepth + 1,
-      indexedTerms: store.searchIndex?.terms.size || 0,
+      indexedTerms: store.searchIndex?.terms.size || 0
     };
   }
 
@@ -1453,7 +1711,7 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) return false;
 
-    const index = store.sections.findIndex(s => s.id === sectionId);
+    const index = store.sections.findIndex((s) => s.id === sectionId);
     if (index === -1) return false;
 
     const section = store.sections[index];
@@ -1472,7 +1730,10 @@ export class RLMContextManager extends EventEmitter {
       try {
         this.vectorStore.removeSection(sectionId);
       } catch (error) {
-        console.error('[RLM] Failed to remove section from vector store:', error);
+        console.error(
+          '[RLM] Failed to remove section from vector store:',
+          error
+        );
       }
     }
 
@@ -1509,15 +1770,17 @@ export class RLMContextManager extends EventEmitter {
   /**
    * Index all sections in a store for semantic search
    */
-  async indexStoreForSemanticSearch(storeId: string): Promise<{ indexed: number; skipped: number } | null> {
+  async indexStoreForSemanticSearch(
+    storeId: string
+  ): Promise<{ indexed: number; skipped: number } | null> {
     if (!this.vectorStore) return null;
 
     const store = this.stores.get(storeId);
     if (!store) return null;
 
     const sections = store.sections
-      .filter(s => s.depth === 0) // Only index original sections, not summaries
-      .map(s => ({ id: s.id, content: s.content }));
+      .filter((s) => s.depth === 0) // Only index original sections, not summaries
+      .map((s) => ({ id: s.id, content: s.content }));
 
     return this.vectorStore.indexStore(storeId, sections);
   }
@@ -1566,7 +1829,8 @@ export class RLMContextManager extends EventEmitter {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
     const history: Map<string, { direct: number; actual: number }> = new Map();
 
-    const sessionRows = this.db && this.persistenceEnabled ? this.db.listSessions() : [];
+    const sessionRows =
+      this.db && this.persistenceEnabled ? this.db.listSessions() : [];
 
     if (sessionRows.length > 0) {
       for (const row of sessionRows) {
@@ -1575,7 +1839,8 @@ export class RLMContextManager extends EventEmitter {
         const existing = history.get(date) || { direct: 0, actual: 0 };
 
         existing.direct += row.estimated_direct_tokens || 0;
-        existing.actual += (row.total_root_tokens || 0) + (row.total_sub_query_tokens || 0);
+        existing.actual +=
+          (row.total_root_tokens || 0) + (row.total_sub_query_tokens || 0);
         history.set(date, existing);
       }
     } else {
@@ -1586,7 +1851,8 @@ export class RLMContextManager extends EventEmitter {
         const existing = history.get(date) || { direct: 0, actual: 0 };
 
         existing.direct += session.estimatedDirectTokens;
-        existing.actual += session.totalRootTokens + session.totalSubQueryTokens;
+        existing.actual +=
+          session.totalRootTokens + session.totalSubQueryTokens;
         history.set(date, existing);
       }
     }
@@ -1596,9 +1862,10 @@ export class RLMContextManager extends EventEmitter {
         date,
         directTokens: data.direct,
         actualTokens: data.actual,
-        savingsPercent: data.direct > 0
-          ? ((data.direct - data.actual) / data.direct) * 100
-          : 0,
+        savingsPercent:
+          data.direct > 0
+            ? ((data.direct - data.actual) / data.direct) * 100
+            : 0
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }
@@ -1613,9 +1880,13 @@ export class RLMContextManager extends EventEmitter {
     avgTokens: number;
   }[] {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    const stats: Map<string, { count: number; totalDuration: number; totalTokens: number }> = new Map();
+    const stats: Map<
+      string,
+      { count: number; totalDuration: number; totalTokens: number }
+    > = new Map();
 
-    const sessionRows = this.db && this.persistenceEnabled ? this.db.listSessions() : [];
+    const sessionRows =
+      this.db && this.persistenceEnabled ? this.db.listSessions() : [];
 
     if (sessionRows.length > 0) {
       for (const row of sessionRows) {
@@ -1625,7 +1896,11 @@ export class RLMContextManager extends EventEmitter {
 
         for (const queryResult of queries) {
           const queryType = queryResult.query.type;
-          const existing = stats.get(queryType) || { count: 0, totalDuration: 0, totalTokens: 0 };
+          const existing = stats.get(queryType) || {
+            count: 0,
+            totalDuration: 0,
+            totalTokens: 0
+          };
           existing.count++;
           existing.totalDuration += queryResult.duration || 0;
           existing.totalTokens += queryResult.tokensUsed || 0;
@@ -1638,7 +1913,11 @@ export class RLMContextManager extends EventEmitter {
 
         for (const queryResult of session.queries) {
           const queryType = queryResult.query.type;
-          const existing = stats.get(queryType) || { count: 0, totalDuration: 0, totalTokens: 0 };
+          const existing = stats.get(queryType) || {
+            count: 0,
+            totalDuration: 0,
+            totalTokens: 0
+          };
           existing.count++;
           existing.totalDuration += queryResult.duration || 0;
           existing.totalTokens += queryResult.tokensUsed || 0;
@@ -1652,7 +1931,7 @@ export class RLMContextManager extends EventEmitter {
         type,
         count: data.count,
         avgDuration: data.count > 0 ? data.totalDuration / data.count : 0,
-        avgTokens: data.count > 0 ? data.totalTokens / data.count : 0,
+        avgTokens: data.count > 0 ? data.totalTokens / data.count : 0
       }))
       .sort((a, b) => b.count - a.count);
   }
@@ -1692,7 +1971,7 @@ export class RLMContextManager extends EventEmitter {
       totalSizeBytes: totalSize,
       byType: Array.from(byType.entries())
         .map(([type, data]) => ({ type, ...data }))
-        .sort((a, b) => b.tokens - a.tokens),
+        .sort((a, b) => b.tokens - a.tokens)
     };
   }
 
@@ -1713,7 +1992,7 @@ export class RLMContextManager extends EventEmitter {
       store: {
         id: store.id,
         instanceId: store.instanceId,
-        sections: store.sections.map(s => ({
+        sections: store.sections.map((s) => ({
           id: s.id,
           type: s.type,
           name: s.name,
@@ -1727,25 +2006,28 @@ export class RLMContextManager extends EventEmitter {
           parentSummaryId: s.parentSummaryId,
           filePath: s.filePath,
           language: s.language,
-          sourceUrl: s.sourceUrl,
+          sourceUrl: s.sourceUrl
         })),
         totalTokens: store.totalTokens,
         totalSize: store.totalSize,
         createdAt: store.createdAt,
-        accessCount: store.accessCount,
-      },
+        accessCount: store.accessCount
+      }
     };
   }
 
   /**
    * Import store from exported format
    */
-  importStore(data: ExportedStore, options?: {
-    newId?: boolean;
-    merge?: boolean;
-    targetStoreId?: string;
-    instanceId?: string;
-  }): string {
+  importStore(
+    data: ExportedStore,
+    options?: {
+      newId?: boolean;
+      merge?: boolean;
+      targetStoreId?: string;
+      instanceId?: string;
+    }
+  ): string {
     const storeId = options?.newId
       ? `store-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       : options?.targetStoreId || data.store.id;
@@ -1754,16 +2036,26 @@ export class RLMContextManager extends EventEmitter {
       // Merge into existing store
       const existing = this.stores.get(storeId)!;
       for (const section of data.store.sections) {
-        const exists = existing.sections.some(s => s.id === section.id);
+        const exists = existing.sections.some((s) => s.id === section.id);
         if (!exists) {
-          this.addSection(storeId, section.type, section.name, section.content, {
-            filePath: section.filePath,
-            language: section.language,
-            sourceUrl: section.sourceUrl,
-          } as Partial<ContextSection>);
+          this.addSection(
+            storeId,
+            section.type,
+            section.name,
+            section.content,
+            {
+              filePath: section.filePath,
+              language: section.language,
+              sourceUrl: section.sourceUrl
+            } as Partial<ContextSection>
+          );
         }
       }
-      this.emit('store:imported', { storeId, sectionCount: data.store.sections.length, merged: true });
+      this.emit('store:imported', {
+        storeId,
+        sectionCount: data.store.sections.length,
+        merged: true
+      });
       return storeId;
     }
 
@@ -1783,10 +2075,14 @@ export class RLMContextManager extends EventEmitter {
         sections: [],
         totalTokens: 0,
         totalSize: 0,
-        searchIndex: { terms: new Map(), sectionBoundaries: [], lastRebuilt: Date.now() },
+        searchIndex: {
+          terms: new Map(),
+          sectionBoundaries: [],
+          lastRebuilt: Date.now()
+        },
         accessCount: 0,
         createdAt: Date.now(),
-        lastAccessed: Date.now(),
+        lastAccessed: Date.now()
       };
 
       this.stores.set(storeId, newStore);
@@ -1796,7 +2092,7 @@ export class RLMContextManager extends EventEmitter {
         try {
           this.db.createStore({
             id: storeId,
-            instanceId,
+            instanceId
           });
         } catch (error) {
           console.error('[RLM] Failed to persist imported store:', error);
@@ -1808,14 +2104,24 @@ export class RLMContextManager extends EventEmitter {
 
     // Add sections
     for (const section of data.store.sections) {
-      this.addSection(finalStoreId, section.type, section.name, section.content, {
-        filePath: section.filePath,
-        language: section.language,
-        sourceUrl: section.sourceUrl,
-      } as Partial<ContextSection>);
+      this.addSection(
+        finalStoreId,
+        section.type,
+        section.name,
+        section.content,
+        {
+          filePath: section.filePath,
+          language: section.language,
+          sourceUrl: section.sourceUrl
+        } as Partial<ContextSection>
+      );
     }
 
-    this.emit('store:imported', { storeId: finalStoreId, sectionCount: data.store.sections.length, merged: false });
+    this.emit('store:imported', {
+      storeId: finalStoreId,
+      sectionCount: data.store.sections.length,
+      merged: false
+    });
     return finalStoreId;
   }
 }

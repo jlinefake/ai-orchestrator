@@ -10,6 +10,7 @@
 
 import * as https from 'https';
 import * as http from 'http';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
 export interface DiscoveredModel {
   id: string;
@@ -173,9 +174,9 @@ export class ModelDiscoveryService {
     // Anthropic models are relatively static, use known list
     const knownModels: DiscoveredModel[] = [
       {
-        id: 'claude-opus-4-20250514',
-        name: 'Claude Opus 4',
-        displayName: 'Claude Opus 4',
+        id: CLAUDE_MODELS.OPUS,
+        name: 'Claude Opus 4.5',
+        displayName: 'Claude Opus 4.5',
         provider: 'anthropic',
         description: 'Most capable model for complex tasks',
         contextLength: 200000,
@@ -188,18 +189,18 @@ export class ModelDiscoveryService {
           systemMessage: true,
         },
         pricing: {
-          inputPer1kTokens: 0.015,
-          outputPer1kTokens: 0.075,
-          cachePer1kTokens: 0.01875,
+          inputPer1kTokens: 0.005,
+          outputPer1kTokens: 0.025,
+          cachePer1kTokens: 0.00625,
           currency: 'USD',
         },
         isAvailable: true,
         lastChecked: Date.now(),
       },
       {
-        id: 'claude-sonnet-4-20250514',
-        name: 'Claude Sonnet 4',
-        displayName: 'Claude Sonnet 4',
+        id: CLAUDE_MODELS.SONNET,
+        name: 'Claude Sonnet 4.5',
+        displayName: 'Claude Sonnet 4.5',
         provider: 'anthropic',
         description: 'Balanced performance and cost',
         contextLength: 200000,
@@ -221,9 +222,9 @@ export class ModelDiscoveryService {
         lastChecked: Date.now(),
       },
       {
-        id: 'claude-3-5-haiku-20241022',
-        name: 'Claude 3.5 Haiku',
-        displayName: 'Claude 3.5 Haiku',
+        id: CLAUDE_MODELS.HAIKU,
+        name: 'Claude Haiku 4.5',
+        displayName: 'Claude Haiku 4.5',
         provider: 'anthropic',
         description: 'Fast and cost-effective',
         contextLength: 200000,

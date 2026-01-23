@@ -14,7 +14,13 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import type { ContextStore, RLMSession, ContextQuery, QueryType } from '../../../../shared/types/rlm.types';
+import type {
+  ContextStore,
+  RLMSession,
+  ContextQuery,
+  QueryType,
+  ContextSection
+} from '../../../../shared/types/rlm.types';
 import { ElectronIpcService } from '../../core/services/electron-ipc.service';
 import { RlmContextBrowserComponent } from './rlm-context-browser.component';
 
@@ -73,6 +79,9 @@ interface QueryResult {
           (createStore)="createStore()"
           (startSession)="startSession()"
           (executeQueryRequest)="executeQuery($event)"
+          (sectionSelected)="handleSectionSelected($event)"
+          (queryExecuted)="handleQueryExecuted($event)"
+          (storeUpdated)="handleStoreUpdated($event)"
         />
       </div>
     </div>
@@ -169,9 +178,9 @@ interface QueryResult {
         color: var(--text-primary);
         cursor: pointer;
       }
-    `,
+    `
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class RlmPageComponent implements OnInit, OnDestroy {
   private readonly ipc = inject(ElectronIpcService);
@@ -206,7 +215,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     this.stores.set(stores);
 
     const currentId = this.selectedStoreId();
-    const nextId = stores.find((s) => s.id === currentId)?.id || stores[0]?.id || '';
+    const nextId =
+      stores.find((s) => s.id === currentId)?.id || stores[0]?.id || '';
     if (nextId !== currentId) {
       this.selectedStoreId.set(nextId);
     }
@@ -244,7 +254,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
 
     const response = await this.ipc.rlmStartSession({
       storeId: store.id,
-      instanceId: store.instanceId,
+      instanceId: store.instanceId
     });
     const session = this.unwrapResponse<RLMSession | null>(response);
     this.session.set(session || null);
@@ -257,7 +267,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     try {
       const response = await this.ipc.rlmExecuteQuery({
         sessionId: session.id,
-        query,
+        query
       });
       const result = this.unwrapResponse<any>(response);
 
@@ -268,7 +278,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
         tokens: result?.tokensUsed || 0,
         sections: result?.sectionsAccessed || [],
         timestamp: Date.now(),
-        duration: result?.duration || 0,
+        duration: result?.duration || 0
       };
 
       this.browser?.addQueryResult(queryResult);
@@ -287,11 +297,41 @@ export class RlmPageComponent implements OnInit, OnDestroy {
         sections: [],
         timestamp: Date.now(),
         duration: 0,
-        error: error instanceof Error ? error.message : 'Query failed',
+        error: error instanceof Error ? error.message : 'Query failed'
       };
 
       this.browser?.addQueryResult(queryResult);
     }
+  }
+
+  async handleSectionSelected(section: ContextSection): Promise<void> {
+    const store = this.store();
+    if (!store) return;
+
+    // Refresh store snapshot to keep selection in sync
+    const storeResponse = await this.ipc.rlmGetStore(store.id);
+    const refreshed = this.unwrapResponse<ContextStore | null>(storeResponse);
+    if (refreshed) {
+      this.store.set(refreshed);
+    }
+  }
+
+  async handleQueryExecuted(_result: QueryResult): Promise<void> {
+    const session = this.session();
+    if (!session) return;
+
+    const refreshed = await this.ipc.rlmGetSession(session.id);
+    const updatedSession = this.unwrapResponse<RLMSession | null>(refreshed);
+    if (updatedSession) {
+      this.session.set(updatedSession);
+    }
+  }
+
+  async handleStoreUpdated(store: ContextStore): Promise<void> {
+    this.store.set(store);
+    const storesResponse = await this.ipc.rlmListStores();
+    const stores = this.unwrapResponse<ContextStore[]>(storesResponse) || [];
+    this.stores.set(stores);
   }
 
   onStoreChange(event: Event): void {
@@ -322,7 +362,9 @@ export class RlmPageComponent implements OnInit, OnDestroy {
         const session = this.session();
         if (session && data.sessionId === session.id) {
           const refreshed = await this.ipc.rlmGetSession(session.id);
-          const updatedSession = this.unwrapResponse<RLMSession | null>(refreshed);
+          const updatedSession = this.unwrapResponse<RLMSession | null>(
+            refreshed
+          );
           if (updatedSession) {
             this.session.set(updatedSession);
           }
@@ -332,7 +374,11 @@ export class RlmPageComponent implements OnInit, OnDestroy {
   }
 
   private unwrapResponse<T>(response: unknown): T | null {
-    if (response && typeof response === 'object' && 'success' in (response as any)) {
+    if (
+      response &&
+      typeof response === 'object' &&
+      'success' in (response as any)
+    ) {
       const typed = response as { success: boolean; data?: T };
       return typed.success ? (typed.data ?? null) : null;
     }

@@ -291,6 +291,9 @@ const IPC_CHANNELS = {
   HOOKS_EVALUATE: 'hooks:evaluate',
   HOOKS_IMPORT: 'hooks:import',
   HOOKS_EXPORT: 'hooks:export',
+  HOOK_APPROVALS_LIST: 'hooks:approvals:list',
+  HOOK_APPROVALS_UPDATE: 'hooks:approvals:update',
+  HOOK_APPROVALS_CLEAR: 'hooks:approvals:clear',
 
   // Phase 6: Skills (6.4)
   SKILLS_DISCOVER: 'skills:discover',
@@ -406,7 +409,7 @@ const IPC_CHANNELS = {
   VERIFICATION_START_CLI: 'verification:start-cli',
   VERIFICATION_CANCEL: 'verification:cancel',
   VERIFICATION_GET_ACTIVE: 'verification:get-active',
-  VERIFICATION_GET_RESULT: 'verification:get-result',
+  VERIFICATION_GET_RESULT: 'verification:get-result'
 } as const;
 
 // Response type
@@ -419,6 +422,15 @@ interface IpcResponse {
     timestamp: number;
   };
 }
+
+let ipcAuthToken: string | null = null;
+
+const withAuth = (
+  payload: Record<string, unknown> = {}
+): Record<string, unknown> & { ipcAuthToken?: string } => ({
+  ...payload,
+  ipcAuthToken: ipcAuthToken || undefined
+});
 
 /**
  * Electron API exposed to renderer
@@ -440,6 +452,7 @@ const electronAPI = {
     attachments?: unknown[];
     yoloMode?: boolean;
     agentId?: string;
+    provider?: 'claude' | 'openai' | 'gemini' | 'auto';
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_CREATE, payload);
   },
@@ -452,7 +465,10 @@ const electronAPI = {
     message: string;
     attachments?: unknown[];
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_CREATE_WITH_MESSAGE, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.INSTANCE_CREATE_WITH_MESSAGE,
+      payload
+    );
   },
 
   /**
@@ -489,9 +505,7 @@ const electronAPI = {
   /**
    * Restart an instance
    */
-  restartInstance: (payload: {
-    instanceId: string;
-  }): Promise<IpcResponse> => {
+  restartInstance: (payload: { instanceId: string }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_RESTART, payload);
   },
 
@@ -527,45 +541,57 @@ const electronAPI = {
    * Listen for instance created events
    */
   onInstanceCreated: (callback: (instance: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, instance: unknown) => callback(instance);
+    const handler = (_event: IpcRendererEvent, instance: unknown) =>
+      callback(instance);
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_CREATED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_CREATED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_CREATED, handler);
   },
 
   /**
    * Listen for instance removed events
    */
   onInstanceRemoved: (callback: (instanceId: string) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, instanceId: string) => callback(instanceId);
+    const handler = (_event: IpcRendererEvent, instanceId: string) =>
+      callback(instanceId);
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_REMOVED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_REMOVED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_REMOVED, handler);
   },
 
   /**
    * Listen for instance state updates
    */
-  onInstanceStateUpdate: (callback: (update: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, update: unknown) => callback(update);
+  onInstanceStateUpdate: (
+    callback: (update: unknown) => void
+  ): (() => void) => {
+    const handler = (_event: IpcRendererEvent, update: unknown) =>
+      callback(update);
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_STATE_UPDATE, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_STATE_UPDATE, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_STATE_UPDATE, handler);
   },
 
   /**
    * Listen for instance output
    */
   onInstanceOutput: (callback: (output: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, output: unknown) => callback(output);
+    const handler = (_event: IpcRendererEvent, output: unknown) =>
+      callback(output);
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_OUTPUT, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_OUTPUT, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_OUTPUT, handler);
   },
 
   /**
    * Listen for batch updates
    */
   onBatchUpdate: (callback: (batch: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, batch: unknown) => callback(batch);
+    const handler = (_event: IpcRendererEvent, batch: unknown) =>
+      callback(batch);
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
   },
 
   // ============================================
@@ -576,7 +602,15 @@ const electronAPI = {
    * Signal app ready
    */
   appReady: (): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.APP_READY);
+    return ipcRenderer
+      .invoke(IPC_CHANNELS.APP_READY)
+      .then((response: IpcResponse) => {
+        const data = response?.data as { ipcAuthToken?: string } | undefined;
+        if (data?.ipcAuthToken) {
+          ipcAuthToken = data.ipcAuthToken;
+        }
+        return response;
+      });
   },
 
   /**
@@ -634,7 +668,10 @@ const electronAPI = {
    * Open file selection dialog
    * Returns the selected file paths or null if cancelled
    */
-  selectFiles: (options?: { multiple?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<IpcResponse> => {
+  selectFiles: (options?: {
+    multiple?: boolean;
+    filters?: { name: string; extensions: string[] }[];
+  }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILES, options);
   },
 
@@ -646,7 +683,10 @@ const electronAPI = {
    * Read directory contents
    */
   readDir: (path: string, includeHidden?: boolean): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_DIR, { path, includeHidden });
+    return ipcRenderer.invoke(IPC_CHANNELS.FILE_READ_DIR, {
+      path,
+      includeHidden
+    });
   },
 
   /**
@@ -708,7 +748,8 @@ const electronAPI = {
   onSettingsChanged: (callback: (data: unknown) => void): (() => void) => {
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, handler);
   },
 
   // ============================================
@@ -725,35 +766,47 @@ const electronAPI = {
   /**
    * Load historical output from disk for an instance
    */
-  loadHistoricalOutput: (instanceId: string, limit?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.MEMORY_LOAD_HISTORY, { instanceId, limit });
+  loadHistoricalOutput: (
+    instanceId: string,
+    limit?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MEMORY_LOAD_HISTORY, {
+      instanceId,
+      limit
+    });
   },
 
   /**
    * Listen for memory stats updates
    */
   onMemoryStatsUpdate: (callback: (stats: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, stats: unknown) => callback(stats);
+    const handler = (_event: IpcRendererEvent, stats: unknown) =>
+      callback(stats);
     ipcRenderer.on(IPC_CHANNELS.MEMORY_STATS_UPDATE, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_STATS_UPDATE, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_STATS_UPDATE, handler);
   },
 
   /**
    * Listen for memory warnings
    */
   onMemoryWarning: (callback: (warning: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, warning: unknown) => callback(warning);
+    const handler = (_event: IpcRendererEvent, warning: unknown) =>
+      callback(warning);
     ipcRenderer.on(IPC_CHANNELS.MEMORY_WARNING, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_WARNING, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_WARNING, handler);
   },
 
   /**
    * Listen for critical memory alerts
    */
   onMemoryCritical: (callback: (alert: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, alert: unknown) => callback(alert);
+    const handler = (_event: IpcRendererEvent, alert: unknown) =>
+      callback(alert);
     ipcRenderer.on(IPC_CHANNELS.MEMORY_CRITICAL, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_CRITICAL, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_CRITICAL, handler);
   },
 
   // ============================================
@@ -788,8 +841,14 @@ const electronAPI = {
   /**
    * Restore a conversation from history as a new instance
    */
-  restoreHistory: (entryId: string, workingDirectory?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_RESTORE, { entryId, workingDirectory });
+  restoreHistory: (
+    entryId: string,
+    workingDirectory?: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_RESTORE, {
+      entryId,
+      workingDirectory
+    });
   },
 
   /**
@@ -813,8 +872,14 @@ const electronAPI = {
   /**
    * Get status of a specific provider
    */
-  getProviderStatus: (providerType: string, forceRefresh?: boolean): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_STATUS, { providerType, forceRefresh });
+  getProviderStatus: (
+    providerType: string,
+    forceRefresh?: boolean
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_STATUS, {
+      providerType,
+      forceRefresh
+    });
   },
 
   /**
@@ -827,8 +892,14 @@ const electronAPI = {
   /**
    * Update provider configuration
    */
-  updateProviderConfig: (providerType: string, config: Record<string, unknown>): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_UPDATE_CONFIG, { providerType, config });
+  updateProviderConfig: (
+    providerType: string,
+    config: Record<string, unknown>
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.PROVIDER_UPDATE_CONFIG,
+      withAuth({ providerType, config })
+    );
   },
 
   // ============================================
@@ -960,7 +1031,9 @@ const electronAPI = {
    * Returns merged config with source tracking (project > user > default)
    */
   resolveConfig: (workingDirectory?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_RESOLVE, { workingDirectory });
+    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_RESOLVE, {
+      workingDirectory
+    });
   },
 
   /**
@@ -973,15 +1046,27 @@ const electronAPI = {
   /**
    * Save project config to a specific path
    */
-  saveProjectConfig: (configPath: string, config: Record<string, unknown>): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SAVE_PROJECT, { configPath, config });
+  saveProjectConfig: (
+    configPath: string,
+    config: Record<string, unknown>
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_SAVE_PROJECT, {
+      configPath,
+      config
+    });
   },
 
   /**
    * Create a new project config file
    */
-  createProjectConfig: (projectDir: string, config?: Record<string, unknown>): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_CREATE_PROJECT, { projectDir, config });
+  createProjectConfig: (
+    projectDir: string,
+    config?: Record<string, unknown>
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.CONFIG_CREATE_PROJECT, {
+      projectDir,
+      config
+    });
   },
 
   /**
@@ -1006,21 +1091,36 @@ const electronAPI = {
    * Exit plan mode
    */
   exitPlanMode: (instanceId: string, force?: boolean): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_EXIT, { instanceId, force });
+    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_EXIT, {
+      instanceId,
+      force
+    });
   },
 
   /**
    * Approve a plan (allows transition to implementation)
    */
-  approvePlan: (instanceId: string, planContent?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_APPROVE, { instanceId, planContent });
+  approvePlan: (
+    instanceId: string,
+    planContent?: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_APPROVE, {
+      instanceId,
+      planContent
+    });
   },
 
   /**
    * Update plan content
    */
-  updatePlanContent: (instanceId: string, planContent: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_UPDATE, { instanceId, planContent });
+  updatePlanContent: (
+    instanceId: string,
+    planContent: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLAN_MODE_UPDATE, {
+      instanceId,
+      planContent
+    });
   },
 
   /**
@@ -1045,21 +1145,31 @@ const electronAPI = {
    * Get git status for working directory
    */
   vcsGetStatus: (workingDirectory: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_STATUS, { workingDirectory });
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_STATUS, {
+      workingDirectory
+    });
   },
 
   /**
    * Get branches for working directory
    */
   vcsGetBranches: (workingDirectory: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_BRANCHES, { workingDirectory });
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_BRANCHES, {
+      workingDirectory
+    });
   },
 
   /**
    * Get recent commits
    */
-  vcsGetCommits: (workingDirectory: string, limit?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_COMMITS, { workingDirectory, limit });
+  vcsGetCommits: (
+    workingDirectory: string,
+    limit?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_COMMITS, {
+      workingDirectory,
+      limit
+    });
   },
 
   /**
@@ -1078,22 +1188,44 @@ const electronAPI = {
   /**
    * Get file history (commits that modified the file)
    */
-  vcsGetFileHistory: (workingDirectory: string, filePath: string, limit?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_FILE_HISTORY, { workingDirectory, filePath, limit });
+  vcsGetFileHistory: (
+    workingDirectory: string,
+    filePath: string,
+    limit?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_FILE_HISTORY, {
+      workingDirectory,
+      filePath,
+      limit
+    });
   },
 
   /**
    * Get file content at a specific commit
    */
-  vcsGetFileAtCommit: (workingDirectory: string, filePath: string, commitHash: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_FILE_AT_COMMIT, { workingDirectory, filePath, commitHash });
+  vcsGetFileAtCommit: (
+    workingDirectory: string,
+    filePath: string,
+    commitHash: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_FILE_AT_COMMIT, {
+      workingDirectory,
+      filePath,
+      commitHash
+    });
   },
 
   /**
    * Get blame information for a file
    */
-  vcsGetBlame: (workingDirectory: string, filePath: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_BLAME, { workingDirectory, filePath });
+  vcsGetBlame: (
+    workingDirectory: string,
+    filePath: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.VCS_GET_BLAME, {
+      workingDirectory,
+      filePath
+    });
   },
 
   // ============================================
@@ -1115,8 +1247,14 @@ const electronAPI = {
   /**
    * Start a snapshot session
    */
-  snapshotStartSession: (instanceId: string, description?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_START_SESSION, { instanceId, description });
+  snapshotStartSession: (
+    instanceId: string,
+    description?: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_START_SESSION, {
+      instanceId,
+      description
+    });
   },
 
   /**
@@ -1130,7 +1268,9 @@ const electronAPI = {
    * Get all snapshots for an instance
    */
   snapshotGetForInstance: (instanceId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_FOR_INSTANCE, { instanceId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_FOR_INSTANCE, {
+      instanceId
+    });
   },
 
   /**
@@ -1144,28 +1284,36 @@ const electronAPI = {
    * Get all sessions for an instance
    */
   snapshotGetSessions: (instanceId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_SESSIONS, { instanceId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_SESSIONS, {
+      instanceId
+    });
   },
 
   /**
    * Get content from a snapshot
    */
   snapshotGetContent: (snapshotId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_CONTENT, { snapshotId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_GET_CONTENT, {
+      snapshotId
+    });
   },
 
   /**
    * Revert a file to a specific snapshot
    */
   snapshotRevertFile: (snapshotId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_REVERT_FILE, { snapshotId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_REVERT_FILE, {
+      snapshotId
+    });
   },
 
   /**
    * Revert all files in a session
    */
   snapshotRevertSession: (sessionId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_REVERT_SESSION, { sessionId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_REVERT_SESSION, {
+      sessionId
+    });
   },
 
   /**
@@ -1273,10 +1421,16 @@ const electronAPI = {
   /**
    * Listen for TODO list changes
    */
-  onTodoListChanged: (callback: (data: { sessionId: string; list: unknown }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { sessionId: string; list: unknown }) => callback(data);
+  onTodoListChanged: (
+    callback: (data: { sessionId: string; list: unknown }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      data: { sessionId: string; list: unknown }
+    ) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.TODO_LIST_CHANGED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.TODO_LIST_CHANGED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.TODO_LIST_CHANGED, handler);
   },
 
   // ============================================
@@ -1405,19 +1559,38 @@ const electronAPI = {
   /**
    * Listen for MCP state changes (tools, resources, prompts updated)
    */
-  onMcpStateChanged: (callback: (data: { type: string; serverId?: string }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { type: string; serverId?: string }) => callback(data);
+  onMcpStateChanged: (
+    callback: (data: { type: string; serverId?: string }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      data: { type: string; serverId?: string }
+    ) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MCP_STATE_CHANGED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_STATE_CHANGED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.MCP_STATE_CHANGED, handler);
   },
 
   /**
    * Listen for MCP server status changes
    */
-  onMcpServerStatusChanged: (callback: (data: { serverId: string; status: string; error?: string }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { serverId: string; status: string; error?: string }) => callback(data);
+  onMcpServerStatusChanged: (
+    callback: (data: {
+      serverId: string;
+      status: string;
+      error?: string;
+    }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      data: { serverId: string; status: string; error?: string }
+    ) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGED, handler);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGED, handler);
+    return () =>
+      ipcRenderer.removeListener(
+        IPC_CHANNELS.MCP_SERVER_STATUS_CHANGED,
+        handler
+      );
   },
 
   // ============================================
@@ -1482,8 +1655,14 @@ const electronAPI = {
   /**
    * Search workspace symbols
    */
-  lspWorkspaceSymbols: (query: string, rootPath: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LSP_WORKSPACE_SYMBOLS, { query, rootPath });
+  lspWorkspaceSymbols: (
+    query: string,
+    rootPath: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LSP_WORKSPACE_SYMBOLS, {
+      query,
+      rootPath
+    });
   },
 
   /**
@@ -1626,8 +1805,14 @@ const electronAPI = {
   /**
    * Detect secrets in content
    */
-  securityDetectSecrets: (content: string, contentType?: 'env' | 'text' | 'auto'): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_DETECT_SECRETS, { content, contentType });
+  securityDetectSecrets: (
+    content: string,
+    contentType?: 'env' | 'text' | 'auto'
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_DETECT_SECRETS, {
+      content,
+      contentType
+    });
   },
 
   /**
@@ -1636,9 +1821,19 @@ const electronAPI = {
   securityRedactContent: (
     content: string,
     contentType?: 'env' | 'text' | 'auto',
-    options?: { maskChar?: string; showStart?: number; showEnd?: number; fullMask?: boolean; label?: string }
+    options?: {
+      maskChar?: string;
+      showStart?: number;
+      showEnd?: number;
+      fullMask?: boolean;
+      label?: string;
+    }
   ): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_REDACT_CONTENT, { content, contentType, options });
+    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_REDACT_CONTENT, {
+      content,
+      contentType,
+      options
+    });
   },
 
   /**
@@ -1651,8 +1846,14 @@ const electronAPI = {
   /**
    * Get secret access audit log
    */
-  securityGetAuditLog: (instanceId?: string, limit?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_GET_AUDIT_LOG, { instanceId, limit });
+  securityGetAuditLog: (
+    instanceId?: string,
+    limit?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_GET_AUDIT_LOG, {
+      instanceId,
+      limit
+    });
   },
 
   /**
@@ -1673,7 +1874,10 @@ const electronAPI = {
    * Check if a single env var should be allowed
    */
   securityCheckEnvVar: (name: string, value: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_CHECK_ENV_VAR, { name, value });
+    return ipcRenderer.invoke(IPC_CHANNELS.SECURITY_CHECK_ENV_VAR, {
+      name,
+      value
+    });
   },
 
   /**
@@ -1697,27 +1901,39 @@ const electronAPI = {
     inputTokens: number,
     outputTokens: number
   ): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.COST_RECORD_USAGE, {
-      instanceId,
-      provider,
-      model,
-      inputTokens,
-      outputTokens,
-    });
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.COST_RECORD_USAGE,
+      withAuth({
+        instanceId,
+        provider,
+        model,
+        inputTokens,
+        outputTokens
+      })
+    );
   },
 
   /**
    * Get cost summary
    */
   costGetSummary: (instanceId?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.COST_GET_SUMMARY, { instanceId });
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.COST_GET_SUMMARY,
+      withAuth({ instanceId })
+    );
   },
 
   /**
    * Get cost history
    */
-  costGetHistory: (instanceId?: string, limit?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.COST_GET_HISTORY, { instanceId, limit });
+  costGetHistory: (
+    instanceId?: string,
+    limit?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COST_GET_HISTORY, {
+      instanceId,
+      limit
+    });
   },
 
   /**
@@ -1729,14 +1945,20 @@ const electronAPI = {
     monthly?: number;
     warningThreshold?: number;
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.COST_SET_BUDGET, { budget });
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.COST_SET_BUDGET,
+      withAuth({ budget })
+    );
   },
 
   /**
    * Get current budget status
    */
   costGetBudgetStatus: (): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.COST_GET_BUDGET_STATUS);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.COST_GET_BUDGET_STATUS,
+      withAuth({})
+    );
   },
 
   /**
@@ -1778,7 +2000,11 @@ const electronAPI = {
     sessionData: unknown,
     options?: { compress?: boolean; metadata?: Record<string, unknown> }
   ): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_SESSION, { sessionId, sessionData, options });
+    return ipcRenderer.invoke(IPC_CHANNELS.ARCHIVE_SESSION, {
+      sessionId,
+      sessionData,
+      options
+    });
   },
 
   /**
@@ -1831,8 +2057,14 @@ const electronAPI = {
   /**
    * Get config value
    */
-  remoteConfigGet: (key: string, defaultValue?: unknown): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.REMOTE_CONFIG_GET, { key, defaultValue });
+  remoteConfigGet: (
+    key: string,
+    defaultValue?: unknown
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.REMOTE_CONFIG_GET, {
+      key,
+      defaultValue
+    });
   },
 
   /**
@@ -1844,7 +2076,9 @@ const electronAPI = {
     refreshInterval?: number;
     branch?: string;
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.REMOTE_CONFIG_SET_SOURCE, { source });
+    return ipcRenderer.invoke(IPC_CHANNELS.REMOTE_CONFIG_SET_SOURCE, {
+      source
+    });
   },
 
   /**
@@ -1857,8 +2091,11 @@ const electronAPI = {
   /**
    * Listen for remote config updates
    */
-  onRemoteConfigUpdated: (callback: (config: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, config: unknown) => callback(config);
+  onRemoteConfigUpdated: (
+    callback: (config: unknown) => void
+  ): (() => void) => {
+    const handler = (_event: IpcRendererEvent, config: unknown) =>
+      callback(config);
     ipcRenderer.on('remote-config:updated', handler);
     return () => ipcRenderer.removeListener('remote-config:updated', handler);
   },
@@ -1867,7 +2104,8 @@ const electronAPI = {
    * Listen for remote config errors
    */
   onRemoteConfigError: (callback: (error: unknown) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, error: unknown) => callback(error);
+    const handler = (_event: IpcRendererEvent, error: unknown) =>
+      callback(error);
     ipcRenderer.on('remote-config:error', handler);
     return () => ipcRenderer.removeListener('remote-config:error', handler);
   },
@@ -1881,7 +2119,12 @@ const electronAPI = {
    */
   editorOpen: (
     filePath: string,
-    options?: { editor?: string; line?: number; column?: number; waitForClose?: boolean }
+    options?: {
+      editor?: string;
+      line?: number;
+      column?: number;
+      waitForClose?: boolean;
+    }
   ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.EDITOR_OPEN, { filePath, options });
   },
@@ -1916,7 +2159,12 @@ const electronAPI = {
    */
   watcherWatch: (
     path: string,
-    options?: { recursive?: boolean; patterns?: string[]; ignorePatterns?: string[]; debounceMs?: number }
+    options?: {
+      recursive?: boolean;
+      patterns?: string[];
+      ignorePatterns?: string[];
+      debounceMs?: number;
+    }
   ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.WATCHER_WATCH, { path, options });
   },
@@ -1984,7 +2232,12 @@ const electronAPI = {
     context?: string,
     metadata?: Record<string, unknown>
   ): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LOG_MESSAGE, { level, message, context, metadata });
+    return ipcRenderer.invoke(IPC_CHANNELS.LOG_MESSAGE, {
+      level,
+      message,
+      context,
+      metadata
+    });
   },
 
   /**
@@ -2003,7 +2256,9 @@ const electronAPI = {
   /**
    * Set log level
    */
-  logSetLevel: (level: 'debug' | 'info' | 'warn' | 'error'): Promise<IpcResponse> => {
+  logSetLevel: (
+    level: 'debug' | 'info' | 'warn' | 'error'
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.LOG_SET_LEVEL, { level });
   },
 
@@ -2031,7 +2286,10 @@ const electronAPI = {
   /**
    * Execute debug command
    */
-  debugExecute: (command: string, args?: Record<string, unknown>): Promise<IpcResponse> => {
+  debugExecute: (
+    command: string,
+    args?: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.DEBUG_EXECUTE, { command, args });
   },
 
@@ -2073,7 +2331,7 @@ const electronAPI = {
       sessionId,
       instanceId,
       agentId,
-      workingDirectory,
+      workingDirectory
     });
   },
 
@@ -2081,7 +2339,9 @@ const electronAPI = {
    * Record session end
    */
   statsRecordSessionEnd: (sessionId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.STATS_RECORD_SESSION_END, { sessionId });
+    return ipcRenderer.invoke(IPC_CHANNELS.STATS_RECORD_SESSION_END, {
+      sessionId
+    });
   },
 
   /**
@@ -2097,21 +2357,29 @@ const electronAPI = {
       sessionId,
       inputTokens,
       outputTokens,
-      cost,
+      cost
     });
   },
 
   /**
    * Record tool usage
    */
-  statsRecordToolUsage: (sessionId: string, tool: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.STATS_RECORD_TOOL_USAGE, { sessionId, tool });
+  statsRecordToolUsage: (
+    sessionId: string,
+    tool: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.STATS_RECORD_TOOL_USAGE, {
+      sessionId,
+      tool
+    });
   },
 
   /**
    * Get stats for a period
    */
-  statsGetStats: (period: 'day' | 'week' | 'month' | 'year' | 'all'): Promise<IpcResponse> => {
+  statsGetStats: (
+    period: 'day' | 'week' | 'month' | 'year' | 'all'
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.STATS_GET_STATS, { period });
   },
 
@@ -2155,7 +2423,7 @@ const electronAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.SEARCH_BUILD_INDEX, {
       directory,
       includePatterns,
-      excludePatterns,
+      excludePatterns
     });
   },
 
@@ -2235,8 +2503,11 @@ const electronAPI = {
   /**
    * Listen for plugin loaded events
    */
-  onPluginLoaded: (callback: (data: { pluginId: string }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { pluginId: string }) => callback(data);
+  onPluginLoaded: (
+    callback: (data: { pluginId: string }) => void
+  ): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { pluginId: string }) =>
+      callback(data);
     ipcRenderer.on('plugins:loaded', handler);
     return () => ipcRenderer.removeListener('plugins:loaded', handler);
   },
@@ -2244,8 +2515,11 @@ const electronAPI = {
   /**
    * Listen for plugin unloaded events
    */
-  onPluginUnloaded: (callback: (data: { pluginId: string }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { pluginId: string }) => callback(data);
+  onPluginUnloaded: (
+    callback: (data: { pluginId: string }) => void
+  ): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: { pluginId: string }) =>
+      callback(data);
     ipcRenderer.on('plugins:unloaded', handler);
     return () => ipcRenderer.removeListener('plugins:unloaded', handler);
   },
@@ -2253,8 +2527,13 @@ const electronAPI = {
   /**
    * Listen for plugin error events
    */
-  onPluginError: (callback: (data: { pluginId: string; error: string }) => void): (() => void) => {
-    const handler = (_event: IpcRendererEvent, data: { pluginId: string; error: string }) => callback(data);
+  onPluginError: (
+    callback: (data: { pluginId: string; error: string }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      data: { pluginId: string; error: string }
+    ) => callback(data);
     ipcRenderer.on('plugins:error', handler);
     return () => ipcRenderer.removeListener('plugins:error', handler);
   },
@@ -2274,7 +2553,9 @@ const electronAPI = {
    * Get a specific workflow template
    */
   workflowGetTemplate: (templateId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_TEMPLATE, { templateId });
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_TEMPLATE, {
+      templateId
+    });
   },
 
   /**
@@ -2292,35 +2573,61 @@ const electronAPI = {
    * Get workflow execution status
    */
   workflowGetExecution: (executionId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_EXECUTION, { executionId });
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_EXECUTION, {
+      executionId
+    });
   },
 
   /**
    * Get workflow execution for instance
    */
   workflowGetByInstance: (instanceId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_BY_INSTANCE, { instanceId });
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_BY_INSTANCE, {
+      instanceId
+    });
   },
 
   /**
    * Complete a workflow phase
    */
-  workflowCompletePhase: (executionId: string, phaseId: string, result?: unknown): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_COMPLETE_PHASE, { executionId, phaseId, result });
+  workflowCompletePhase: (
+    executionId: string,
+    phaseId: string,
+    result?: unknown
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_COMPLETE_PHASE, {
+      executionId,
+      phaseId,
+      result
+    });
   },
 
   /**
    * Satisfy a workflow gate
    */
-  workflowSatisfyGate: (executionId: string, gateId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_SATISFY_GATE, { executionId, gateId });
+  workflowSatisfyGate: (
+    executionId: string,
+    gateId: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_SATISFY_GATE, {
+      executionId,
+      gateId
+    });
   },
 
   /**
    * Skip a workflow phase
    */
-  workflowSkipPhase: (executionId: string, phaseId: string, reason?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_SKIP_PHASE, { executionId, phaseId, reason });
+  workflowSkipPhase: (
+    executionId: string,
+    phaseId: string,
+    reason?: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_SKIP_PHASE, {
+      executionId,
+      phaseId,
+      reason
+    });
   },
 
   /**
@@ -2334,7 +2641,9 @@ const electronAPI = {
    * Get workflow prompt addition
    */
   workflowGetPromptAddition: (executionId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_PROMPT_ADDITION, { executionId });
+    return ipcRenderer.invoke(IPC_CHANNELS.WORKFLOW_GET_PROMPT_ADDITION, {
+      executionId
+    });
   },
 
   // ============================================
@@ -2362,7 +2671,10 @@ const electronAPI = {
   /**
    * List hooks
    */
-  hooksList: (filter?: { event?: string; scope?: string }): Promise<IpcResponse> => {
+  hooksList: (filter?: {
+    event?: string;
+    scope?: string;
+  }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HOOKS_LIST, { filter });
   },
 
@@ -2389,7 +2701,10 @@ const electronAPI = {
   /**
    * Update a hook
    */
-  hooksUpdate: (hookId: string, updates: Record<string, unknown>): Promise<IpcResponse> => {
+  hooksUpdate: (
+    hookId: string,
+    updates: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HOOKS_UPDATE, { hookId, updates });
   },
 
@@ -2403,7 +2718,10 @@ const electronAPI = {
   /**
    * Evaluate hooks for an event
    */
-  hooksEvaluate: (event: string, context: Record<string, unknown>): Promise<IpcResponse> => {
+  hooksEvaluate: (
+    event: string,
+    context: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HOOKS_EVALUATE, { event, context });
   },
 
@@ -2419,6 +2737,34 @@ const electronAPI = {
    */
   hooksExport: (filePath: string, hookIds?: string[]): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HOOKS_EXPORT, { filePath, hookIds });
+  },
+
+  /**
+   * List hook approvals
+   */
+  hooksApprovalsList: (payload?: {
+    pendingOnly?: boolean;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HOOK_APPROVALS_LIST, payload);
+  },
+
+  /**
+   * Update hook approval
+   */
+  hooksApprovalsUpdate: (payload: {
+    hookId: string;
+    approved: boolean;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HOOK_APPROVALS_UPDATE, payload);
+  },
+
+  /**
+   * Clear hook approvals
+   */
+  hooksApprovalsClear: (payload?: {
+    hookIds?: string[];
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HOOK_APPROVALS_CLEAR, payload);
   },
 
   // ============================================
@@ -2470,8 +2816,14 @@ const electronAPI = {
   /**
    * Load example for a skill
    */
-  skillsLoadExample: (skillId: string, exampleId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SKILLS_LOAD_EXAMPLE, { skillId, exampleId });
+  skillsLoadExample: (
+    skillId: string,
+    exampleId: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SKILLS_LOAD_EXAMPLE, {
+      skillId,
+      exampleId
+    });
   },
 
   /**
@@ -2560,7 +2912,9 @@ const electronAPI = {
    * Get specialist profiles by category
    */
   specialistGetByCategory: (category: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_BY_CATEGORY, { category });
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_BY_CATEGORY, {
+      category
+    });
   },
 
   /**
@@ -2590,31 +2944,39 @@ const electronAPI = {
   /**
    * Update a custom specialist profile
    */
-  specialistUpdateCustom: (profileId: string, updates: {
-    name?: string;
-    description?: string;
-    category?: string;
-    icon?: string;
-    color?: string;
-    systemPromptAddition?: string;
-    restrictedTools?: string[];
-    constraints?: {
-      readOnlyMode?: boolean;
-      maxTokens?: number;
-      allowedDirectories?: string[];
-      blockedDirectories?: string[];
-      requireApprovalFor?: string[];
-    };
-    tags?: string[];
-  }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_CUSTOM, { profileId, updates });
+  specialistUpdateCustom: (
+    profileId: string,
+    updates: {
+      name?: string;
+      description?: string;
+      category?: string;
+      icon?: string;
+      color?: string;
+      systemPromptAddition?: string;
+      restrictedTools?: string[];
+      constraints?: {
+        readOnlyMode?: boolean;
+        maxTokens?: number;
+        allowedDirectories?: string[];
+        blockedDirectories?: string[];
+        requireApprovalFor?: string[];
+      };
+      tags?: string[];
+    }
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_CUSTOM, {
+      profileId,
+      updates
+    });
   },
 
   /**
    * Remove a custom specialist profile
    */
   specialistRemoveCustom: (profileId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_REMOVE_CUSTOM, { profileId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_REMOVE_CUSTOM, {
+      profileId
+    });
   },
 
   /**
@@ -2631,15 +2993,23 @@ const electronAPI = {
   /**
    * Create a specialist instance
    */
-  specialistCreateInstance: (profileId: string, orchestratorInstanceId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_CREATE_INSTANCE, { profileId, orchestratorInstanceId });
+  specialistCreateInstance: (
+    profileId: string,
+    orchestratorInstanceId: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_CREATE_INSTANCE, {
+      profileId,
+      orchestratorInstanceId
+    });
   },
 
   /**
    * Get a specialist instance
    */
   specialistGetInstance: (instanceId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_INSTANCE, { instanceId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_INSTANCE, {
+      instanceId
+    });
   },
 
   /**
@@ -2652,47 +3022,67 @@ const electronAPI = {
   /**
    * Update specialist instance status
    */
-  specialistUpdateStatus: (instanceId: string, status: 'active' | 'paused' | 'completed' | 'failed'): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_STATUS, { instanceId, status });
+  specialistUpdateStatus: (
+    instanceId: string,
+    status: 'active' | 'paused' | 'completed' | 'failed'
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_STATUS, {
+      instanceId,
+      status
+    });
   },
 
   /**
    * Add a finding to a specialist instance
    */
-  specialistAddFinding: (instanceId: string, finding: {
-    id: string;
-    type: string;
-    severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-    title: string;
-    description: string;
-    filePath?: string;
-    lineRange?: { start: number; end: number };
-    codeSnippet?: string;
-    suggestion?: string;
-    confidence: number;
-    tags?: string[];
-  }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_ADD_FINDING, { instanceId, finding });
+  specialistAddFinding: (
+    instanceId: string,
+    finding: {
+      id: string;
+      type: string;
+      severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+      title: string;
+      description: string;
+      filePath?: string;
+      lineRange?: { start: number; end: number };
+      codeSnippet?: string;
+      suggestion?: string;
+      confidence: number;
+      tags?: string[];
+    }
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_ADD_FINDING, {
+      instanceId,
+      finding
+    });
   },
 
   /**
    * Update specialist instance metrics
    */
-  specialistUpdateMetrics: (instanceId: string, updates: {
-    filesAnalyzed?: number;
-    linesAnalyzed?: number;
-    findingsCount?: number;
-    tokensUsed?: number;
-    durationMs?: number;
-  }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_METRICS, { instanceId, updates });
+  specialistUpdateMetrics: (
+    instanceId: string,
+    updates: {
+      filesAnalyzed?: number;
+      linesAnalyzed?: number;
+      findingsCount?: number;
+      tokensUsed?: number;
+      durationMs?: number;
+    }
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_UPDATE_METRICS, {
+      instanceId,
+      updates
+    });
   },
 
   /**
    * Get system prompt addition for a specialist
    */
   specialistGetPromptAddition: (profileId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_PROMPT_ADDITION, { profileId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SPECIALIST_GET_PROMPT_ADDITION, {
+      profileId
+    });
   },
 
   // ============================================
@@ -2703,7 +3093,9 @@ const electronAPI = {
    * Get supervision tree
    */
   supervisionGetTree: (rootInstanceId?: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.SUPERVISION_GET_TREE, { rootInstanceId });
+    return ipcRenderer.invoke(IPC_CHANNELS.SUPERVISION_GET_TREE, {
+      rootInstanceId
+    });
   },
 
   /**
@@ -2740,7 +3132,10 @@ const electronAPI = {
   /**
    * Remove a section from a context store
    */
-  rlmRemoveSection: (payload: { storeId: string; sectionId: string }): Promise<IpcResponse> => {
+  rlmRemoveSection: (payload: {
+    storeId: string;
+    sectionId: string;
+  }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.RLM_REMOVE_SECTION, payload);
   },
 
@@ -2782,7 +3177,10 @@ const electronAPI = {
   /**
    * Start an RLM session
    */
-  rlmStartSession: (payload: { storeId: string; instanceId: string }): Promise<IpcResponse> => {
+  rlmStartSession: (payload: {
+    storeId: string;
+    instanceId: string;
+  }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.RLM_START_SESSION, payload);
   },
 
@@ -2844,7 +3242,12 @@ const electronAPI = {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{ tool: string; count: number; avgDuration: number; errorCount: number }>;
+    toolsUsed: Array<{
+      tool: string;
+      count: number;
+      avgDuration: number;
+      errorCount: number;
+    }>;
     tokensUsed: number;
     duration: number;
     success: boolean;
@@ -2860,14 +3263,22 @@ const electronAPI = {
    * Get RLM learned patterns
    */
   rlmGetPatterns: (minSuccessRate?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.RLM_GET_PATTERNS, { minSuccessRate });
+    return ipcRenderer.invoke(IPC_CHANNELS.RLM_GET_PATTERNS, {
+      minSuccessRate
+    });
   },
 
   /**
    * Get RLM strategy suggestions
    */
-  rlmGetStrategySuggestions: (context: string, maxSuggestions?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.RLM_GET_STRATEGY_SUGGESTIONS, { context, maxSuggestions });
+  rlmGetStrategySuggestions: (
+    context: string,
+    maxSuggestions?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RLM_GET_STRATEGY_SUGGESTIONS, {
+      context,
+      maxSuggestions
+    });
   },
 
   // ============================================
@@ -2886,7 +3297,12 @@ const electronAPI = {
     agentUsed: string;
     modelUsed: string;
     workflowUsed?: string;
-    toolsUsed: Array<{ tool: string; count: number; avgDuration: number; errorCount: number }>;
+    toolsUsed: Array<{
+      tool: string;
+      count: number;
+      avgDuration: number;
+      errorCount: number;
+    }>;
     tokensUsed: number;
     duration: number;
     success: boolean;
@@ -2902,21 +3318,35 @@ const electronAPI = {
    * Get learning patterns
    */
   learningGetPatterns: (minSuccessRate?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_GET_PATTERNS, { minSuccessRate });
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_GET_PATTERNS, {
+      minSuccessRate
+    });
   },
 
   /**
    * Get learning suggestions
    */
-  learningGetSuggestions: (context: string, maxSuggestions?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_GET_SUGGESTIONS, { context, maxSuggestions });
+  learningGetSuggestions: (
+    context: string,
+    maxSuggestions?: number
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_GET_SUGGESTIONS, {
+      context,
+      maxSuggestions
+    });
   },
 
   /**
    * Enhance prompt with learning
    */
-  learningEnhancePrompt: (prompt: string, context: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_ENHANCE_PROMPT, { prompt, context });
+  learningEnhancePrompt: (
+    prompt: string,
+    context: string
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_ENHANCE_PROMPT, {
+      prompt,
+      context
+    });
   },
 
   // ============================================
@@ -2975,7 +3405,9 @@ const electronAPI = {
    * Get verification result
    */
   verificationGetResult: (verificationId: string): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.VERIFICATION_GET_RESULT, { verificationId });
+    return ipcRenderer.invoke(IPC_CHANNELS.VERIFICATION_GET_RESULT, {
+      verificationId
+    });
   },
 
   // ============================================
@@ -2996,8 +3428,13 @@ const electronAPI = {
   /**
    * Memory-R1: Execute a decided operation
    */
-  memoryR1ExecuteOperation: (decision: Record<string, unknown>): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.MEMORY_R1_EXECUTE_OPERATION, decision);
+  memoryR1ExecuteOperation: (
+    decision: Record<string, unknown>
+  ): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.MEMORY_R1_EXECUTE_OPERATION,
+      decision
+    );
   },
 
   /**
@@ -3029,7 +3466,10 @@ const electronAPI = {
   /**
    * Memory-R1: Retrieve memories
    */
-  memoryR1Retrieve: (payload: { query: string; taskId: string }): Promise<IpcResponse> => {
+  memoryR1Retrieve: (payload: {
+    query: string;
+    taskId: string;
+  }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.MEMORY_R1_RETRIEVE, payload);
   },
 
@@ -3068,7 +3508,9 @@ const electronAPI = {
   /**
    * Memory-R1: Configure
    */
-  memoryR1Configure: (config: Record<string, unknown>): Promise<IpcResponse> => {
+  memoryR1Configure: (
+    config: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.MEMORY_R1_CONFIGURE, config);
   },
 
@@ -3084,7 +3526,10 @@ const electronAPI = {
     sessionId: string;
     taskId: string;
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_PROCESS_INPUT, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_PROCESS_INPUT,
+      payload
+    );
   },
 
   /**
@@ -3093,7 +3538,12 @@ const electronAPI = {
   unifiedMemoryRetrieve: (payload: {
     query: string;
     taskId: string;
-    options?: { types?: string[]; maxTokens?: number; sessionId?: string; instanceId?: string };
+    options?: {
+      types?: string[];
+      maxTokens?: number;
+      sessionId?: string;
+      instanceId?: string;
+    };
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_RETRIEVE, payload);
   },
@@ -3107,7 +3557,10 @@ const electronAPI = {
     summary: string;
     lessons: string[];
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_RECORD_SESSION_END, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_RECORD_SESSION_END,
+      payload
+    );
   },
 
   /**
@@ -3118,7 +3571,10 @@ const electronAPI = {
     steps: string[];
     applicableContexts: string[];
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_RECORD_WORKFLOW, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_RECORD_WORKFLOW,
+      payload
+    );
   },
 
   /**
@@ -3131,7 +3587,10 @@ const electronAPI = {
     success: boolean;
     score: number;
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_RECORD_STRATEGY, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_RECORD_STRATEGY,
+      payload
+    );
   },
 
   /**
@@ -3142,7 +3601,10 @@ const electronAPI = {
     success: boolean;
     score: number;
   }): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_RECORD_OUTCOME, payload);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_RECORD_OUTCOME,
+      payload
+    );
   },
 
   /**
@@ -3163,7 +3625,10 @@ const electronAPI = {
    * Unified Memory: Get patterns
    */
   unifiedMemoryGetPatterns: (minSuccessRate?: number): Promise<IpcResponse> => {
-    return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_GET_PATTERNS, minSuccessRate);
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.UNIFIED_MEMORY_GET_PATTERNS,
+      minSuccessRate
+    );
   },
 
   /**
@@ -3183,14 +3648,18 @@ const electronAPI = {
   /**
    * Unified Memory: Load state
    */
-  unifiedMemoryLoad: (snapshot: Record<string, unknown>): Promise<IpcResponse> => {
+  unifiedMemoryLoad: (
+    snapshot: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_LOAD, snapshot);
   },
 
   /**
    * Unified Memory: Configure
    */
-  unifiedMemoryConfigure: (config: Record<string, unknown>): Promise<IpcResponse> => {
+  unifiedMemoryConfigure: (
+    config: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.UNIFIED_MEMORY_CONFIGURE, config);
   },
 
@@ -3293,7 +3762,9 @@ const electronAPI = {
   /**
    * Configure training
    */
-  trainingConfigure: (config: Record<string, unknown>): Promise<IpcResponse> => {
+  trainingConfigure: (
+    config: Record<string, unknown>
+  ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.TRAINING_CONFIGURE, config);
   },
 
@@ -3324,7 +3795,9 @@ const electronAPI = {
    * One-time event listener - fires once then auto-removes
    */
   once: (channel: string, callback: (data: unknown) => void): void => {
-    ipcRenderer.once(channel, (_event: IpcRendererEvent, data: unknown) => callback(data));
+    ipcRenderer.once(channel, (_event: IpcRendererEvent, data: unknown) =>
+      callback(data)
+    );
   },
 
   // ============================================
@@ -3334,7 +3807,7 @@ const electronAPI = {
   /**
    * Get current platform
    */
-  platform: process.platform,
+  platform: process.platform
 };
 
 // Expose the API to the renderer process

@@ -35,11 +35,7 @@ export interface DetectionResult {
 /**
  * CLI type identifiers - only CLIs with provider implementations
  */
-export type CliType =
-  | 'claude'
-  | 'codex'
-  | 'gemini'
-  | 'ollama';
+export type CliType = 'claude' | 'codex' | 'gemini' | 'ollama';
 
 /**
  * CLIs that have provider implementations and can be used for verification
@@ -71,12 +67,19 @@ const CLI_REGISTRY: Record<CliType, CliRegistryEntry> = {
     displayName: 'Claude Code',
     versionFlag: '--version',
     versionPattern: /(\d+\.\d+\.\d+)/,
-    capabilities: ['streaming', 'tool-use', 'file-access', 'shell', 'multi-turn', 'vision'],
+    capabilities: [
+      'streaming',
+      'tool-use',
+      'file-access',
+      'shell',
+      'multi-turn',
+      'vision'
+    ],
     alternativePaths: [
       '/usr/local/bin/claude',
       '/usr/bin/claude',
-      `${process.env['HOME']}/.local/bin/claude`,
-    ],
+      `${process.env['HOME']}/.local/bin/claude`
+    ]
   },
   codex: {
     name: 'codex',
@@ -84,11 +87,18 @@ const CLI_REGISTRY: Record<CliType, CliRegistryEntry> = {
     displayName: 'OpenAI Codex CLI',
     versionFlag: '--version',
     versionPattern: /(\d+\.\d+\.\d+)/,
-    capabilities: ['streaming', 'tool-use', 'file-access', 'shell', 'multi-turn', 'code-execution'],
+    capabilities: [
+      'streaming',
+      'tool-use',
+      'file-access',
+      'shell',
+      'multi-turn',
+      'code-execution'
+    ],
     alternativePaths: [
       '/usr/local/bin/codex',
-      `${process.env['HOME']}/.local/bin/codex`,
-    ],
+      `${process.env['HOME']}/.local/bin/codex`
+    ]
   },
   gemini: {
     name: 'gemini',
@@ -96,11 +106,19 @@ const CLI_REGISTRY: Record<CliType, CliRegistryEntry> = {
     displayName: 'Google Gemini CLI',
     versionFlag: '--version',
     versionPattern: /(\d+\.\d+\.\d+)/,
-    capabilities: ['streaming', 'tool-use', 'file-access', 'shell', 'multi-turn', 'vision', 'large-context'],
+    capabilities: [
+      'streaming',
+      'tool-use',
+      'file-access',
+      'shell',
+      'multi-turn',
+      'vision',
+      'large-context'
+    ],
     alternativePaths: [
       '/usr/local/bin/gemini',
-      `${process.env['HOME']}/.local/bin/gemini`,
-    ],
+      `${process.env['HOME']}/.local/bin/gemini`
+    ]
   },
   ollama: {
     name: 'ollama',
@@ -112,9 +130,9 @@ const CLI_REGISTRY: Record<CliType, CliRegistryEntry> = {
     alternativePaths: [
       '/usr/local/bin/ollama',
       `${process.env['HOME']}/.ollama/bin/ollama`,
-      '/Applications/Ollama.app/Contents/MacOS/ollama',
-    ],
-  },
+      '/Applications/Ollama.app/Contents/MacOS/ollama'
+    ]
+  }
 };
 
 /**
@@ -161,22 +179,28 @@ export class CliDetectionService {
       cliTypes.map((type) => this.checkCli(type))
     );
 
-    console.log('[CliDetection] Results:', results.map(r => ({
-      name: r.name,
-      installed: r.installed,
-      version: r.version,
-      path: r.path,
-      error: r.error,
-    })));
+    console.log(
+      '[CliDetection] Results:',
+      results.map((r) => ({
+        name: r.name,
+        installed: r.installed,
+        version: r.version,
+        path: r.path,
+        error: r.error
+      }))
+    );
 
     const detectionResult: DetectionResult = {
       detected: results,
       available: results.filter((r) => r.installed),
       unavailable: results.filter((r) => !r.installed),
-      timestamp: new Date(),
+      timestamp: new Date()
     };
 
-    console.log('[CliDetection] Available:', detectionResult.available.map(r => r.name));
+    console.log(
+      '[CliDetection] Available:',
+      detectionResult.available.map((r) => r.name)
+    );
 
     // Update cache
     this.cache = detectionResult;
@@ -254,7 +278,7 @@ export class CliDetectionService {
         command: type,
         displayName: type,
         installed: false,
-        error: 'Unknown CLI type',
+        error: 'Unknown CLI type'
       };
     }
 
@@ -282,16 +306,24 @@ export class CliDetectionService {
   /**
    * Check if a specific command is available
    */
-  private checkCommand(command: string, config: CliRegistryEntry): Promise<CliInfo> {
+  private checkCommand(
+    command: string,
+    config: CliRegistryEntry
+  ): Promise<CliInfo> {
     return new Promise((resolve) => {
       const result: CliInfo = {
         name: config.name,
         command: config.command,
         displayName: config.displayName,
         installed: false,
-        capabilities: config.capabilities,
+        capabilities: config.capabilities
       };
 
+      if (command !== config.command) {
+        result.error = 'Invalid CLI command';
+        resolve(result);
+        return;
+      }
       try {
         // Build the version check arguments
         const args = config.versionFlag.split(' ');
@@ -306,19 +338,22 @@ export class CliDetectionService {
           `${homeDir}/.npm-global/bin`,
           `${homeDir}/.nvm/versions/node/current/bin`,
           '/usr/bin',
-          '/bin',
+          '/bin'
         ].filter(Boolean);
         const currentPath = process.env['PATH'] || '';
         const extendedPath = [...additionalPaths, currentPath].join(':');
 
-        console.log(`[CliDetection] checkCommand: ${command} ${args.join(' ')}`);
+        console.log(
+          `[CliDetection] checkCommand: ${command} ${args.join(' ')}`
+        );
         console.log(`[CliDetection] HOME: ${homeDir}`);
-        console.log(`[CliDetection] Extended PATH includes: ${additionalPaths.join(', ')}`);
+        console.log(
+          `[CliDetection] Extended PATH includes: ${additionalPaths.join(', ')}`
+        );
 
         const proc = spawn(command, args, {
           timeout: 5000,
-          shell: true,
-          env: { ...process.env, PATH: extendedPath },
+          env: { ...process.env, PATH: extendedPath }
         });
 
         let stdout = '';
@@ -336,17 +371,23 @@ export class CliDetectionService {
           const output = stdout + stderr;
           const versionMatch = output.match(config.versionPattern);
 
-          console.log(`[CliDetection] ${command} close event: code=${code}, stdout=${stdout.substring(0, 100)}, stderr=${stderr.substring(0, 100)}`);
+          console.log(
+            `[CliDetection] ${command} close event: code=${code}, stdout=${stdout.substring(0, 100)}, stderr=${stderr.substring(0, 100)}`
+          );
 
           if (code === 0 || versionMatch) {
             result.installed = true;
             result.version = versionMatch?.[1];
             result.path = command;
             result.authenticated = !output.includes('not authenticated');
-            console.log(`[CliDetection] ${command} detected: version=${result.version}`);
+            console.log(
+              `[CliDetection] ${command} detected: version=${result.version}`
+            );
           } else {
             result.error = stderr.trim() || 'Command failed';
-            console.log(`[CliDetection] ${command} not detected: error=${result.error}`);
+            console.log(
+              `[CliDetection] ${command} not detected: error=${result.error}`
+            );
           }
           resolve(result);
         });
@@ -383,9 +424,11 @@ export class CliDetectionService {
       shellExecution: capabilities.includes('shell'),
       multiTurn: capabilities.includes('multi-turn'),
       vision: capabilities.includes('vision'),
-      codeExecution: capabilities.includes('code-execution') || capabilities.includes('shell'),
+      codeExecution:
+        capabilities.includes('code-execution') ||
+        capabilities.includes('shell'),
       contextWindow: capabilities.includes('large-context') ? 1000000 : 200000,
-      outputFormats: ['text'],
+      outputFormats: ['text']
     };
   }
 }

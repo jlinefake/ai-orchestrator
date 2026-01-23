@@ -1,8 +1,9 @@
 /**
  * Gemini CLI Adapter - Spawns and manages Google Gemini CLI processes
- * https://github.com/anthropics/gemini-cli
+ * https://github.com/google-gemini/gemini-cli
  *
- * Uses positional prompt for non-interactive mode with JSON output
+ * Uses positional prompt for non-interactive mode with JSON output.
+ * Also provides spawn/sendInput interface for compatibility with InstanceManager.
  */
 
 import {
@@ -13,8 +14,14 @@ import {
   CliMessage,
   CliResponse,
   CliToolCall,
-  CliUsage,
+  CliUsage
 } from './base-cli-adapter';
+import type {
+  OutputMessage,
+  ContextUsage,
+  InstanceStatus
+} from '../../../shared/types/instance.types';
+import { generateId } from '../../../shared/utils/id-generator';
 
 /**
  * Gemini CLI specific configuration
@@ -32,6 +39,22 @@ export interface GeminiCliConfig {
   yolo?: boolean;
   /** Output format: text, json, stream-json */
   outputFormat?: 'text' | 'json' | 'stream-json';
+  /** System prompt */
+  systemPrompt?: string;
+  /** Alias for yolo (used by adapter factory) */
+  yoloMode?: boolean;
+}
+
+/**
+ * Events emitted by GeminiCliAdapter (for InstanceManager compatibility)
+ */
+export interface GeminiCliAdapterEvents {
+  output: (message: OutputMessage) => void;
+  status: (status: InstanceStatus) => void;
+  context: (usage: ContextUsage) => void;
+  error: (error: Error) => void;
+  exit: (code: number | null, signal: string | null) => void;
+  spawned: (pid: number) => void;
 }
 
 /**
@@ -46,11 +69,15 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       args: [],
       cwd: config.workingDir,
       timeout: config.timeout || 300000,
-      sessionPersistence: true,
+      sessionPersistence: true
     };
     super(adapterConfig);
 
-    this.cliConfig = config;
+    // Handle yoloMode alias
+    this.cliConfig = {
+      ...config,
+      yolo: config.yolo ?? config.yoloMode
+    };
     this.sessionId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
@@ -70,7 +97,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       vision: true, // Gemini supports images
       codeExecution: true,
       contextWindow: 1000000, // Gemini 1.5 Pro has 1M+ context
-      outputFormats: ['text', 'json', 'markdown'],
+      outputFormats: ['text', 'json', 'markdown']
     };
   }
 
@@ -93,12 +120,12 @@ export class GeminiCliAdapter extends BaseCliAdapter {
             available: true,
             version: versionMatch?.[1] || 'unknown',
             path: 'gemini',
-            authenticated: !output.includes('not authenticated'),
+            authenticated: !output.includes('not authenticated')
           });
         } else {
           resolve({
             available: false,
-            error: `Gemini CLI not found or not configured: ${output}`,
+            error: `Gemini CLI not found or not configured: ${output}`
           });
         }
       });
@@ -106,7 +133,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       proc.on('error', (err) => {
         resolve({
           available: false,
-          error: `Failed to spawn gemini: ${err.message}`,
+          error: `Failed to spawn gemini: ${err.message}`
         });
       });
 
@@ -114,7 +141,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
         proc.kill();
         resolve({
           available: false,
-          error: 'Timeout checking Gemini CLI',
+          error: 'Timeout checking Gemini CLI'
         });
       }, 5000);
     });
@@ -144,15 +171,38 @@ export class GeminiCliAdapter extends BaseCliAdapter {
             const event = JSON.parse(line);
             // Handle Gemini stream-json event types
             // Assistant messages: {"type":"message","role":"assistant","content":"..."}
-            if (event.type === 'message' && event.role === 'assistant' && event.content) {
-              this.emit('output', event.content);
+            if (
+              event.type === 'message' &&
+              event.role === 'assistant' &&
+              event.content
+            ) {
+              this.emit('output', {
+                id: generateId(),
+                timestamp: Date.now(),
+                type: 'assistant',
+                content: event.content
+              } as OutputMessage);
             } else if (event.type === 'text' && event.text) {
-              this.emit('output', event.text);
+              this.emit('output', {
+                id: generateId(),
+                timestamp: Date.now(),
+                type: 'assistant',
+                content: event.text
+              } as OutputMessage);
             }
           } catch {
             // Not JSON, emit raw if it looks like content
-            if (line.trim() && !line.startsWith('{') && !line.includes('YOLO mode')) {
-              this.emit('output', line);
+            if (
+              line.trim() &&
+              !line.startsWith('{') &&
+              !line.includes('YOLO mode')
+            ) {
+              this.emit('output', {
+                id: generateId(),
+                timestamp: Date.now(),
+                type: 'assistant',
+                content: line
+              } as OutputMessage);
             }
           }
         }
@@ -161,7 +211,11 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       this.process.stderr?.on('data', (data) => {
         const errorStr = data.toString();
         // Only emit as error if it's actually an error
-        if (errorStr.includes('error') || errorStr.includes('Error') || errorStr.includes('fatal')) {
+        if (
+          errorStr.includes('error') ||
+          errorStr.includes('Error') ||
+          errorStr.includes('fatal')
+        ) {
           this.emit('error', errorStr);
         }
       });
@@ -173,7 +227,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
           const response = this.parseOutput(this.outputBuffer);
           response.usage = {
             ...response.usage,
-            duration,
+            duration
           };
           this.emit('complete', response);
           resolve(response);
@@ -215,14 +269,22 @@ export class GeminiCliAdapter extends BaseCliAdapter {
         try {
           const event = JSON.parse(line);
           // Assistant messages: {"type":"message","role":"assistant","content":"..."}
-          if (event.type === 'message' && event.role === 'assistant' && event.content) {
+          if (
+            event.type === 'message' &&
+            event.role === 'assistant' &&
+            event.content
+          ) {
             yield event.content;
           } else if (event.type === 'text' && event.text) {
             yield event.text;
           }
         } catch {
           // Not JSON, yield if it looks like content
-          if (line.trim() && !line.startsWith('{') && !line.includes('YOLO mode')) {
+          if (
+            line.trim() &&
+            !line.startsWith('{') &&
+            !line.includes('YOLO mode')
+          ) {
             yield line;
           }
         }
@@ -233,7 +295,8 @@ export class GeminiCliAdapter extends BaseCliAdapter {
   parseOutput(raw: string): CliResponse {
     const id = this.generateResponseId();
     const toolCalls = this.extractToolCalls(raw);
-    const content = this.extractContentFromStreamJson(raw) || this.cleanContent(raw);
+    const content =
+      this.extractContentFromStreamJson(raw) || this.cleanContent(raw);
     const usage = this.extractUsage(raw);
 
     return {
@@ -242,7 +305,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       role: 'assistant',
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
-      raw,
+      raw
     };
   }
 
@@ -252,12 +315,16 @@ export class GeminiCliAdapter extends BaseCliAdapter {
    */
   private extractContentFromStreamJson(raw: string): string {
     const contentParts: string[] = [];
-    const lines = raw.split('\n').filter(l => l.trim());
+    const lines = raw.split('\n').filter((l) => l.trim());
 
     for (const line of lines) {
       try {
         const event = JSON.parse(line);
-        if (event.type === 'message' && event.role === 'assistant' && event.content) {
+        if (
+          event.type === 'message' &&
+          event.role === 'assistant' &&
+          event.content
+        ) {
           contentParts.push(event.content);
         } else if (event.type === 'text' && event.text) {
           contentParts.push(event.text);
@@ -288,6 +355,10 @@ export class GeminiCliAdapter extends BaseCliAdapter {
 
     // YOLO mode (auto-approve all actions)
     if (this.cliConfig.yolo) {
+      console.warn('[Security] YOLO mode enabled for Gemini CLI instance', {
+        sessionId: this.sessionId,
+        model: this.cliConfig.model
+      });
       args.push('--yolo');
     }
 
@@ -317,13 +388,13 @@ export class GeminiCliAdapter extends BaseCliAdapter {
         toolCalls.push({
           id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: match[1],
-          arguments: JSON.parse(match[2] || '{}'),
+          arguments: JSON.parse(match[2] || '{}')
         });
       } catch {
         toolCalls.push({
           id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: match[1],
-          arguments: { raw: match[2] },
+          arguments: { raw: match[2] }
         });
       }
     }
@@ -335,13 +406,13 @@ export class GeminiCliAdapter extends BaseCliAdapter {
         toolCalls.push({
           id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: match[1],
-          arguments: JSON.parse(match[2] || '{}'),
+          arguments: JSON.parse(match[2] || '{}')
         });
       } catch {
         toolCalls.push({
           id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: match[1],
-          arguments: { raw: match[2] },
+          arguments: { raw: match[2] }
         });
       }
     }
@@ -361,7 +432,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
   private extractUsage(raw: string): CliUsage {
     // Try to extract usage from Gemini result event
     // Format: {"type":"result","stats":{"total_tokens":...,"input_tokens":...,"output_tokens":...}}
-    const lines = raw.split('\n').filter(l => l.trim());
+    const lines = raw.split('\n').filter((l) => l.trim());
 
     for (const line of lines) {
       try {
@@ -370,7 +441,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
           return {
             inputTokens: event.stats.input_tokens || event.stats.input || 0,
             outputTokens: event.stats.output_tokens || 0,
-            totalTokens: event.stats.total_tokens || 0,
+            totalTokens: event.stats.total_tokens || 0
           };
         }
       } catch {
@@ -382,7 +453,118 @@ export class GeminiCliAdapter extends BaseCliAdapter {
     const tokens = this.estimateTokens(raw);
     return {
       outputTokens: tokens,
-      totalTokens: tokens,
+      totalTokens: tokens
     };
+  }
+
+  // ============ InstanceManager Compatibility API ============
+  // These methods provide the spawn/sendInput pattern expected by InstanceManager
+  // Unlike Claude CLI which maintains a persistent process, Gemini runs exec per message
+
+  private isSpawned: boolean = false;
+  private totalTokensUsed: number = 0;
+
+  /**
+   * "Spawn" the CLI adapter - marks it as ready to receive messages.
+   * Unlike Claude CLI, Gemini doesn't maintain a persistent process.
+   * Each sendInput() will exec a new command.
+   */
+  async spawn(): Promise<number> {
+    if (this.isSpawned) {
+      throw new Error('Adapter already spawned');
+    }
+
+    this.isSpawned = true;
+    // Generate a fake PID to maintain API compatibility
+    const fakePid = Math.floor(Math.random() * 100000) + 10000;
+    this.emit('spawned', fakePid);
+    this.emit('status', 'idle' as InstanceStatus);
+
+    return fakePid;
+  }
+
+  /**
+   * Send a message to Gemini via exec command.
+   * Each call spawns a new process.
+   */
+  async sendInput(message: string, attachments?: any[]): Promise<void> {
+    if (!this.isSpawned) {
+      throw new Error('Adapter not spawned - call spawn() first');
+    }
+
+    this.emit('status', 'busy' as InstanceStatus);
+
+    try {
+      // Build attachments for CliMessage format
+      const cliAttachments = attachments?.map((a) => ({
+        type: a.type?.startsWith('image/')
+          ? ('image' as const)
+          : ('file' as const),
+        path: a.path,
+        content: a.data,
+        mimeType: a.type,
+        name: a.name
+      }));
+
+      const cliMessage: CliMessage = {
+        role: 'user',
+        content: message,
+        attachments: cliAttachments
+      };
+
+      // Execute the command
+      // Note: sendMessage() already emits OutputMessages during streaming,
+      // so we don't need to emit the final content again
+      const response = await this.sendMessage(cliMessage);
+
+      // Emit tool uses if any
+      if (response.toolCalls) {
+        for (const tool of response.toolCalls) {
+          const toolMessage: OutputMessage = {
+            id: generateId(),
+            timestamp: Date.now(),
+            type: 'tool_use',
+            content: `Using tool: ${tool.name}`,
+            metadata: { ...tool } as Record<string, unknown>
+          };
+          this.emit('output', toolMessage);
+        }
+      }
+
+      // Update context/usage tracking
+      if (response.usage) {
+        this.totalTokensUsed += response.usage.totalTokens || 0;
+        const contextUsage: ContextUsage = {
+          used: this.totalTokensUsed,
+          total: 1000000, // Gemini 1.5 Pro has 1M+ context
+          percentage: Math.min((this.totalTokensUsed / 1000000) * 100, 100)
+        };
+        this.emit('context', contextUsage);
+      }
+
+      this.emit('status', 'idle' as InstanceStatus);
+    } catch (error) {
+      const errorMessage: OutputMessage = {
+        id: generateId(),
+        timestamp: Date.now(),
+        type: 'error',
+        content: error instanceof Error ? error.message : String(error)
+      };
+      this.emit('output', errorMessage);
+      this.emit('status', 'error' as InstanceStatus);
+      this.emit(
+        'error',
+        error instanceof Error ? error : new Error(String(error))
+      );
+    }
+  }
+
+  /**
+   * Override terminate to clean up spawned state
+   */
+  override async terminate(graceful: boolean = true): Promise<void> {
+    await super.terminate(graceful);
+    this.isSpawned = false;
+    this.totalTokensUsed = 0;
   }
 }

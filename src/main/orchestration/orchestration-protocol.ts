@@ -2,6 +2,8 @@
  * Orchestration Protocol - Defines the communication protocol for Claude to control the orchestrator
  */
 
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
+
 export const ORCHESTRATION_MARKER_START = ':::ORCHESTRATOR_COMMAND:::';
 export const ORCHESTRATION_MARKER_END = ':::END_COMMAND:::';
 
@@ -23,6 +25,10 @@ export interface SpawnChildCommand {
   workingDirectory?: string;
   agentId?: string;
   model?: string;
+  /** CLI provider to use: 'claude', 'codex', 'gemini', or 'auto' (default) */
+  provider?: 'claude' | 'codex' | 'gemini' | 'auto';
+  /** Explicitly enable YOLO for this child (requires user confirmation upstream) */
+  yoloMode?: boolean;
 }
 
 export interface MessageChildCommand {
@@ -131,14 +137,16 @@ ${ORCHESTRATION_MARKER_END}
 
 | Command | Parameters |
 |---------|------------|
-| spawn_child | task, name?, agentId?, model? |
+| spawn_child | task, name?, agentId?, model?, provider? |
 | message_child | childId, message |
 | get_children | (none) |
 | get_child_output | childId, lastN? |
 | terminate_child | childId |
 
-**Model options:** \`claude-3-5-haiku-20241022\`, \`claude-sonnet-4-20250514\`, \`claude-opus-4-20250514\`
+**Model options:** \`${CLAUDE_MODELS.HAIKU}\`, \`${CLAUDE_MODELS.SONNET}\`, \`${CLAUDE_MODELS.OPUS}\`
 (Usually leave unspecified for automatic routing)
+
+**Provider options:** \`claude\`, \`codex\`, \`gemini\`, \`auto\` (default: uses app settings)
 
 Instance ID: ${instanceId}
 `;
@@ -147,7 +155,12 @@ Instance ID: ${instanceId}
 /**
  * Generate the prompt for a child instance
  */
-export function generateChildPrompt(childId: string, parentId: string, task: string, taskId?: string): string {
+export function generateChildPrompt(
+  childId: string,
+  parentId: string,
+  task: string,
+  taskId?: string
+): string {
   const taskIdInfo = taskId ? ` (Task: ${taskId})` : '';
   return `## 👶 Child Instance${taskIdInfo}
 

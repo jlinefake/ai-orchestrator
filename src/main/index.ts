@@ -8,6 +8,7 @@ import * as path from 'path';
 import { WindowManager } from './window-manager';
 import { IpcMainHandler } from './ipc/ipc-main-handler';
 import { InstanceManager } from './instance/instance-manager';
+import { getHookManager } from './hooks/hook-manager';
 
 class ClaudeOrchestratorApp {
   private windowManager: WindowManager;
@@ -17,7 +18,10 @@ class ClaudeOrchestratorApp {
   constructor() {
     this.windowManager = new WindowManager();
     this.instanceManager = new InstanceManager();
-    this.ipcHandler = new IpcMainHandler(this.instanceManager, this.windowManager);
+    this.ipcHandler = new IpcMainHandler(
+      this.instanceManager,
+      this.windowManager
+    );
   }
 
   async initialize(): Promise<void> {
@@ -26,6 +30,9 @@ class ClaudeOrchestratorApp {
     // Register IPC handlers BEFORE creating window
     // (window might call handlers immediately on load)
     this.ipcHandler.registerHandlers();
+
+    // Load persisted hook approvals
+    await getHookManager().loadApprovals();
 
     // Set up instance manager event forwarding to renderer
     this.setupInstanceEventForwarding();

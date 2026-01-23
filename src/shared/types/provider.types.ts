@@ -131,33 +131,70 @@ export interface ProviderSessionOptions {
 }
 
 /**
+ * Claude model identifiers - UPDATE THESE WHEN NEW MODELS RELEASE
+ * All other files should import and reference these constants.
+ */
+export const CLAUDE_MODELS = {
+  // Current models (4.5 generation)
+  HAIKU: 'claude-haiku-4-5-20251001',
+  SONNET: 'claude-sonnet-4-5-20250929',
+  OPUS: 'claude-opus-4-5-20250918',
+  // Aliases for routing tiers
+  FAST: 'claude-haiku-4-5-20251001',
+  BALANCED: 'claude-sonnet-4-5-20250929',
+  POWERFUL: 'claude-opus-4-5-20250918',
+} as const;
+
+/**
+ * OpenAI model identifiers
+ */
+export const OPENAI_MODELS = {
+  GPT4O: 'gpt-4o',
+  GPT4O_MINI: 'gpt-4o-mini',
+  GPT4_TURBO: 'gpt-4-turbo',
+} as const;
+
+/**
+ * Google model identifiers
+ */
+export const GOOGLE_MODELS = {
+  GEMINI_PRO: 'gemini-1.5-pro',
+  GEMINI_FLASH: 'gemini-1.5-flash',
+} as const;
+
+/**
  * Default models for each provider
  */
 export const DEFAULT_MODELS: Record<ProviderType, string> = {
-  'claude-cli': 'claude-sonnet-4-20250514',
-  'anthropic-api': 'claude-sonnet-4-20250514',
-  'openai': 'gpt-4o',
-  'openai-compatible': 'gpt-4o',
+  'claude-cli': CLAUDE_MODELS.SONNET,
+  'anthropic-api': CLAUDE_MODELS.SONNET,
+  'openai': OPENAI_MODELS.GPT4O,
+  'openai-compatible': OPENAI_MODELS.GPT4O,
   'ollama': 'llama3',
-  'google': 'gemini-1.5-pro',
+  'google': GOOGLE_MODELS.GEMINI_PRO,
   'amazon-bedrock': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-  'azure': 'gpt-4o',
+  'azure': OPENAI_MODELS.GPT4O,
 };
 
 /**
  * Known model pricing (USD per million tokens)
  */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  // Claude models
+  // Claude 4.5 models (current)
+  [CLAUDE_MODELS.SONNET]: { input: 3.0, output: 15.0 },
+  [CLAUDE_MODELS.OPUS]: { input: 5.0, output: 25.0 },
+  [CLAUDE_MODELS.HAIKU]: { input: 1.0, output: 5.0 },
+  // Claude 4 models (legacy)
   'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },
   'claude-opus-4-20250514': { input: 15.0, output: 75.0 },
+  // Claude 3.5 models (legacy)
   'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0 },
   'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0 },
   // OpenAI models
-  'gpt-4o': { input: 2.5, output: 10.0 },
-  'gpt-4o-mini': { input: 0.15, output: 0.6 },
-  'gpt-4-turbo': { input: 10.0, output: 30.0 },
+  [OPENAI_MODELS.GPT4O]: { input: 2.5, output: 10.0 },
+  [OPENAI_MODELS.GPT4O_MINI]: { input: 0.15, output: 0.6 },
+  [OPENAI_MODELS.GPT4_TURBO]: { input: 10.0, output: 30.0 },
   // Google models
-  'gemini-1.5-pro': { input: 1.25, output: 5.0 },
-  'gemini-1.5-flash': { input: 0.075, output: 0.3 },
+  [GOOGLE_MODELS.GEMINI_PRO]: { input: 1.25, output: 5.0 },
+  [GOOGLE_MODELS.GEMINI_FLASH]: { input: 0.075, output: 0.3 },
 };

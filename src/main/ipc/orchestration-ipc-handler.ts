@@ -28,19 +28,30 @@ import type {
   HooksEvaluatePayload,
   HooksImportPayload,
   HooksExportPayload,
+  HookApprovalsListPayload,
+  HookApprovalsUpdatePayload,
+  HookApprovalsClearPayload,
   SkillsDiscoverPayload,
   SkillsGetPayload,
   SkillsLoadPayload,
   SkillsUnloadPayload,
   SkillsLoadReferencePayload,
   SkillsLoadExamplePayload,
-  SkillsMatchPayload,
+  SkillsMatchPayload
 } from '../../shared/types/ipc.types';
 import { getWorkflowManager } from '../workflows/workflow-manager';
 import { getHookEngine } from '../hooks/hook-engine';
+import { getHookManager } from '../hooks/hook-manager';
 import { getSkillRegistry } from '../skills/skill-registry';
-import { builtInReviewAgents, getReviewAgentById } from '../agents/review-agents';
-import { HookEvent, HookContext, HookRule } from '../../shared/types/hook.types';
+import {
+  builtInReviewAgents,
+  getReviewAgentById
+} from '../agents/review-agents';
+import {
+  HookEvent,
+  HookContext,
+  HookRule
+} from '../../shared/types/hook.types';
 import { serializeLoadedSkill } from '../../shared/types/skill.types';
 
 export function registerOrchestrationHandlers(): void {
@@ -61,8 +72,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_LIST_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -83,8 +94,8 @@ export function registerOrchestrationHandlers(): void {
             error: {
               code: 'WORKFLOW_TEMPLATE_NOT_FOUND',
               message: `Template not found: ${payload.templateId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: template };
@@ -94,8 +105,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_GET_TEMPLATE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -120,8 +131,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_START_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -135,15 +146,17 @@ export function registerOrchestrationHandlers(): void {
       payload: WorkflowGetExecutionPayload
     ): Promise<IpcResponse> => {
       try {
-        const execution = getWorkflowManager().getExecution(payload.executionId);
+        const execution = getWorkflowManager().getExecution(
+          payload.executionId
+        );
         if (!execution) {
           return {
             success: false,
             error: {
               code: 'WORKFLOW_EXECUTION_NOT_FOUND',
               message: `Execution not found: ${payload.executionId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: execution };
@@ -153,8 +166,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_GET_EXECUTION_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -168,7 +181,9 @@ export function registerOrchestrationHandlers(): void {
       payload: WorkflowGetByInstancePayload
     ): Promise<IpcResponse> => {
       try {
-        const execution = getWorkflowManager().getExecutionByInstance(payload.instanceId);
+        const execution = getWorkflowManager().getExecutionByInstance(
+          payload.instanceId
+        );
         return { success: true, data: execution || null };
       } catch (error) {
         return {
@@ -176,8 +191,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_GET_BY_INSTANCE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -202,8 +217,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_COMPLETE_PHASE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -228,8 +243,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_SATISFY_GATE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -251,8 +266,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_SKIP_PHASE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -274,8 +289,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_CANCEL_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -289,7 +304,9 @@ export function registerOrchestrationHandlers(): void {
       payload: WorkflowGetPromptAdditionPayload
     ): Promise<IpcResponse> => {
       try {
-        const addition = getWorkflowManager().getSystemPromptAddition(payload.executionId);
+        const addition = getWorkflowManager().getSystemPromptAddition(
+          payload.executionId
+        );
         return { success: true, data: addition };
       } catch (error) {
         return {
@@ -297,8 +314,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'WORKFLOW_GET_PROMPT_ADDITION_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -320,8 +337,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'REVIEW_LIST_AGENTS_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -342,8 +359,8 @@ export function registerOrchestrationHandlers(): void {
             error: {
               code: 'REVIEW_AGENT_NOT_FOUND',
               message: `Agent not found: ${payload.agentId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: agent };
@@ -353,8 +370,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'REVIEW_GET_AGENT_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -394,8 +411,132 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_LIST_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // List hook approvals
+  ipcMain.handle(
+    IPC_CHANNELS.HOOK_APPROVALS_LIST,
+    async (
+      event: IpcMainInvokeEvent,
+      payload?: HookApprovalsListPayload
+    ): Promise<IpcResponse> => {
+      try {
+        const hookManager = getHookManager();
+        const hooks = hookManager.getAllHooks();
+
+        const approvals = hooks
+          .filter((hook) => hook.approvalRequired)
+          .filter((hook) => (payload?.pendingOnly ? !hook.approved : true))
+          .map((hook) => {
+            const handlerType = hook.handler.type;
+            let handlerSummary: string | undefined;
+            if (handlerType === 'command') {
+              handlerSummary = hook.handler.command;
+            } else if (handlerType === 'prompt') {
+              handlerSummary = hook.handler.prompt;
+            }
+
+            return {
+              id: hook.id,
+              name: hook.name,
+              event: hook.event,
+              enabled: hook.enabled,
+              approvalRequired: Boolean(hook.approvalRequired),
+              approved: Boolean(hook.approved),
+              handlerType,
+              handlerSummary
+            };
+          });
+
+        return { success: true, data: approvals };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'HOOK_APPROVALS_LIST_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // Update hook approval
+  ipcMain.handle(
+    IPC_CHANNELS.HOOK_APPROVALS_UPDATE,
+    async (
+      event: IpcMainInvokeEvent,
+      payload: HookApprovalsUpdatePayload
+    ): Promise<IpcResponse> => {
+      try {
+        const hookManager = getHookManager();
+        const updated = hookManager.approveHook(
+          payload.hookId,
+          payload.approved
+        );
+        if (!updated) {
+          return {
+            success: false,
+            error: {
+              code: 'HOOK_APPROVAL_NOT_FOUND',
+              message: `Hook not found: ${payload.hookId}`,
+              timestamp: Date.now()
+            }
+          };
+        }
+        return { success: true, data: updated };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'HOOK_APPROVAL_UPDATE_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // Clear hook approvals
+  ipcMain.handle(
+    IPC_CHANNELS.HOOK_APPROVALS_CLEAR,
+    async (
+      event: IpcMainInvokeEvent,
+      payload?: HookApprovalsClearPayload
+    ): Promise<IpcResponse> => {
+      try {
+        const hookManager = getHookManager();
+        const hookIds = payload?.hookIds
+          ? payload.hookIds
+          : hookManager
+              .getAllHooks()
+              .filter((hook) => hook.approvalRequired)
+              .map((hook) => hook.id);
+
+        let cleared = 0;
+        for (const hookId of hookIds) {
+          const updated = hookManager.approveHook(hookId, false);
+          if (updated) {
+            cleared += 1;
+          }
+        }
+
+        return { success: true, data: { cleared } };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'HOOK_APPROVALS_CLEAR_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -416,8 +557,8 @@ export function registerOrchestrationHandlers(): void {
             error: {
               code: 'HOOK_NOT_FOUND',
               message: `Hook not found: ${payload.ruleId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: rule };
@@ -427,8 +568,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_GET_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -448,11 +589,17 @@ export function registerOrchestrationHandlers(): void {
           event: payload.rule.event as HookEvent | 'all',
           conditions: payload.rule.conditions.map((c) => ({
             field: c.field,
-            operator: c.operator as 'regex_match' | 'contains' | 'not_contains' | 'equals' | 'starts_with' | 'ends_with',
-            pattern: c.pattern,
+            operator: c.operator as
+              | 'regex_match'
+              | 'contains'
+              | 'not_contains'
+              | 'equals'
+              | 'starts_with'
+              | 'ends_with',
+            pattern: c.pattern
           })),
           source: 'user',
-          createdAt: Date.now(),
+          createdAt: Date.now()
         };
 
         getHookEngine().registerRule(rule);
@@ -463,8 +610,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_CREATE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -483,9 +630,15 @@ export function registerOrchestrationHandlers(): void {
           ...payload.updates,
           conditions: payload.updates.conditions?.map((c) => ({
             field: c.field,
-            operator: c.operator as 'regex_match' | 'contains' | 'not_contains' | 'equals' | 'starts_with' | 'ends_with',
-            pattern: c.pattern,
-          })),
+            operator: c.operator as
+              | 'regex_match'
+              | 'contains'
+              | 'not_contains'
+              | 'equals'
+              | 'starts_with'
+              | 'ends_with',
+            pattern: c.pattern
+          }))
         };
         const updated = getHookEngine().updateRule(payload.ruleId, updates);
         if (!updated) {
@@ -494,8 +647,8 @@ export function registerOrchestrationHandlers(): void {
             error: {
               code: 'HOOK_NOT_FOUND',
               message: `Hook not found: ${payload.ruleId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: updated };
@@ -505,8 +658,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_UPDATE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -528,8 +681,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_DELETE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -545,7 +698,7 @@ export function registerOrchestrationHandlers(): void {
       try {
         const context: HookContext = {
           ...payload.context,
-          event: payload.context.event as HookEvent,
+          event: payload.context.event as HookEvent
         };
         const result = getHookEngine().evaluate(context);
         return { success: true, data: result };
@@ -555,8 +708,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_EVALUATE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -581,8 +734,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_IMPORT_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -604,8 +757,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'HOOKS_EXPORT_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -623,7 +776,9 @@ export function registerOrchestrationHandlers(): void {
       payload: SkillsDiscoverPayload
     ): Promise<IpcResponse> => {
       try {
-        const skills = await getSkillRegistry().discoverSkills(payload.searchPaths);
+        const skills = await getSkillRegistry().discoverSkills(
+          payload.searchPaths
+        );
         return { success: true, data: skills };
       } catch (error) {
         return {
@@ -631,32 +786,29 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_DISCOVER_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
   );
 
   // List skills
-  ipcMain.handle(
-    IPC_CHANNELS.SKILLS_LIST,
-    async (): Promise<IpcResponse> => {
-      try {
-        const skills = getSkillRegistry().listSkills();
-        return { success: true, data: skills };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SKILLS_LIST_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
+  ipcMain.handle(IPC_CHANNELS.SKILLS_LIST, async (): Promise<IpcResponse> => {
+    try {
+      const skills = getSkillRegistry().listSkills();
+      return { success: true, data: skills };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: 'SKILLS_LIST_FAILED',
+          message: (error as Error).message,
+          timestamp: Date.now()
+        }
+      };
     }
-  );
+  });
 
   // Get a specific skill
   ipcMain.handle(
@@ -673,8 +825,8 @@ export function registerOrchestrationHandlers(): void {
             error: {
               code: 'SKILL_NOT_FOUND',
               message: `Skill not found: ${payload.skillId}`,
-              timestamp: Date.now(),
-            },
+              timestamp: Date.now()
+            }
           };
         }
         return { success: true, data: skill };
@@ -684,8 +836,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_GET_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -707,8 +859,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_LOAD_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -730,8 +882,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_UNLOAD_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -756,8 +908,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_LOAD_REFERENCE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -782,8 +934,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_LOAD_EXAMPLE_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -805,8 +957,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_MATCH_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }
@@ -825,8 +977,8 @@ export function registerOrchestrationHandlers(): void {
           error: {
             code: 'SKILLS_GET_MEMORY_FAILED',
             message: (error as Error).message,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         };
       }
     }

@@ -33,6 +33,7 @@ export interface AppSettings {
   maxDiskStorageMB: number; // max disk space for output storage (0 = unlimited)
   memoryWarningThresholdMB: number; // warn when heap exceeds this (0 = disabled)
   autoTerminateOnMemoryPressure: boolean; // terminate idle instances when memory critical
+  persistSessionContent: boolean; // persist session content (conversation/tool output) to disk
 
   // Display
   fontSize: number; // 12-20
@@ -49,7 +50,7 @@ export interface AppSettings {
  */
 export const DEFAULT_SETTINGS: AppSettings = {
   // General
-  defaultYoloMode: true,
+  defaultYoloMode: false,
   defaultWorkingDirectory: '',
   defaultCli: 'auto',
   theme: 'dark',
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxDiskStorageMB: 500, // 500MB max disk storage
   memoryWarningThresholdMB: 1024, // warn at 1GB heap
   autoTerminateOnMemoryPressure: true,
+  persistSessionContent: true,
 
   // Display
   fontSize: 14,
@@ -74,7 +76,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   // Advanced
   customModelOverride: '',
-  parserBufferMaxKB: 1024, // 1MB max parser buffer
+  parserBufferMaxKB: 1024 // 1MB max parser buffer
 };
 
 /**
@@ -111,9 +113,10 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
   {
     key: 'defaultYoloMode',
     label: 'YOLO Mode by Default',
-    description: 'Enable YOLO mode (auto-approve all actions) for new instances',
+    description:
+      'Enable YOLO mode (auto-approve all actions) for new instances',
     type: 'boolean',
-    category: 'general',
+    category: 'general'
   },
   {
     key: 'defaultWorkingDirectory',
@@ -121,7 +124,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     description: 'Starting folder for new instances (empty = home directory)',
     type: 'directory',
     category: 'general',
-    placeholder: '~/Projects',
+    placeholder: '~/Projects'
   },
   {
     key: 'defaultCli',
@@ -133,8 +136,8 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
       { value: 'auto', label: 'Auto-detect' },
       { value: 'claude', label: 'Claude Code' },
       { value: 'gemini', label: 'Gemini CLI' },
-      { value: 'openai', label: 'OpenAI CLI' },
-    ],
+      { value: 'openai', label: 'OpenAI CLI' }
+    ]
   },
   {
     key: 'theme',
@@ -145,8 +148,8 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     options: [
       { value: 'dark', label: 'Dark' },
       { value: 'light', label: 'Light' },
-      { value: 'system', label: 'System' },
-    ],
+      { value: 'system', label: 'System' }
+    ]
   },
 
   // Orchestration
@@ -157,7 +160,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'orchestration',
     min: 0,
-    max: 100,
+    max: 100
   },
   {
     key: 'maxTotalInstances',
@@ -166,23 +169,34 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'orchestration',
     min: 0,
-    max: 100,
+    max: 100
   },
   {
     key: 'autoTerminateIdleMinutes',
     label: 'Auto-terminate Idle Instances',
-    description: 'Terminate instances after N minutes of inactivity (0 = disabled)',
+    description:
+      'Terminate instances after N minutes of inactivity (0 = disabled)',
     type: 'number',
     category: 'orchestration',
     min: 0,
-    max: 120,
+    max: 120
   },
   {
     key: 'allowNestedOrchestration',
     label: 'Allow Nested Orchestration',
     description: 'Allow child instances to spawn their own children',
     type: 'boolean',
-    category: 'orchestration',
+    category: 'orchestration'
+  },
+
+  // Memory
+  {
+    key: 'persistSessionContent',
+    label: 'Persist Session Content',
+    description:
+      'Save conversation and tool output to disk for session continuity',
+    type: 'boolean',
+    category: 'memory'
   },
 
   // Display
@@ -193,7 +207,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'display',
     min: 12,
-    max: 20,
+    max: 20
   },
   {
     key: 'contextWarningThreshold',
@@ -202,32 +216,33 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'display',
     min: 50,
-    max: 100,
+    max: 100
   },
   {
     key: 'showToolMessages',
     label: 'Show Tool Messages',
     description: 'Display tool use and tool result messages in output',
     type: 'boolean',
-    category: 'display',
+    category: 'display'
   },
 
   // Memory Management
   {
     key: 'outputBufferSize',
     label: 'In-Memory Buffer Size',
-    description: 'Messages kept in memory per instance (older ones saved to disk)',
+    description:
+      'Messages kept in memory per instance (older ones saved to disk)',
     type: 'number',
     category: 'memory',
     min: 100,
-    max: 5000,
+    max: 5000
   },
   {
     key: 'enableDiskStorage',
     label: 'Enable Disk Storage',
     description: 'Save older output to disk to reduce memory usage',
     type: 'boolean',
-    category: 'memory',
+    category: 'memory'
   },
   {
     key: 'maxDiskStorageMB',
@@ -236,7 +251,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'memory',
     min: 0,
-    max: 10000,
+    max: 10000
   },
   {
     key: 'memoryWarningThresholdMB',
@@ -245,14 +260,14 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'memory',
     min: 0,
-    max: 8192,
+    max: 8192
   },
   {
     key: 'autoTerminateOnMemoryPressure',
     label: 'Auto-terminate on Memory Pressure',
     description: 'Terminate idle instances when memory is critical',
     type: 'boolean',
-    category: 'memory',
+    category: 'memory'
   },
 
   // Advanced
@@ -262,7 +277,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     description: 'Override the default model (leave empty for CLI default)',
     type: 'string',
     category: 'advanced',
-    placeholder: 'e.g., claude-3-opus-20240229',
+    placeholder: 'e.g., claude-3-opus-20240229'
   },
   {
     key: 'parserBufferMaxKB',
@@ -271,8 +286,8 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'number',
     category: 'advanced',
     min: 256,
-    max: 10240,
-  },
+    max: 10240
+  }
 ];
 
 // ============================================
@@ -292,7 +307,7 @@ export interface ProjectConfig {
   settings?: Partial<AppSettings>;
 
   // Agent configuration
-  defaultAgent?: string;  // Default agent mode for this project
+  defaultAgent?: string; // Default agent mode for this project
 
   // Custom commands for this project
   commands?: {
@@ -362,6 +377,6 @@ export function mergeConfigs(
 
   return {
     settings,
-    sources: sources as Record<keyof AppSettings, ConfigSource>,
+    sources: sources as Record<keyof AppSettings, ConfigSource>
   };
 }

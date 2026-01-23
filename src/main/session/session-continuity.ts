@@ -11,9 +11,14 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import { EventEmitter } from 'events';
-import type { Instance, OutputMessage } from '../../shared/types/instance.types';
+import type {
+  Instance,
+  OutputMessage
+} from '../../shared/types/instance.types';
+import { CLAUDE_MODELS } from '../../shared/types/provider.types';
+import { getSettingsManager } from '../settings/settings-manager';
 
 /**
  * Session snapshot for point-in-time restoration
@@ -101,6 +106,9 @@ export interface ContinuityConfig {
   resumeOnStartup: boolean;
   preserveToolResults: boolean;
   maxConversationEntries: number;
+  encryptOnDisk: boolean;
+  persistSessionContent: boolean;
+  redactToolOutputs: boolean;
 }
 
 /**
@@ -123,6 +131,9 @@ const DEFAULT_CONFIG: ContinuityConfig = {
   resumeOnStartup: true,
   preserveToolResults: true,
   maxConversationEntries: 1000,
+  encryptOnDisk: true,
+  persistSessionContent: true,
+  redactToolOutputs: true
 };
 
 /**
@@ -170,8 +181,10 @@ export class SessionContinuityManager extends EventEmitter {
       for (const file of files) {
         if (file.endsWith('.json')) {
           const filePath = path.join(this.stateDir, file);
-          const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-          this.sessionStates.set(data.instanceId, data);
+          const data = this.readPayload<SessionState>(filePath);
+          if (data) {
+            this.sessionStates.set(data.instanceId, data);
+          }
         }
       }
     } catch (error) {
@@ -240,6 +253,7 @@ export class SessionContinuityManager extends EventEmitter {
    * Add a conversation entry
    */
   addConversationEntry(instanceId: string, entry: ConversationEntry): void {
+    if (!this.config.persistSessionContent) return;
     const state = this.sessionStates.get(instanceId);
     if (!state) return;
 
@@ -259,7 +273,7 @@ export class SessionContinuityManager extends EventEmitter {
         role: 'system',
         content: `[Compacted ${toCompact.length} earlier messages. Key context preserved in session state.]`,
         timestamp: Date.now(),
-        isCompacted: true,
+        isCompacted: true
       };
       state.conversationHistory.unshift(summaryEntry);
     }
@@ -289,14 +303,15 @@ export class SessionContinuityManager extends EventEmitter {
       metadata: {
         messageCount: state.conversationHistory.length,
         tokensUsed: state.contextUsage.used,
-        duration: Date.now() - (state.conversationHistory[0]?.timestamp || Date.now()),
-        trigger,
-      },
+        duration:
+          Date.now() - (state.conversationHistory[0]?.timestamp || Date.now()),
+        trigger
+      }
     };
 
     // Save snapshot
     const snapshotFile = path.join(this.snapshotDir, `${snapshot.id}.json`);
-    fs.writeFileSync(snapshotFile, JSON.stringify(snapshot, null, 2));
+    this.writePayload(snapshotFile, snapshot);
 
     // Cleanup old snapshots
     this.cleanupSnapshots(instanceId);
@@ -316,9 +331,8 @@ export class SessionContinuityManager extends EventEmitter {
       for (const file of files) {
         if (file.endsWith('.json')) {
           const filePath = path.join(this.snapshotDir, file);
-          const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as SessionSnapshot;
-
-          if (!instanceId || data.sessionId === instanceId) {
+          const data = this.readPayload<SessionSnapshot>(filePath);
+          if (data && (!instanceId || data.sessionId === instanceId)) {
             snapshots.push(data);
           }
         }
@@ -335,8 +349,11 @@ export class SessionContinuityManager extends EventEmitter {
    */
   getResumableSessions(): SessionState[] {
     return Array.from(this.sessionStates.values()).sort(
-      (a, b) => (b.conversationHistory[b.conversationHistory.length - 1]?.timestamp || 0) -
-                (a.conversationHistory[a.conversationHistory.length - 1]?.timestamp || 0)
+      (a, b) =>
+        (b.conversationHistory[b.conversationHistory.length - 1]?.timestamp ||
+          0) -
+        (a.conversationHistory[a.conversationHistory.length - 1]?.timestamp ||
+          0)
     );
   }
 
@@ -363,7 +380,10 @@ export class SessionContinuityManager extends EventEmitter {
         // Try loading from disk
         const stateFile = path.join(this.stateDir, `${instanceId}.json`);
         if (fs.existsSync(stateFile)) {
-          state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+          const loaded = this.readPayload<SessionState>(stateFile);
+          if (loaded) {
+            state = loaded;
+          }
         }
       }
     }
@@ -396,7 +416,10 @@ export class SessionContinuityManager extends EventEmitter {
   /**
    * Get transcript for a session
    */
-  getTranscript(instanceId: string, format: 'json' | 'markdown' | 'text' = 'markdown'): string {
+  getTranscript(
+    instanceId: string,
+    format: 'json' | 'markdown' | 'text' = 'markdown'
+  ): string {
     const state = this.sessionStates.get(instanceId);
     if (!state) return '';
 
@@ -406,10 +429,15 @@ export class SessionContinuityManager extends EventEmitter {
 
       case 'markdown':
         return state.conversationHistory
-          .map(entry => {
-            const roleLabel = entry.role === 'user' ? '**User**' :
-                              entry.role === 'assistant' ? '**Assistant**' :
-                              entry.role === 'system' ? '*System*' : '*Tool*';
+          .map((entry) => {
+            const roleLabel =
+              entry.role === 'user'
+                ? '**User**'
+                : entry.role === 'assistant'
+                  ? '**Assistant**'
+                  : entry.role === 'system'
+                    ? '*System*'
+                    : '*Tool*';
             const timestamp = new Date(entry.timestamp).toLocaleString();
             let content = `### ${roleLabel} (${timestamp})\n\n${entry.content}`;
 
@@ -431,7 +459,7 @@ export class SessionContinuityManager extends EventEmitter {
       case 'text':
       default:
         return state.conversationHistory
-          .map(entry => {
+          .map((entry) => {
             const role = entry.role.toUpperCase();
             const time = new Date(entry.timestamp).toLocaleString();
             return `[${time}] ${role}:\n${entry.content}`;
@@ -443,7 +471,9 @@ export class SessionContinuityManager extends EventEmitter {
   /**
    * Export session for external storage/sharing
    */
-  exportSession(instanceId: string): { state: SessionState; snapshots: SessionSnapshot[] } | null {
+  exportSession(
+    instanceId: string
+  ): { state: SessionState; snapshots: SessionSnapshot[] } | null {
     const state = this.sessionStates.get(instanceId);
     if (!state) return null;
 
@@ -451,7 +481,7 @@ export class SessionContinuityManager extends EventEmitter {
 
     return {
       state: JSON.parse(JSON.stringify(state)),
-      snapshots,
+      snapshots
     };
   }
 
@@ -473,7 +503,7 @@ export class SessionContinuityManager extends EventEmitter {
       for (const snapshot of data.snapshots) {
         const updatedSnapshot = { ...snapshot, sessionId: instanceId };
         const snapshotFile = path.join(this.snapshotDir, `${snapshot.id}.json`);
-        fs.writeFileSync(snapshotFile, JSON.stringify(updatedSnapshot, null, 2));
+        this.writePayload(snapshotFile, updatedSnapshot);
       }
     }
 
@@ -485,28 +515,41 @@ export class SessionContinuityManager extends EventEmitter {
    * Convert Instance to SessionState
    */
   private instanceToState(instance: Instance): SessionState {
+    const persistContent = this.config.persistSessionContent;
+    const redactToolOutputs = this.config.redactToolOutputs;
+
     return {
       instanceId: instance.id,
       displayName: instance.displayName,
       agentId: instance.agentId,
-      modelId: 'claude-sonnet-4-20250514', // Default model
+      modelId: CLAUDE_MODELS.SONNET, // Default model
       workingDirectory: instance.workingDirectory,
       systemPrompt: undefined,
       temperature: undefined,
       maxTokens: undefined,
-      conversationHistory: instance.outputBuffer.map((msg, idx) => ({
-        id: `msg-${idx}`,
-        role: msg.type === 'user' ? 'user' as const :
-              msg.type === 'assistant' ? 'assistant' as const :
-              msg.type === 'tool_use' || msg.type === 'tool_result' ? 'tool' as const : 'system' as const,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        tokens: undefined,
-      })),
+      conversationHistory: persistContent
+        ? instance.outputBuffer.map((msg, idx) => ({
+            id: `msg-${idx}`,
+            role:
+              msg.type === 'user'
+                ? ('user' as const)
+                : msg.type === 'assistant'
+                  ? ('assistant' as const)
+                  : msg.type === 'tool_use' || msg.type === 'tool_result'
+                    ? ('tool' as const)
+                    : ('system' as const),
+            content:
+              redactToolOutputs && msg.type === 'tool_result'
+                ? '[REDACTED TOOL OUTPUT]'
+                : msg.content,
+            timestamp: msg.timestamp,
+            tokens: undefined
+          }))
+        : [],
       contextUsage: {
         used: instance.contextUsage.used,
         total: instance.contextUsage.total,
-        costEstimate: instance.contextUsage.costEstimate,
+        costEstimate: instance.contextUsage.costEstimate
       },
       pendingTasks: [],
       environmentVariables: {},
@@ -514,7 +557,7 @@ export class SessionContinuityManager extends EventEmitter {
       gitBranch: undefined,
       customInstructions: undefined,
       skillsLoaded: [],
-      hooksActive: [],
+      hooksActive: []
     };
   }
 
@@ -547,7 +590,7 @@ export class SessionContinuityManager extends EventEmitter {
 
     try {
       const stateFile = path.join(this.stateDir, `${instanceId}.json`);
-      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+      this.writePayload(stateFile, state);
       this.emit('state:saved', { instanceId });
     } catch (error) {
       console.error('Failed to save session state:', error);
@@ -563,10 +606,63 @@ export class SessionContinuityManager extends EventEmitter {
 
     if (!fs.existsSync(snapshotFile)) return null;
 
+    return this.readPayload<SessionSnapshot>(snapshotFile);
+  }
+
+  private writePayload(filePath: string, data: unknown): void {
+    const serialized = this.serializePayload(data);
+    fs.writeFileSync(filePath, serialized);
+  }
+
+  private readPayload<T>(filePath: string): T | null {
     try {
-      return JSON.parse(fs.readFileSync(snapshotFile, 'utf-8'));
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return this.deserializePayload<T>(raw);
     } catch (error) {
-      console.error('Failed to load snapshot:', error);
+      console.error('Failed to read continuity payload:', error);
+      return null;
+    }
+  }
+
+  private serializePayload(data: unknown): string {
+    const json = JSON.stringify(data, null, 2);
+    if (this.config.encryptOnDisk && safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(json).toString('base64');
+      return JSON.stringify({ encrypted: true, data: encrypted });
+    }
+    return JSON.stringify({ encrypted: false, data: json });
+  }
+
+  private deserializePayload<T>(raw: string): T | null {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        'encrypted' in parsed &&
+        'data' in parsed
+      ) {
+        if (
+          parsed['encrypted'] === true &&
+          typeof parsed['data'] === 'string'
+        ) {
+          const decrypted = safeStorage.decryptString(
+            Buffer.from(parsed['data'], 'base64')
+          );
+          return JSON.parse(decrypted) as T;
+        }
+        if (
+          parsed['encrypted'] === false &&
+          typeof parsed['data'] === 'string'
+        ) {
+          return JSON.parse(parsed['data']) as T;
+        }
+      }
+
+      // Fallback to legacy plain JSON
+      return parsed as unknown as T;
+    } catch (error) {
+      console.error('Failed to decrypt continuity payload:', error);
       return null;
     }
   }
@@ -576,7 +672,8 @@ export class SessionContinuityManager extends EventEmitter {
    */
   private cleanupSnapshots(instanceId: string): void {
     const snapshots = this.listSnapshots(instanceId);
-    const cutoffTime = Date.now() - this.config.snapshotRetentionDays * 24 * 60 * 60 * 1000;
+    const cutoffTime =
+      Date.now() - this.config.snapshotRetentionDays * 24 * 60 * 60 * 1000;
 
     // Remove old snapshots
     for (const snapshot of snapshots) {
@@ -631,7 +728,9 @@ export class SessionContinuityManager extends EventEmitter {
     // Find oldest and newest sessions
     for (const state of this.sessionStates.values()) {
       const firstTimestamp = state.conversationHistory[0]?.timestamp;
-      const lastTimestamp = state.conversationHistory[state.conversationHistory.length - 1]?.timestamp;
+      const lastTimestamp =
+        state.conversationHistory[state.conversationHistory.length - 1]
+          ?.timestamp;
 
       if (firstTimestamp) {
         if (oldestSession === null || firstTimestamp < oldestSession) {
@@ -651,7 +750,7 @@ export class SessionContinuityManager extends EventEmitter {
       totalSnapshots: this.listSnapshots().length,
       diskUsageBytes,
       oldestSession,
-      newestSession,
+      newestSession
     };
   }
 
@@ -662,7 +761,10 @@ export class SessionContinuityManager extends EventEmitter {
     this.config = { ...this.config, ...config };
 
     // Update auto-save timers if interval changed
-    if (config.autoSaveIntervalMs !== undefined || config.autoSaveEnabled !== undefined) {
+    if (
+      config.autoSaveIntervalMs !== undefined ||
+      config.autoSaveEnabled !== undefined
+    ) {
       for (const [instanceId, timer] of this.autoSaveTimers) {
         clearInterval(timer);
         if (this.config.autoSaveEnabled) {
@@ -694,7 +796,10 @@ let continuityManagerInstance: SessionContinuityManager | null = null;
 
 export function getSessionContinuityManager(): SessionContinuityManager {
   if (!continuityManagerInstance) {
-    continuityManagerInstance = new SessionContinuityManager();
+    const settings = getSettingsManager();
+    continuityManagerInstance = new SessionContinuityManager({
+      persistSessionContent: settings.get('persistSessionContent')
+    });
   }
   return continuityManagerInstance;
 }

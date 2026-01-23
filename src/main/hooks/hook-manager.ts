@@ -4,13 +4,16 @@
  */
 
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
+import * as path from 'path';
+import { app } from 'electron';
 import type { HookEvent } from '../../shared/types/hook.types';
 import {
   HookExecutor,
   getHookExecutor,
   type HookConfig,
   type HookExecutionContext,
-  type HookExecutorResult,
+  type HookExecutorResult
 } from './hook-executor';
 
 // Local type for hook matchers
@@ -24,6 +27,10 @@ export interface HookMatcher {
 export interface ManagedHookConfig extends HookConfig {
   matcher?: HookMatcher;
   stopOnFailure?: boolean;
+  /** Require explicit approval before execution */
+  approvalRequired?: boolean;
+  /** Whether this hook has been approved */
+  approved?: boolean;
 }
 
 export interface HookManagerConfig {
@@ -40,12 +47,13 @@ export class HookManager extends EventEmitter {
   private config: HookManagerConfig;
   private executionHistory: HookExecutorResult[] = [];
   private maxHistorySize = 1000;
+  private approvalsFilePath: string;
 
   private defaultConfig: HookManagerConfig = {
     enabled: true,
     maxConcurrentHooks: 5,
     defaultTimeout: 30000,
-    stopOnFirstFailure: false,
+    stopOnFirstFailure: false
   };
 
   static getInstance(): HookManager {
@@ -59,6 +67,9 @@ export class HookManager extends EventEmitter {
     super();
     this.config = { ...this.defaultConfig };
     this.executor = getHookExecutor();
+    // Initialize approvals persistence path
+    const userData = app?.getPath?.('userData') || process.cwd();
+    this.approvalsFilePath = path.join(userData, 'hook-approvals.json');
   }
 
   // ============ Configuration ============
@@ -82,7 +93,10 @@ export class HookManager extends EventEmitter {
     this.emit('hook:registered', hook);
   }
 
-  updateHook(hookId: string, updates: Partial<ManagedHookConfig>): ManagedHookConfig | undefined {
+  updateHook(
+    hookId: string,
+    updates: Partial<ManagedHookConfig>
+  ): ManagedHookConfig | undefined {
     const hook = this.hooks.get(hookId);
     if (!hook) return undefined;
 
@@ -104,17 +118,34 @@ export class HookManager extends EventEmitter {
     return this.hooks.get(hookId);
   }
 
+  approveHook(
+    hookId: string,
+    approved: boolean = true
+  ): ManagedHookConfig | undefined {
+    const hook = this.hooks.get(hookId);
+    if (!hook) return undefined;
+    const updated = { ...hook, approved };
+    this.hooks.set(hookId, updated);
+    this.emit('hook:approval-updated', { hookId, approved });
+    // Persist approval state
+    void this.saveApprovals();
+    return updated;
+  }
+
   getAllHooks(): ManagedHookConfig[] {
     return Array.from(this.hooks.values());
   }
 
   getHooksByEvent(event: HookEvent): ManagedHookConfig[] {
-    return this.getAllHooks().filter(h => h.event === event && h.enabled);
+    return this.getAllHooks().filter((h) => h.event === event && h.enabled);
   }
 
   // ============ Hook Execution ============
 
-  async triggerHooks(event: HookEvent, context: HookExecutionContext): Promise<HookExecutorResult[]> {
+  async triggerHooks(
+    event: HookEvent,
+    context: HookExecutionContext
+  ): Promise<HookExecutorResult[]> {
     if (!this.config.enabled) {
       return [];
     }
@@ -124,12 +155,33 @@ export class HookManager extends EventEmitter {
       return [];
     }
 
-    this.emit('hooks:triggered', { event, hookCount: matchingHooks.length, context });
+    this.emit('hooks:triggered', {
+      event,
+      hookCount: matchingHooks.length,
+      context
+    });
 
     const results: HookExecutorResult[] = [];
 
     for (const hook of matchingHooks) {
       try {
+        if (hook.approvalRequired && !hook.approved) {
+          const approvalResult: HookExecutorResult = {
+            hookId: hook.id,
+            success: false,
+            error: 'Approval required',
+            duration: 0,
+            timestamp: Date.now()
+          };
+          results.push(approvalResult);
+          this.recordResult(approvalResult);
+          this.emit('hook:approval-required', {
+            hookId: hook.id,
+            hook,
+            context
+          });
+          continue;
+        }
         const result = await this.executor.execute(hook, context);
         results.push(result);
         this.recordResult(result);
@@ -138,12 +190,18 @@ export class HookManager extends EventEmitter {
 
         // Check if we should stop on failure
         if (!result.success && hook.stopOnFailure) {
-          this.emit('hooks:stopped', { reason: 'Hook failure', hookId: hook.id });
+          this.emit('hooks:stopped', {
+            reason: 'Hook failure',
+            hookId: hook.id
+          });
           break;
         }
 
         if (!result.success && this.config.stopOnFirstFailure) {
-          this.emit('hooks:stopped', { reason: 'Config stopOnFirstFailure', hookId: hook.id });
+          this.emit('hooks:stopped', {
+            reason: 'Config stopOnFirstFailure',
+            hookId: hook.id
+          });
           break;
         }
       } catch (error) {
@@ -152,11 +210,14 @@ export class HookManager extends EventEmitter {
           success: false,
           error: (error as Error).message,
           duration: 0,
-          timestamp: Date.now(),
+          timestamp: Date.now()
         };
         results.push(errorResult);
         this.recordResult(errorResult);
-        this.emit('hook:error', { hookId: hook.id, error: (error as Error).message });
+        this.emit('hook:error', {
+          hookId: hook.id,
+          error: (error as Error).message
+        });
 
         if (hook.stopOnFailure || this.config.stopOnFirstFailure) {
           break;
@@ -168,16 +229,26 @@ export class HookManager extends EventEmitter {
     return results;
   }
 
-  private findMatchingHooks(event: HookEvent, context: HookExecutionContext): ManagedHookConfig[] {
-    return this.getHooksByEvent(event).filter(hook => this.matchesContext(hook.matcher, context));
+  private findMatchingHooks(
+    event: HookEvent,
+    context: HookExecutionContext
+  ): ManagedHookConfig[] {
+    return this.getHooksByEvent(event).filter((hook) =>
+      this.matchesContext(hook.matcher, context)
+    );
   }
 
-  private matchesContext(matcher: HookMatcher | undefined, context: HookExecutionContext): boolean {
+  private matchesContext(
+    matcher: HookMatcher | undefined,
+    context: HookExecutionContext
+  ): boolean {
     if (!matcher) return true; // No matcher means match all
 
     // Tool name matching
     if (matcher.toolName) {
-      const toolNames = Array.isArray(matcher.toolName) ? matcher.toolName : [matcher.toolName];
+      const toolNames = Array.isArray(matcher.toolName)
+        ? matcher.toolName
+        : [matcher.toolName];
       if (context.toolName && !toolNames.includes(context.toolName)) {
         return false;
       }
@@ -220,11 +291,15 @@ export class HookManager extends EventEmitter {
     }
   }
 
-  getExecutionHistory(options?: { hookId?: string; event?: HookEvent; limit?: number }): HookExecutorResult[] {
+  getExecutionHistory(options?: {
+    hookId?: string;
+    event?: HookEvent;
+    limit?: number;
+  }): HookExecutorResult[] {
     let history = this.executionHistory;
 
     if (options?.hookId) {
-      history = history.filter(r => r.hookId === options.hookId);
+      history = history.filter((r) => r.hookId === options.hookId);
     }
 
     if (options?.limit) {
@@ -241,7 +316,10 @@ export class HookManager extends EventEmitter {
 
   // ============ Hook Testing ============
 
-  async testHook(hookId: string, testContext: HookExecutionContext): Promise<HookExecutorResult> {
+  async testHook(
+    hookId: string,
+    testContext: HookExecutionContext
+  ): Promise<HookExecutorResult> {
     const hook = this.hooks.get(hookId);
     if (!hook) {
       return {
@@ -249,7 +327,7 @@ export class HookManager extends EventEmitter {
         success: false,
         error: 'Hook not found',
         duration: 0,
-        timestamp: Date.now(),
+        timestamp: Date.now()
       };
     }
 
@@ -263,7 +341,10 @@ export class HookManager extends EventEmitter {
     return this.getAllHooks();
   }
 
-  importHooks(hooks: ManagedHookConfig[], options?: { overwrite?: boolean }): { imported: number; skipped: number } {
+  importHooks(
+    hooks: ManagedHookConfig[],
+    options?: { overwrite?: boolean }
+  ): { imported: number; skipped: number } {
     let imported = 0;
     let skipped = 0;
 
@@ -306,20 +387,89 @@ export class HookManager extends EventEmitter {
     }
 
     const history = this.executionHistory;
-    const successful = history.filter(r => r.success).length;
-    const avgDuration = history.length > 0 ? history.reduce((sum, r) => sum + r.duration, 0) / history.length : 0;
+    const successful = history.filter((r) => r.success).length;
+    const avgDuration =
+      history.length > 0
+        ? history.reduce((sum, r) => sum + r.duration, 0) / history.length
+        : 0;
 
     return {
       totalHooks: hooks.length,
-      enabledHooks: hooks.filter(h => h.enabled).length,
+      enabledHooks: hooks.filter((h) => h.enabled).length,
       byEvent,
       executionStats: {
         total: history.length,
         successful,
         failed: history.length - successful,
-        avgDuration,
-      },
+        avgDuration
+      }
     };
+  }
+}
+
+  // ============ Persistence ============
+
+  /**
+   * Save approved hook IDs to disk
+   */
+  async saveApprovals(): Promise<void> {
+    try {
+      const approvedIds = this.getAllHooks()
+        .filter((h) => h.approvalRequired && h.approved)
+        .map((h) => h.id);
+      await fs.promises.writeFile(
+        this.approvalsFilePath,
+        JSON.stringify({ approvedHookIds: approvedIds }, null, 2),
+        'utf-8'
+      );
+      this.emit('approvals:saved', { count: approvedIds.length });
+    } catch (error) {
+      console.error('Failed to save hook approvals:', error);
+      this.emit('approvals:save-error', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Load approved hook IDs from disk and apply to registered hooks
+   */
+  async loadApprovals(): Promise<void> {
+    try {
+      if (!fs.existsSync(this.approvalsFilePath)) {
+        return;
+      }
+      const content = await fs.promises.readFile(this.approvalsFilePath, 'utf-8');
+      const data = JSON.parse(content) as { approvedHookIds?: string[] };
+      const approvedIds = new Set(data.approvedHookIds || []);
+      let applied = 0;
+      for (const hook of this.hooks.values()) {
+        if (hook.approvalRequired && approvedIds.has(hook.id)) {
+          hook.approved = true;
+          applied++;
+        }
+      }
+      this.emit('approvals:loaded', { total: approvedIds.size, applied });
+    } catch (error) {
+      console.error('Failed to load hook approvals:', error);
+      this.emit('approvals:load-error', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Clear all saved approvals
+   */
+  async clearApprovals(): Promise<void> {
+    try {
+      for (const hook of this.hooks.values()) {
+        if (hook.approvalRequired) {
+          hook.approved = false;
+        }
+      }
+      await this.saveApprovals();
+      this.emit('approvals:cleared');
+    } catch (error) {
+      console.error('Failed to clear hook approvals:', error);
+      this.emit('approvals:clear-error', { error: (error as Error).message });
+    }
   }
 }
 
