@@ -25,7 +25,9 @@ export interface UnifiedSpawnOptions {
   model?: string;
   yoloMode?: boolean;
   timeout?: number;
+  allowedTools?: string[];
   disallowedTools?: string[];
+  resume?: boolean;  // Resume an existing session (requires sessionId)
 }
 
 /**
@@ -119,7 +121,9 @@ export function createClaudeAdapter(options: UnifiedSpawnOptions): ClaudeCliAdap
     systemPrompt: options.systemPrompt,
     model: options.model,
     yoloMode: options.yoloMode,
+    allowedTools: options.allowedTools,
     disallowedTools: options.disallowedTools,
+    resume: options.resume,
   };
   return new ClaudeCliAdapter(claudeOptions);
 }

@@ -21,7 +21,7 @@ import type {
   QueryType,
   ContextSection
 } from '../../../../shared/types/rlm.types';
-import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc';
 import { RlmContextBrowserComponent } from './rlm-context-browser.component';
 
 interface QueryResult {

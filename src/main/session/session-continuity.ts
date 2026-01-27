@@ -15,7 +15,7 @@ import { app, safeStorage } from 'electron';
 import { EventEmitter } from 'events';
 import type { Instance } from '../../shared/types/instance.types';
 import { CLAUDE_MODELS } from '../../shared/types/provider.types';
-import { getSettingsManager } from '../settings/settings-manager';
+import { getSettingsManager } from '../core/config/settings-manager';
 
 /**
  * Session snapshot for point-in-time restoration

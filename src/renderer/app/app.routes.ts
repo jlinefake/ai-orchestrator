@@ -141,7 +141,7 @@ export const routes: Routes = [
   {
     path: 'verification',
     loadComponent: () =>
-      import('./features/verification/verification-dashboard.component').then(
+      import('./features/verification/dashboard/verification-dashboard.component').then(
         (m) => m.VerificationDashboardComponent
       ),
   },
@@ -150,7 +150,7 @@ export const routes: Routes = [
   {
     path: 'verification/settings',
     loadComponent: () =>
-      import('./features/verification/cli-settings-panel.component').then(
+      import('./features/verification/config/cli-settings-panel.component').then(
         (m) => m.CliSettingsPanelComponent
       ),
   },

@@ -9,7 +9,8 @@ export const LIMITS = {
   RESTART_WINDOW_MS: 60000, // 1 minute
 
   // Output buffering
-  OUTPUT_BUFFER_MAX_SIZE: 1000,
+  // Increased from 1000 to 2000 to retain more context for complex tasks
+  OUTPUT_BUFFER_MAX_SIZE: 2000,
   OUTPUT_BATCH_INTERVAL_MS: 50,
 
   // Context

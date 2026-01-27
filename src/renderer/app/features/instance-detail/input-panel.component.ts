@@ -132,10 +132,33 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
         }
       </div>
 
-      @if (queuedCount() > 0) {
-        <div class="queue-indicator">
-          <span class="queue-badge">{{ queuedCount() }}</span>
-          <span class="queue-text">message{{ queuedCount() > 1 ? 's' : '' }} queued</span>
+      @if (queuedMessages().length > 0) {
+        <div class="queue-section">
+          <div class="queue-header">
+            <span class="queue-badge">{{ queuedMessages().length }}</span>
+            <span class="queue-text">message{{ queuedMessages().length > 1 ? 's' : '' }} queued</span>
+          </div>
+          <div class="queued-messages">
+            @for (queuedMsg of queuedMessages(); track $index; let i = $index) {
+              <div class="queued-message-item">
+                <span class="queued-message-text" [title]="queuedMsg.message">
+                  {{ truncateMessage(queuedMsg.message) }}
+                </span>
+                @if (queuedMsg.files && queuedMsg.files.length > 0) {
+                  <span class="queued-file-count" title="Attached files">
+                    📎{{ queuedMsg.files.length }}
+                  </span>
+                }
+                <button
+                  class="queued-cancel-btn"
+                  (click)="onCancelQueuedMessage(i)"
+                  title="Cancel and restore to input"
+                >
+                  ×
+                </button>
+              </div>
+            }
+          </div>
         </div>
       }
     </div>
@@ -405,18 +428,22 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       animation: pulse 2s ease-in-out infinite;
     }
 
-    /* Queue Indicator - Message queue status */
-    .queue-indicator {
-      display: flex;
-      align-items: center;
-      gap: var(--spacing-sm);
+    /* Queue Section - Message queue display */
+    .queue-section {
       margin-top: var(--spacing-sm);
-      padding: var(--spacing-sm);
       background: rgba(var(--primary-rgb), 0.1);
       border: 1px solid rgba(var(--primary-rgb), 0.3);
       border-radius: var(--radius-md);
-      font-size: 12px;
+      overflow: hidden;
       animation: fadeIn 0.2s ease-out;
+    }
+
+    .queue-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-sm);
+      border-bottom: 1px solid rgba(var(--primary-rgb), 0.2);
     }
 
     .queue-badge {
@@ -440,6 +467,65 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       font-family: var(--font-display);
       font-weight: 600;
       font-size: 12px;
+    }
+
+    .queued-messages {
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .queued-message-item {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border-bottom: 1px solid rgba(var(--primary-rgb), 0.1);
+      transition: background var(--transition-fast);
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      &:hover {
+        background: rgba(var(--primary-rgb), 0.05);
+      }
+    }
+
+    .queued-message-text {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .queued-file-count {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .queued-cancel-btn {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      border: none;
+      font-size: 14px;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all var(--transition-fast);
+
+      &:hover {
+        background: rgba(var(--warning-rgb, 255, 183, 77), 0.2);
+        color: var(--warning-color, #ffb74d);
+      }
     }
 
     /* Command Suggestions - Autocomplete dropdown */
@@ -524,6 +610,7 @@ export class InputPanelComponent implements OnDestroy {
   pendingFiles = input<File[]>([]);
   pendingFolders = input<string[]>([]);
   queuedCount = input<number>(0);
+  queuedMessages = input<{ message: string; files?: File[] }[]>([]);
   isBusy = input<boolean>(false);
 
   // Computed preview data for pending files
@@ -551,6 +638,7 @@ export class InputPanelComponent implements OnDestroy {
   removeFile = output<File>();
   removeFolder = output<string>();
   addFiles = output<void>();
+  cancelQueuedMessage = output<number>(); // Emits the index of the message to cancel
 
   message = signal('');
   showCommandSuggestions = signal(false);
@@ -789,5 +877,17 @@ export class InputPanelComponent implements OnDestroy {
 
   onRemoveFolder(folder: string): void {
     this.removeFolder.emit(folder);
+  }
+
+  truncateMessage(message: string): string {
+    const firstLine = message.split('\n')[0];
+    if (firstLine.length > 50) {
+      return firstLine.slice(0, 50) + '...';
+    }
+    return firstLine + (message.includes('\n') ? '...' : '');
+  }
+
+  onCancelQueuedMessage(index: number): void {
+    this.cancelQueuedMessage.emit(index);
   }
 }

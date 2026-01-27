@@ -1,31 +1,35 @@
 /**
- * Settings Component - Application settings modal
+ * Settings Component - Application settings modal (container)
  */
 
-import {
-  Component,
-  inject,
-  output,
-  signal,
-  computed,
-  effect
-} from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { Component, inject, output, signal } from '@angular/core';
 import { SettingsStore } from '../../core/state/settings.store';
-import { KeybindingService } from '../../core/services/keybinding.service';
-import { ViewLayoutService } from '../../core/services/view-layout.service';
-import type {
-  SettingMetadata,
-  AppSettings
-} from '../../../../shared/types/settings.types';
+import { GeneralSettingsTabComponent } from './general-settings-tab.component';
+import { OrchestrationSettingsTabComponent } from './orchestration-settings-tab.component';
+import { MemorySettingsTabComponent } from './memory-settings-tab.component';
+import { DisplaySettingsTabComponent } from './display-settings-tab.component';
+import { AdvancedSettingsTabComponent } from './advanced-settings-tab.component';
+import { KeyboardSettingsTabComponent } from './keyboard-settings-tab.component';
 
-// Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+type SettingsTab =
+  | 'general'
+  | 'orchestration'
+  | 'memory'
+  | 'display'
+  | 'advanced'
+  | 'keyboard';
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [
+    GeneralSettingsTabComponent,
+    OrchestrationSettingsTabComponent,
+    MemorySettingsTabComponent,
+    DisplaySettingsTabComponent,
+    AdvancedSettingsTabComponent,
+    KeyboardSettingsTabComponent
+  ],
   template: `
     <div class="settings-overlay" (click)="onOverlayClick($event)">
       <div class="settings-modal">
@@ -83,381 +87,26 @@ const getApi = () => (window as any).electronAPI;
             </button>
           </div>
 
-          <!-- Settings Form -->
+          <!-- Tab Content -->
           <div class="settings-form">
             @switch (activeTab()) {
               @case ('general') {
-                @for (setting of store.generalSettings(); track setting.key) {
-                  <div class="setting-row">
-                    <div class="setting-info">
-                      <label [for]="setting.key" class="setting-label">{{
-                        setting.label
-                      }}</label>
-                      <p class="setting-description">
-                        {{ setting.description }}
-                      </p>
-                    </div>
-                    <div class="setting-control">
-                      @switch (setting.type) {
-                        @case ('boolean') {
-                          <label class="toggle">
-                            <input
-                              type="checkbox"
-                              [id]="setting.key"
-                              [checked]="getValue(setting.key)"
-                              (change)="onBooleanChange(setting.key, $event)"
-                            />
-                            <span class="toggle-slider"></span>
-                          </label>
-                        }
-                        @case ('select') {
-                          <select
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            (change)="onSelectChange(setting.key, $event)"
-                          >
-                            @for (
-                              option of setting.options;
-                              track option.value
-                            ) {
-                              <option [value]="option.value">
-                                {{ option.label }}
-                              </option>
-                            }
-                          </select>
-                        }
-                        @case ('directory') {
-                          <div class="directory-input">
-                            <input
-                              type="text"
-                              [id]="setting.key"
-                              [value]="getValue(setting.key)"
-                              [placeholder]="
-                                setting.placeholder || 'Select folder...'
-                              "
-                              readonly
-                            />
-                            <button
-                              class="btn-browse"
-                              (click)="browseFolder(setting.key)"
-                            >
-                              Browse
-                            </button>
-                          </div>
-                        }
-                      }
-                    </div>
-                  </div>
-                }
+                <app-general-settings-tab />
               }
               @case ('orchestration') {
-                @for (
-                  setting of store.orchestrationSettings();
-                  track setting.key
-                ) {
-                  <div class="setting-row">
-                    <div class="setting-info">
-                      <label [for]="setting.key" class="setting-label">{{
-                        setting.label
-                      }}</label>
-                      <p class="setting-description">
-                        {{ setting.description }}
-                      </p>
-                    </div>
-                    <div class="setting-control">
-                      @switch (setting.type) {
-                        @case ('boolean') {
-                          <label class="toggle">
-                            <input
-                              type="checkbox"
-                              [id]="setting.key"
-                              [checked]="getValue(setting.key)"
-                              (change)="onBooleanChange(setting.key, $event)"
-                            />
-                            <span class="toggle-slider"></span>
-                          </label>
-                        }
-                        @case ('number') {
-                          <input
-                            type="number"
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            [min]="setting.min"
-                            [max]="setting.max"
-                            (change)="onNumberChange(setting.key, $event)"
-                          />
-                        }
-                      }
-                    </div>
-                  </div>
-                }
+                <app-orchestration-settings-tab />
               }
               @case ('memory') {
-                @for (setting of store.memorySettings(); track setting.key) {
-                  <div class="setting-row">
-                    <div class="setting-info">
-                      <label [for]="setting.key" class="setting-label">{{
-                        setting.label
-                      }}</label>
-                      <p class="setting-description">
-                        {{ setting.description }}
-                      </p>
-                    </div>
-                    <div class="setting-control">
-                      @switch (setting.type) {
-                        @case ('boolean') {
-                          <label class="toggle">
-                            <input
-                              type="checkbox"
-                              [id]="setting.key"
-                              [checked]="getValue(setting.key)"
-                              (change)="onBooleanChange(setting.key, $event)"
-                            />
-                            <span class="toggle-slider"></span>
-                          </label>
-                        }
-                        @case ('number') {
-                          <input
-                            type="number"
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            [min]="setting.min"
-                            [max]="setting.max"
-                            (change)="onNumberChange(setting.key, $event)"
-                          />
-                        }
-                      }
-                    </div>
-                  </div>
-                }
+                <app-memory-settings-tab />
               }
               @case ('display') {
-                @for (setting of store.displaySettings(); track setting.key) {
-                  <div class="setting-row">
-                    <div class="setting-info">
-                      <label [for]="setting.key" class="setting-label">{{
-                        setting.label
-                      }}</label>
-                      <p class="setting-description">
-                        {{ setting.description }}
-                      </p>
-                    </div>
-                    <div class="setting-control">
-                      @switch (setting.type) {
-                        @case ('boolean') {
-                          <label class="toggle">
-                            <input
-                              type="checkbox"
-                              [id]="setting.key"
-                              [checked]="getValue(setting.key)"
-                              (change)="onBooleanChange(setting.key, $event)"
-                            />
-                            <span class="toggle-slider"></span>
-                          </label>
-                        }
-                        @case ('number') {
-                          <input
-                            type="number"
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            [min]="setting.min"
-                            [max]="setting.max"
-                            (change)="onNumberChange(setting.key, $event)"
-                          />
-                        }
-                      }
-                    </div>
-                  </div>
-                }
-
-                <!-- Reset View Layout Section -->
-                <div class="setting-row reset-layout-row">
-                  <div class="setting-info">
-                    <label class="setting-label">Reset View Layout</label>
-                    <p class="setting-description">
-                      Reset sidebar and file explorer panel widths to their
-                      default positions. This will not affect other settings.
-                    </p>
-                  </div>
-                  <div class="setting-control">
-                    <button
-                      class="btn-reset-layout"
-                      (click)="resetViewLayout()"
-                    >
-                      Reset Layout
-                    </button>
-                  </div>
-                </div>
+                <app-display-settings-tab />
               }
               @case ('advanced') {
-                @for (setting of store.advancedSettings(); track setting.key) {
-                  <div class="setting-row">
-                    <div class="setting-info">
-                      <label [for]="setting.key" class="setting-label">{{
-                        setting.label
-                      }}</label>
-                      <p class="setting-description">
-                        {{ setting.description }}
-                      </p>
-                    </div>
-                    <div class="setting-control">
-                      @switch (setting.type) {
-                        @case ('number') {
-                          <input
-                            type="number"
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            [min]="setting.min"
-                            [max]="setting.max"
-                            (change)="onNumberChange(setting.key, $event)"
-                          />
-                        }
-                        @case ('string') {
-                          <input
-                            type="text"
-                            [id]="setting.key"
-                            [value]="getValue(setting.key)"
-                            [placeholder]="setting.placeholder || ''"
-                            (change)="onStringChange(setting.key, $event)"
-                          />
-                        }
-                      }
-                    </div>
-                  </div>
-                }
-
-                <!-- Hook Approvals Section -->
-                <div class="setting-row hook-approvals-header">
-                  <div class="setting-info">
-                    <label class="setting-label">Hook Approvals</label>
-                    <p class="setting-description">
-                      Review hooks that require approval before they run and
-                      manage remembered approvals.
-                    </p>
-                  </div>
-                  <div class="setting-control">
-                    <button
-                      class="btn-secondary"
-                      (click)="loadHookApprovals()"
-                      [disabled]="hookApprovalsLoading()"
-                    >
-                      Refresh
-                    </button>
-                    <button
-                      class="btn-secondary"
-                      (click)="clearHookApprovals()"
-                      [disabled]="hookApprovalsLoading()"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-                </div>
-
-                <div class="hook-approvals-list">
-                  @if (hookApprovalsLoading()) {
-                    <div class="hook-approvals-empty">Loading approvals…</div>
-                  } @else if (hookApprovalsError()) {
-                    <div class="hook-approvals-empty error">
-                      {{ hookApprovalsError() }}
-                    </div>
-                  } @else if (hookApprovals().length === 0) {
-                    <div class="hook-approvals-empty">
-                      No hook approvals to review.
-                    </div>
-                  } @else {
-                    @for (hook of hookApprovals(); track hook.id) {
-                      <div class="hook-approval-row">
-                        <div class="hook-approval-info">
-                          <div class="hook-approval-title">
-                            <span class="hook-name">{{ hook.name }}</span>
-                            <span class="hook-event">{{ hook.event }}</span>
-                          </div>
-                          <div class="hook-approval-meta">
-                            <span
-                              class="hook-status"
-                              [class.approved]="hook.approved"
-                            >
-                              {{ hook.approved ? 'Approved' : 'Pending' }}
-                            </span>
-                            <span class="hook-type">{{
-                              hook.handlerType
-                            }}</span>
-                            @if (hook.handlerSummary) {
-                              <span class="hook-summary">{{
-                                hook.handlerSummary
-                              }}</span>
-                            }
-                          </div>
-                        </div>
-                        <div class="hook-approval-actions">
-                          @if (hook.approved) {
-                            <button
-                              class="btn-secondary"
-                              (click)="updateHookApproval(hook.id, false)"
-                              [disabled]="hookApprovalsLoading()"
-                            >
-                              Revoke
-                            </button>
-                          } @else {
-                            <button
-                              class="btn-primary"
-                              (click)="updateHookApproval(hook.id, true)"
-                              [disabled]="hookApprovalsLoading()"
-                            >
-                              Approve
-                            </button>
-                          }
-                        </div>
-                      </div>
-                    }
-                  }
-                </div>
-
-                <!-- Future Settings Note -->
-                <div class="future-settings-note">
-                  <h4>Coming Soon</h4>
-                  <ul>
-                    <li>Session auto-save/restore</li>
-                    <li>Notification preferences</li>
-                    <li>Export/import settings</li>
-                    <li>Per-project settings</li>
-                  </ul>
-                </div>
+                <app-advanced-settings-tab />
               }
               @case ('keyboard') {
-                <div class="keyboard-shortcuts-section">
-                  <p class="keyboard-intro">
-                    These keyboard shortcuts help you work faster. Press the
-                    shortcut combination shown to trigger the action.
-                  </p>
-                  @for (
-                    category of keybindingCategories();
-                    track category.name
-                  ) {
-                    <div class="shortcut-category">
-                      <h3 class="category-title">{{ category.name }}</h3>
-                      <div class="shortcut-list">
-                        @for (binding of category.bindings; track binding.id) {
-                          <div class="shortcut-row">
-                            <div class="shortcut-info">
-                              <span class="shortcut-name">{{
-                                binding.name
-                              }}</span>
-                              <span class="shortcut-desc">{{
-                                binding.description
-                              }}</span>
-                            </div>
-                            <div class="shortcut-keys">
-                              <kbd>{{
-                                keybindingService.formatBinding(binding)
-                              }}</kbd>
-                            </div>
-                          </div>
-                        }
-                      </div>
-                    </div>
-                  }
-                </div>
+                <app-keyboard-settings-tab />
               }
             }
           </div>
@@ -521,6 +170,7 @@ const getApi = () => (window as any).electronAPI;
         align-items: center;
         justify-content: center;
         background: transparent;
+        border: none;
         border-radius: var(--radius-sm);
         font-size: 24px;
         color: var(--text-secondary);
@@ -574,255 +224,6 @@ const getApi = () => (window as any).electronAPI;
         gap: var(--spacing-md);
       }
 
-      .setting-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: var(--spacing-lg);
-        padding: var(--spacing-md);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-      }
-
-      .setting-info {
-        flex: 1;
-      }
-
-      .setting-label {
-        display: block;
-        font-weight: 500;
-        margin-bottom: var(--spacing-xs);
-        color: var(--text-primary);
-      }
-
-      .setting-description {
-        margin: 0;
-        font-size: 12px;
-        color: var(--text-secondary);
-        line-height: 1.4;
-      }
-
-      .setting-control {
-        flex-shrink: 0;
-        min-width: 150px;
-      }
-
-      /* Toggle Switch */
-      .toggle {
-        position: relative;
-        display: inline-block;
-        width: 48px;
-        height: 26px;
-      }
-
-      .toggle input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-
-      .toggle-slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: var(--bg-tertiary);
-        border-radius: 26px;
-        transition: var(--transition-fast);
-
-        &::before {
-          content: '';
-          position: absolute;
-          height: 20px;
-          width: 20px;
-          left: 3px;
-          bottom: 3px;
-          background: white;
-          border-radius: 50%;
-          transition: var(--transition-fast);
-        }
-      }
-
-      .toggle input:checked + .toggle-slider {
-        background: var(--primary-color);
-      }
-
-      .toggle input:checked + .toggle-slider::before {
-        transform: translateX(22px);
-      }
-
-      /* Select */
-      select {
-        width: 100%;
-        padding: var(--spacing-sm);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-        color: var(--text-primary);
-        font-size: 14px;
-        cursor: pointer;
-
-        &:focus {
-          outline: none;
-          border-color: var(--primary-color);
-        }
-      }
-
-      /* Number/Text Input */
-      input[type='number'],
-      input[type='text'] {
-        width: 100%;
-        padding: var(--spacing-sm);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-        color: var(--text-primary);
-        font-size: 14px;
-
-        &:focus {
-          outline: none;
-          border-color: var(--primary-color);
-        }
-      }
-
-      input[type='number'] {
-        width: 80px;
-      }
-
-      /* Directory Input */
-      .directory-input {
-        display: flex;
-        gap: var(--spacing-xs);
-      }
-
-      .directory-input input {
-        flex: 1;
-      }
-
-      .btn-browse {
-        padding: var(--spacing-sm) var(--spacing-md);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-        color: var(--text-primary);
-        font-size: 13px;
-        cursor: pointer;
-        white-space: nowrap;
-
-        &:hover {
-          background: var(--bg-primary);
-        }
-      }
-
-      /* Future Settings Note */
-      .future-settings-note {
-        margin-top: var(--spacing-lg);
-        padding: var(--spacing-md);
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-md);
-        border: 1px dashed var(--border-color);
-
-        h4 {
-          margin: 0 0 var(--spacing-sm);
-          font-size: 14px;
-          color: var(--text-secondary);
-        }
-
-        ul {
-          margin: 0;
-          padding-left: var(--spacing-lg);
-          color: var(--text-muted);
-          font-size: 13px;
-        }
-
-        li {
-          margin-bottom: var(--spacing-xs);
-        }
-      }
-
-      /* Keyboard Shortcuts */
-      .keyboard-shortcuts-section {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-lg);
-      }
-
-      .keyboard-intro {
-        margin: 0;
-        color: var(--text-secondary);
-        font-size: 13px;
-        line-height: 1.5;
-      }
-
-      .shortcut-category {
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        padding: var(--spacing-md);
-      }
-
-      .category-title {
-        margin: 0 0 var(--spacing-sm);
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--text-primary);
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: var(--spacing-xs);
-      }
-
-      .shortcut-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-xs);
-      }
-
-      .shortcut-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: var(--spacing-xs) var(--spacing-sm);
-        border-radius: var(--radius-sm);
-
-        &:hover {
-          background: var(--bg-tertiary);
-        }
-      }
-
-      .shortcut-info {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .shortcut-name {
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--text-primary);
-      }
-
-      .shortcut-desc {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-
-      .shortcut-keys {
-        flex-shrink: 0;
-      }
-
-      .shortcut-keys kbd {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-        font-family: var(--font-mono);
-        font-size: 12px;
-        color: var(--text-primary);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-      }
-
       .settings-footer {
         display: flex;
         justify-content: space-between;
@@ -850,6 +251,7 @@ const getApi = () => (window as any).electronAPI;
       .btn-done {
         padding: var(--spacing-sm) var(--spacing-lg);
         background: var(--primary-color);
+        border: none;
         color: white;
         border-radius: var(--radius-sm);
         font-weight: 500;
@@ -859,237 +261,19 @@ const getApi = () => (window as any).electronAPI;
         &:hover {
           background: var(--primary-hover);
         }
-      }
-
-      /* Reset Layout Button */
-      .reset-layout-row {
-        border: 1px dashed var(--border-color);
-        background: var(--bg-tertiary);
-      }
-
-      .btn-reset-layout {
-        padding: var(--spacing-sm) var(--spacing-md);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        border-radius: var(--radius-sm);
-        font-weight: 500;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all var(--transition-fast);
-        white-space: nowrap;
-
-        &:hover {
-          background: var(--primary-color);
-          border-color: var(--primary-color);
-          color: white;
-        }
-      }
-
-      .btn-secondary,
-      .btn-primary {
-        padding: var(--spacing-xs) var(--spacing-md);
-        border-radius: var(--radius-sm);
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all var(--transition-fast);
-        border: 1px solid transparent;
-        white-space: nowrap;
-      }
-
-      .btn-secondary {
-        background: var(--bg-tertiary);
-        border-color: var(--border-color);
-        color: var(--text-primary);
-
-        &:hover {
-          background: var(--bg-primary);
-        }
-      }
-
-      .btn-primary {
-        background: var(--primary-color);
-        color: white;
-
-        &:hover {
-          background: var(--primary-hover);
-        }
-      }
-
-      .hook-approvals-header .setting-control {
-        display: flex;
-        gap: var(--spacing-xs);
-        align-items: center;
-        min-width: auto;
-      }
-
-      .hook-approvals-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--spacing-sm);
-      }
-
-      .hook-approvals-empty {
-        padding: var(--spacing-md);
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-md);
-        color: var(--text-secondary);
-        font-size: 12px;
-      }
-
-      .hook-approvals-empty.error {
-        color: var(--error-color);
-        border: 1px solid var(--error-color);
-        background: rgba(255, 0, 0, 0.05);
-      }
-
-      .hook-approval-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: var(--spacing-md);
-        padding: var(--spacing-sm) var(--spacing-md);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-color);
-      }
-
-      .hook-approval-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-        flex: 1;
-      }
-
-      .hook-approval-title {
-        display: flex;
-        gap: var(--spacing-sm);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-
-      .hook-name {
-        font-weight: 600;
-        color: var(--text-primary);
-        font-size: 13px;
-      }
-
-      .hook-event {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-muted);
-      }
-
-      .hook-approval-meta {
-        display: flex;
-        gap: var(--spacing-sm);
-        align-items: center;
-        flex-wrap: wrap;
-        font-size: 11px;
-        color: var(--text-secondary);
-      }
-
-      .hook-status {
-        padding: 2px 6px;
-        border-radius: 999px;
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        border: 1px solid var(--border-color);
-      }
-
-      .hook-status.approved {
-        background: rgba(46, 204, 113, 0.15);
-        color: #2ecc71;
-        border-color: rgba(46, 204, 113, 0.35);
-      }
-
-      .hook-summary {
-        max-width: 260px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .hook-approval-actions {
-        display: flex;
-        gap: var(--spacing-xs);
-        flex-shrink: 0;
       }
     `
   ]
 })
 export class SettingsComponent {
-  store = inject(SettingsStore);
-  keybindingService = inject(KeybindingService);
-  viewLayoutService = inject(ViewLayoutService);
+  private store = inject(SettingsStore);
   close = output<void>();
 
-  hookApprovals = signal<HookApprovalSummary[]>([]);
-  hookApprovalsLoading = signal(false);
-  hookApprovalsError = signal<string | null>(null);
-
-  activeTab = signal<
-    'general' | 'orchestration' | 'memory' | 'display' | 'advanced' | 'keyboard'
-  >('general');
-
-  // Computed: keybindings grouped by category
-  keybindingCategories = computed(() => {
-    const byCategory = this.keybindingService.bindingsByCategory();
-    const categories: { name: string; bindings: any[] }[] = [];
-    byCategory.forEach((bindings, name) => {
-      categories.push({ name, bindings });
-    });
-    return categories;
-  });
-
-  private hookApprovalsEffect = effect(() => {
-    if (this.activeTab() === 'advanced') {
-      void this.loadHookApprovals();
-    }
-  });
+  activeTab = signal<SettingsTab>('general');
 
   onOverlayClick(event: MouseEvent): void {
     if ((event.target as HTMLElement).classList.contains('settings-overlay')) {
       this.close.emit();
-    }
-  }
-
-  getValue(key: string): unknown {
-    return this.store.get(key as keyof AppSettings);
-  }
-
-  onBooleanChange(key: string, event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.store.set(key as keyof AppSettings, checked as any);
-  }
-
-  onSelectChange(key: string, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
-    this.store.set(key as keyof AppSettings, value as any);
-  }
-
-  onNumberChange(key: string, event: Event): void {
-    const value = parseInt((event.target as HTMLInputElement).value, 10);
-    if (!isNaN(value)) {
-      this.store.set(key as keyof AppSettings, value as any);
-    }
-  }
-
-  onStringChange(key: string, event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
-    this.store.set(key as keyof AppSettings, value as any);
-  }
-
-  async browseFolder(key: string): Promise<void> {
-    const api = getApi();
-    if (!api) return;
-
-    const response = await api.selectFolder();
-    if (response.success && response.data) {
-      this.store.set(key as keyof AppSettings, response.data as any);
     }
   }
 
@@ -1100,85 +284,4 @@ export class SettingsComponent {
       this.store.reset();
     }
   }
-
-  resetViewLayout(): void {
-    this.viewLayoutService.reset();
-  }
-
-  async loadHookApprovals(): Promise<void> {
-    const api = getApi();
-    if (!api?.hooksApprovalsList) return;
-
-    this.hookApprovalsLoading.set(true);
-    this.hookApprovalsError.set(null);
-    try {
-      const response = await api.hooksApprovalsList({ pendingOnly: false });
-      if (response.success) {
-        this.hookApprovals.set((response.data || []) as HookApprovalSummary[]);
-      } else {
-        this.hookApprovalsError.set(
-          response.error?.message || 'Failed to load approvals'
-        );
-      }
-    } catch (error) {
-      this.hookApprovalsError.set((error as Error).message);
-    } finally {
-      this.hookApprovalsLoading.set(false);
-    }
-  }
-
-  async updateHookApproval(hookId: string, approved: boolean): Promise<void> {
-    const api = getApi();
-    if (!api?.hooksApprovalsUpdate) return;
-
-    this.hookApprovalsLoading.set(true);
-    this.hookApprovalsError.set(null);
-    try {
-      const response = await api.hooksApprovalsUpdate({ hookId, approved });
-      if (response.success) {
-        await this.loadHookApprovals();
-      } else {
-        this.hookApprovalsError.set(
-          response.error?.message || 'Failed to update approval'
-        );
-      }
-    } catch (error) {
-      this.hookApprovalsError.set((error as Error).message);
-    } finally {
-      this.hookApprovalsLoading.set(false);
-    }
-  }
-
-  async clearHookApprovals(): Promise<void> {
-    const api = getApi();
-    if (!api?.hooksApprovalsClear) return;
-
-    this.hookApprovalsLoading.set(true);
-    this.hookApprovalsError.set(null);
-    try {
-      const response = await api.hooksApprovalsClear();
-      if (response.success) {
-        await this.loadHookApprovals();
-      } else {
-        this.hookApprovalsError.set(
-          response.error?.message || 'Failed to clear approvals'
-        );
-      }
-    } catch (error) {
-      this.hookApprovalsError.set((error as Error).message);
-    } finally {
-      this.hookApprovalsLoading.set(false);
-    }
-  }
-}
-
-interface HookApprovalSummary {
-  id: string;
-  name: string;
-  event: string;
-  enabled: boolean;
-  approvalRequired: boolean;
-  approved: boolean;
-  handlerType: string;
-  handlerSummary?: string;
 }

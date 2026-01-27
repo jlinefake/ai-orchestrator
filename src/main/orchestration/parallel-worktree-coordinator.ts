@@ -11,7 +11,7 @@ import type {
   WorktreeMergeResult,
   ConflictDetail,
 } from '../../shared/types/worktree.types';
-import { WorktreeManager, getWorktreeManager } from '../git/worktree-manager';
+import { WorktreeManager, getWorktreeManager } from '../workspace/git/worktree-manager';
 
 export interface ParallelTask {
   id: string;

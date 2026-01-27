@@ -67,3 +67,6 @@ export {
   CliVerificationConfig,
   AgentConfig,
 } from './cli-verification-extension';
+
+// Debate coordination
+export { DebateCoordinator, getDebateCoordinator } from './debate-coordinator';

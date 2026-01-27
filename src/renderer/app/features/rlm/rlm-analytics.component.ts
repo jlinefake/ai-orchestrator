@@ -25,7 +25,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
 import { saveAs } from 'file-saver';

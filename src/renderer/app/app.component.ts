@@ -4,7 +4,7 @@
 
 import { Component, inject, OnInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { ElectronIpcService } from './core/services/electron-ipc.service';
+import { ElectronIpcService } from './core/services/ipc';
 
 @Component({
   selector: 'app-root',

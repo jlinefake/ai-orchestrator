@@ -20,7 +20,7 @@ import {
 import { DatePipe } from '@angular/common';
 import { OutputMessage } from '../../core/state/instance.store';
 import { MarkdownService } from '../../core/services/markdown.service';
-import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc';
 import { MessageAttachmentsComponent } from '../../shared/components/message-attachments/message-attachments.component';
 import { ThoughtProcessComponent } from '../../shared/components/thought-process/thought-process.component';
 

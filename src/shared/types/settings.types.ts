@@ -19,7 +19,7 @@ export interface AppSettings {
   defaultYoloMode: boolean;
   defaultWorkingDirectory: string;
   defaultCli: CliType;
-  defaultCopilotModel: string; // Model to use when Copilot is selected
+  defaultModel: string; // Model to use for all providers (passed via --model flag)
   theme: ThemeMode;
 
   // Orchestration
@@ -54,7 +54,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultYoloMode: false,
   defaultWorkingDirectory: '',
   defaultCli: 'auto',
-  defaultCopilotModel: 'claude-sonnet-4-5',
+  defaultModel: 'claude-opus-4-5',
   theme: 'dark',
 
   // Orchestration
@@ -143,14 +143,15 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     ]
   },
   {
-    key: 'defaultCopilotModel',
-    label: 'Default Copilot Model',
-    description: 'Model to use when GitHub Copilot is selected',
+    key: 'defaultModel',
+    label: 'Default Model',
+    description: 'Model to use for new instances (passed via --model flag)',
     type: 'select',
     category: 'general',
     options: [
       { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
       { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+      { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
       { value: 'gpt-4o', label: 'GPT-4o' },
       { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
       { value: 'o3', label: 'OpenAI o3' },

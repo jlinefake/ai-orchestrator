@@ -28,7 +28,7 @@ import type {
   SupervisionGetTreePayload,
   SupervisionGetHealthPayload,
 } from '../../shared/types/ipc.types';
-import { getWorktreeManager } from '../git/worktree-manager';
+import { getWorktreeManager } from '../workspace/git/worktree-manager';
 import { getMultiVerifyCoordinator } from '../orchestration/multi-verify-coordinator';
 import { getSupervisor } from '../orchestration/supervisor';
 import { getAllPersonalities, getPersonalityDescription } from '../orchestration/personalities';

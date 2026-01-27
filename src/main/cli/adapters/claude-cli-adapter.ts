@@ -74,6 +74,8 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
   private parser: NdjsonParser;
   private formatter: InputFormatter | null = null;
   private spawnOptions: ClaudeCliSpawnOptions;
+  /** Track pending permission requests to avoid duplicate prompts */
+  private pendingPermissions: Set<string> = new Set();
 
   constructor(options: ClaudeCliSpawnOptions = {}) {
     const config: CliAdapterConfig = {
@@ -108,6 +110,15 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       contextWindow: 200000, // Claude 3.5 context window
       outputFormats: ['ndjson', 'text', 'json']
     };
+  }
+
+  /**
+   * Enable resume mode - next spawn will use --resume with the session ID
+   * to continue an existing conversation.
+   */
+  setResume(resume: boolean): void {
+    this.spawnOptions.resume = resume;
+    console.log(`[ClaudeCliAdapter] Resume mode set to: ${resume}, session: ${this.sessionId}`);
   }
 
   async checkStatus(): Promise<CliStatus> {
@@ -378,6 +389,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         model: this.spawnOptions.model
       });
       args.push('--dangerously-skip-permissions');
+    } else {
+      // Explicitly set permission mode to default to ensure prompts appear
+      console.log('[ClaudeCliAdapter] NON-YOLO mode: adding --permission-mode default');
+      args.push('--permission-mode', 'default');
     }
 
     if (this.spawnOptions.resume && this.sessionId) {
@@ -415,9 +430,16 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       );
     }
 
-    if (this.spawnOptions.systemPrompt) {
+    // Don't pass system prompt when resuming - the session already has one
+    // and Claude CLI doesn't support changing it mid-session
+    if (this.spawnOptions.systemPrompt && !this.spawnOptions.resume) {
       args.push('--system-prompt', this.spawnOptions.systemPrompt);
     }
+
+    console.log('[ClaudeCliAdapter] buildArgs complete:', {
+      yoloMode: this.spawnOptions.yoloMode,
+      args: args.join(' ')
+    });
 
     return args;
   }
@@ -503,52 +525,87 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
   /**
    * Send raw text input (for permission prompts, etc.)
-   * When using stream-json input format, permission responses need to be JSON formatted
+   * When using stream-json input format, all responses need to be JSON formatted as user messages
    */
-  async sendRaw(text: string): Promise<void> {
+  async sendRaw(text: string, permissionKey?: string): Promise<void> {
     if (!this.formatter || !this.formatter.isWritable()) {
       throw new Error('CLI not ready for input');
     }
 
-    // When using stream-json input format, all input needs to be in JSON format
-    // For permission prompts (y/n responses), send as a user message
-    const isSimpleYesNo = text === 'y' || text === 'n' || text === 'yes' || text === 'no';
-
-    if (isSimpleYesNo) {
-      // Send permission response as a user message in stream-json format
-      const userMessage = {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: text
-        }
-      };
-      const jsonMessage = JSON.stringify(userMessage);
-      console.log('ClaudeCliAdapter.sendRaw: Sending permission response as user message:', jsonMessage);
-      await this.formatter.sendRaw(jsonMessage);
-    } else {
-      // For non-permission responses, send as raw text
-      console.log('ClaudeCliAdapter.sendRaw: Sending raw text:', text);
-      await this.formatter.sendRaw(text);
+    // Clear the pending permission if one was specified
+    if (permissionKey && this.pendingPermissions.has(permissionKey)) {
+      this.pendingPermissions.delete(permissionKey);
+      console.log('ClaudeCliAdapter.sendRaw: Cleared pending permission:', permissionKey);
     }
 
+    // When using stream-json input format, all input needs to be in JSON format
+    // Send all text as user messages so Claude can understand the response
+    const userMessage = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: text
+      }
+    };
+    const jsonMessage = JSON.stringify(userMessage);
+    console.log('ClaudeCliAdapter.sendRaw: Sending as user message:', jsonMessage);
+    await this.formatter.sendRaw(jsonMessage);
+
     this.emit('status', 'busy' as InstanceStatus);
+  }
+
+  /**
+   * Clear a pending permission (called when user responds to permission prompt)
+   */
+  clearPendingPermission(permissionKey: string): void {
+    if (this.pendingPermissions.has(permissionKey)) {
+      this.pendingPermissions.delete(permissionKey);
+      console.log('ClaudeCliAdapter: Cleared pending permission:', permissionKey);
+    }
   }
 
   // ============ Private Helper Methods ============
 
   private handleStdout(chunk: Buffer): void {
     const raw = chunk.toString();
+
+    // Log ALL message types coming through for debugging
+    const typeMatch = raw.match(/"type"\s*:\s*"([^"]+)"/g);
+    if (typeMatch) {
+      console.log('[ClaudeCliAdapter] handleStdout: Message types in chunk:', typeMatch);
+    }
+
+    // Log raw output for debugging permission issues
+    if (raw.includes('input_required') || raw.includes('permission') || raw.includes('approve')) {
+      console.log('=== [ClaudeCliAdapter] RAW STDOUT (permission-related) ===');
+      console.log(raw);
+      console.log('=== [ClaudeCliAdapter] END RAW STDOUT ===');
+    }
+
     const messages = this.parser.parse(raw);
+    console.log('[ClaudeCliAdapter] handleStdout: Parsed', messages.length, 'messages, types:', messages.map(m => m.type));
 
     for (const message of messages) {
+      // Log all message types for debugging
+      if (message.type === 'input_required') {
+        console.log('[ClaudeCliAdapter] handleStdout: Parsed input_required message, forwarding to processCliMessage');
+      }
       this.processCliMessage(message);
     }
   }
 
   private handleStderr(chunk: Buffer): void {
     const errorText = chunk.toString().trim();
+    console.log('[ClaudeCliAdapter] handleStderr received:', errorText.substring(0, 500));
+
     if (errorText) {
+      // Check if this looks like a permission prompt
+      if (errorText.includes('permission') || errorText.includes('approve') || errorText.includes('allow') || errorText.includes('y/n')) {
+        console.log('=== [ClaudeCliAdapter] STDERR CONTAINS PERMISSION-LIKE CONTENT ===');
+        console.log(errorText);
+        console.log('=== END STDERR PERMISSION CONTENT ===');
+      }
+
       const errorMessage: OutputMessage = {
         id: generateId(),
         timestamp: Date.now(),
@@ -598,10 +655,11 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         // Extract context usage from assistant message (for real-time updates)
         if (assistantMsg.message?.usage) {
           const usage = assistantMsg.message.usage;
+          // input_tokens + output_tokens = actual context window usage
+          // Cache tokens are cumulative across session and used for billing, not context
           const totalUsedTokens =
             (usage.input_tokens || 0) +
-            (usage.output_tokens || 0) +
-            (usage.cache_read_input_tokens || 0);
+            (usage.output_tokens || 0);
 
           // Default context window - will be updated by result message
           const contextWindow = 200000;
@@ -619,10 +677,74 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
       case 'user':
         const userMsg = message as any;
-        if (
-          userMsg.message?.content &&
-          Array.isArray(userMsg.message.content)
-        ) {
+
+        // Check for permission denial in tool_result content
+        // Claude CLI returns these as user messages with tool_result content when permissions are denied
+        if (userMsg.message?.content && Array.isArray(userMsg.message.content)) {
+          for (const block of userMsg.message.content) {
+            if (
+              block.type === 'tool_result' &&
+              block.is_error === true &&
+              typeof block.content === 'string' &&
+              block.content.includes("haven't granted it yet")
+            ) {
+              console.log('=== [ClaudeCliAdapter] PERMISSION DENIAL DETECTED IN TOOL_RESULT ===');
+              console.log('[ClaudeCliAdapter] Tool use ID:', block.tool_use_id);
+              console.log('[ClaudeCliAdapter] Content:', block.content);
+
+              // Extract the path from the message if possible
+              const pathMatch = block.content.match(/permissions to (\w+) to (.+),/);
+              const action = pathMatch?.[1] || 'access';
+              const path = pathMatch?.[2] || 'a file';
+
+              // Create a unique key for this permission request to avoid duplicate prompts
+              const permissionKey = `${action}:${path}`;
+
+              // Skip if we already have a pending request for this exact permission
+              if (this.pendingPermissions.has(permissionKey)) {
+                console.log('[ClaudeCliAdapter] Skipping duplicate permission prompt for:', permissionKey);
+                break;
+              }
+
+              // Track this permission request
+              this.pendingPermissions.add(permissionKey);
+              console.log('[ClaudeCliAdapter] Added to pending permissions:', permissionKey);
+
+              const inputRequestId = generateId();
+              const prompt = `Permission required: Claude wants to ${action} ${path}. Allow?`;
+              const timestamp = message.timestamp || Date.now();
+
+              console.log('[ClaudeCliAdapter] Emitting input_required for permission denial');
+
+              this.emit('status', 'waiting_for_input' as InstanceStatus);
+
+              // Emit the input_required event for UI to handle
+              this.emit('input_required', {
+                id: inputRequestId,
+                prompt,
+                timestamp,
+                metadata: {
+                  type: 'permission_denial',
+                  tool_use_id: block.tool_use_id,
+                  action,
+                  path,
+                  originalContent: block.content,
+                  permissionKey // Include for cleanup after response
+                }
+              });
+
+              // Also emit as system output for visibility in chat
+              this.emit('output', {
+                id: inputRequestId,
+                timestamp,
+                type: 'system',
+                content: prompt,
+                metadata: { requiresInput: true, permissionDenial: true }
+              });
+
+              console.log('=== [ClaudeCliAdapter] PERMISSION DENIAL HANDLING COMPLETE ===');
+            }
+          }
           break;
         }
         if (typeof message.content === 'string' && message.content.trim()) {
@@ -710,17 +832,16 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
             if (modelKeys.length > 0) {
               const modelData = resultMsg.modelUsage[modelKeys[0]];
               contextWindow = modelData.contextWindow || 200000;
-              // Total used = input + output + cache reads (cache reads count toward context)
+              // inputTokens + outputTokens = actual context window usage
               totalUsedTokens =
                 (modelData.inputTokens || 0) +
-                (modelData.outputTokens || 0) +
-                (modelData.cacheReadInputTokens || 0);
+                (modelData.outputTokens || 0);
             }
           } else if (resultMsg.usage) {
+            // input_tokens + output_tokens = actual context window usage
             totalUsedTokens =
               (resultMsg.usage.input_tokens || 0) +
-              (resultMsg.usage.output_tokens || 0) +
-              (resultMsg.usage.cache_read_input_tokens || 0);
+              (resultMsg.usage.output_tokens || 0);
           }
 
           const percentage = (totalUsedTokens / contextWindow) * 100;
@@ -749,10 +870,17 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         break;
 
       case 'input_required':
+        console.log('=== [ClaudeCliAdapter] INPUT_REQUIRED MESSAGE RECEIVED ===');
+        console.log('[ClaudeCliAdapter] Raw message:', JSON.stringify(message, null, 2));
+
         this.emit('status', 'waiting_for_input' as InstanceStatus);
         const inputRequestId = generateId();
         const prompt = message.prompt || 'Input required';
         const timestamp = message.timestamp || Date.now();
+
+        console.log('[ClaudeCliAdapter] Generated request ID:', inputRequestId);
+        console.log('[ClaudeCliAdapter] Prompt:', prompt);
+        console.log('[ClaudeCliAdapter] Emitting input_required event...');
 
         // Emit the input_required event for UI to handle
         this.emit('input_required', {
@@ -760,8 +888,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           prompt,
           timestamp
         });
+        console.log('[ClaudeCliAdapter] input_required event emitted');
 
         // Also emit as system output for visibility in chat
+        console.log('[ClaudeCliAdapter] Emitting output event for chat visibility...');
         this.emit('output', {
           id: inputRequestId,
           timestamp,
@@ -769,6 +899,8 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           content: prompt,
           metadata: { requiresInput: true }
         });
+        console.log('[ClaudeCliAdapter] output event emitted');
+        console.log('=== [ClaudeCliAdapter] INPUT_REQUIRED HANDLING COMPLETE ===');
         break;
     }
   }

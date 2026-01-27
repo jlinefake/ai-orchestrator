@@ -14,7 +14,7 @@ import {
   ChangeDetectionStrategy,
   HostListener,
 } from '@angular/core';
-import { ElectronIpcService, FileEntry } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService, FileEntry } from '../../core/services/ipc';
 import { ViewLayoutService } from '../../core/services/view-layout.service';
 
 interface TreeNode extends FileEntry {

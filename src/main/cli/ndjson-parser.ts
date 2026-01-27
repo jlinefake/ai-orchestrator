@@ -73,6 +73,14 @@ export class NdjsonParser {
       try {
         const parsed = JSON.parse(trimmed) as CliStreamMessage;
         parsed.timestamp = parsed.timestamp || Date.now();
+
+        // Log input_required messages specifically for debugging
+        if (parsed.type === 'input_required') {
+          console.log('=== [NdjsonParser] DETECTED input_required MESSAGE ===');
+          console.log('[NdjsonParser] Raw line:', trimmed);
+          console.log('[NdjsonParser] Parsed message:', JSON.stringify(parsed, null, 2));
+        }
+
         messages.push(parsed);
       } catch (error) {
         // Log parse errors but continue processing

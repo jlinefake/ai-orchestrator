@@ -21,6 +21,8 @@ export const IPC_CHANNELS = {
   INSTANCE_TERMINATE_ALL: 'instance:terminate-all',
   INSTANCE_RESTART: 'instance:restart',
   INSTANCE_RENAME: 'instance:rename',
+  INSTANCE_CHANGE_AGENT_MODE: 'instance:change-agent-mode',
+  INSTANCE_TOGGLE_YOLO_MODE: 'instance:toggle-yolo-mode',
   INSTANCE_SEND_INPUT: 'instance:send-input',
   INSTANCE_INTERRUPT: 'instance:interrupt',
   INSTANCE_STATE_UPDATE: 'instance:state-update',
@@ -51,6 +53,7 @@ export const IPC_CHANNELS = {
   // App operations
   APP_READY: 'app:ready',
   APP_GET_VERSION: 'app:get-version',
+  APP_OPEN_DOCS: 'app:open-docs',
 
   // CLI detection
   CLI_DETECT_ALL: 'cli:detect-all',

@@ -11,7 +11,7 @@
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { Subject, BehaviorSubject, Observable, interval } from 'rxjs';
 import { takeUntil, filter, map } from 'rxjs/operators';
-import { ElectronIpcService } from '../../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../../core/services/ipc';
 import type { DebateResult, DebateSessionRound, DebateContribution } from '../../../../../shared/types/debate.types';
 
 export type DebateStreamingStatus = 'idle' | 'connecting' | 'streaming' | 'paused' | 'completed' | 'error';

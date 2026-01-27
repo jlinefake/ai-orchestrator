@@ -19,6 +19,8 @@ const IPC_CHANNELS = {
   INSTANCE_INTERRUPT: 'instance:interrupt',
   INSTANCE_RESTART: 'instance:restart',
   INSTANCE_RENAME: 'instance:rename',
+  INSTANCE_CHANGE_AGENT_MODE: 'instance:change-agent-mode',
+  INSTANCE_TOGGLE_YOLO_MODE: 'instance:toggle-yolo-mode',
   INSTANCE_LIST: 'instance:list',
 
   // Instance events (main -> renderer)
@@ -59,6 +61,9 @@ const IPC_CHANNELS = {
   FILE_READ_DIR: 'file:read-dir',
   FILE_GET_STATS: 'file:get-stats',
   FILE_OPEN_PATH: 'file:open-path',
+
+  // App operations
+  APP_OPEN_DOCS: 'app:open-docs',
 
   // Settings
   SETTINGS_GET_ALL: 'settings:get-all',
@@ -537,6 +542,25 @@ const electronAPI = {
   },
 
   /**
+   * Change agent mode for an instance (preserves conversation context)
+   */
+  changeAgentMode: (payload: {
+    instanceId: string;
+    agentId: string;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_CHANGE_AGENT_MODE, payload);
+  },
+
+  /**
+   * Toggle YOLO mode for an instance (preserves conversation context)
+   */
+  toggleYoloMode: (payload: {
+    instanceId: string;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_TOGGLE_YOLO_MODE, payload);
+  },
+
+  /**
    * Terminate all instances
    */
   terminateAllInstances: (): Promise<IpcResponse> => {
@@ -669,14 +693,25 @@ const electronAPI = {
     requestId: string;
     prompt: string;
     timestamp: number;
+    metadata?: Record<string, unknown>;
   }) => void): (() => void) => {
+    console.log('[Preload] onInputRequired: Setting up listener');
     const handler = (_event: IpcRendererEvent, payload: {
       instanceId: string;
       requestId: string;
       prompt: string;
       timestamp: number;
-    }) => callback(payload);
+      metadata?: Record<string, unknown>;
+    }) => {
+      console.log('=== [Preload] INPUT_REQUIRED IPC MESSAGE RECEIVED ===');
+      console.log('[Preload] Payload:', JSON.stringify(payload, null, 2));
+      console.log('[Preload] Calling callback...');
+      callback(payload);
+      console.log('[Preload] Callback executed');
+      console.log('=== [Preload] INPUT_REQUIRED HANDLING COMPLETE ===');
+    };
     ipcRenderer.on(IPC_CHANNELS.INPUT_REQUIRED, handler);
+    console.log('[Preload] Listener registered for channel:', IPC_CHANNELS.INPUT_REQUIRED);
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.INPUT_REQUIRED, handler);
   },
@@ -687,12 +722,14 @@ const electronAPI = {
   respondToInputRequired: (
     instanceId: string,
     requestId: string,
-    response: string
+    response: string,
+    permissionKey?: string
   ): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.INPUT_REQUIRED_RESPOND, {
       instanceId,
       requestId,
-      response
+      response,
+      permissionKey
     });
   },
 
@@ -815,6 +852,13 @@ const electronAPI = {
    */
   openPath: (path: string): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.FILE_OPEN_PATH, { path });
+  },
+
+  /**
+   * Open a documentation file from the docs folder
+   */
+  openDocsFile: (filename: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_DOCS, { filename });
   },
 
   // ============================================

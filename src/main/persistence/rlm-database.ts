@@ -1,18 +1,17 @@
 /**
- * RLM Persistence Layer
- * SQLite database for RLM metadata, indices, and learning data
+ * RLM Database - Thin Coordinator
+ *
+ * SQLite database for RLM metadata, indices, and learning data.
+ * This is a facade that delegates to focused sub-modules.
  */
 
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import * as path from 'path';
-import * as fs from 'fs';
 import { EventEmitter } from 'events';
-import {
+import type {
   ContextStoreRow,
   ContextSectionRow,
-  SearchIndexEntry,
-  SearchResultRow,
   SearchResult,
   RLMSessionRow,
   OutcomeRow,
@@ -21,16 +20,28 @@ import {
   InsightRow,
   VectorRow,
   MigrationRow,
-  Migration,
 } from './rlm-database.types';
-import * as crypto from 'crypto';
 
-export interface RLMDatabaseConfig {
-  dbPath?: string;
-  contentDir?: string;
-  enableWAL?: boolean;
-  cacheSize?: number; // MB
-}
+// Import from decomposed modules
+import { SCHEMA_VERSION, type RLMDatabaseConfig } from './rlm/rlm-types';
+import {
+  createTables,
+  createMigrationsTable,
+  runMigrations,
+  getSchemaInfo,
+  MIGRATIONS
+} from './rlm/rlm-schema';
+import { ensureDirectories } from './rlm/rlm-content';
+import * as stores from './rlm/rlm-stores';
+import * as sections from './rlm/rlm-sections';
+import * as search from './rlm/rlm-search';
+import * as sessions from './rlm/rlm-sessions';
+import * as learning from './rlm/rlm-learning';
+import * as vectors from './rlm/rlm-vectors';
+import * as backup from './rlm/rlm-backup';
+
+// Re-export config type
+export type { RLMDatabaseConfig };
 
 export class RLMDatabase extends EventEmitter {
   private static instance: RLMDatabase;
@@ -38,66 +49,6 @@ export class RLMDatabase extends EventEmitter {
   private contentDir: string;
   private config: RLMDatabaseConfig;
   private initialized = false;
-
-  // Threshold for inline vs file storage (in bytes)
-  private readonly INLINE_THRESHOLD = 4096; // 4KB
-
-  // Current schema version
-  private static readonly SCHEMA_VERSION = 1;
-
-  // Migrations to be applied in order
-  private static readonly MIGRATIONS: Migration[] = [
-    // Migration 001: Add optimized indices for common query patterns
-    {
-      name: '001_add_optimized_indices',
-      up: `
-        -- Composite index for filtering outcomes by task type and success
-        CREATE INDEX IF NOT EXISTS idx_outcomes_task_success
-          ON outcomes(task_type, success);
-
-        -- Index for model-specific outcome queries
-        CREATE INDEX IF NOT EXISTS idx_outcomes_model
-          ON outcomes(model);
-
-        -- Index for cleaning up expired insights
-        CREATE INDEX IF NOT EXISTS idx_insights_expires
-          ON insights(expires_at);
-
-        -- Index for time-based session queries
-        CREATE INDEX IF NOT EXISTS idx_sessions_started
-          ON rlm_sessions(started_at);
-
-        -- Index for section checksum lookups (deduplication)
-        CREATE INDEX IF NOT EXISTS idx_sections_checksum
-          ON context_sections(checksum);
-
-        -- Index for file path lookups in sections
-        CREATE INDEX IF NOT EXISTS idx_sections_filepath
-          ON context_sections(file_path);
-
-        -- Composite index for section name lookups within a store
-        CREATE INDEX IF NOT EXISTS idx_sections_store_name
-          ON context_sections(store_id, name);
-      `,
-      down: `
-        DROP INDEX IF EXISTS idx_outcomes_task_success;
-        DROP INDEX IF EXISTS idx_outcomes_model;
-        DROP INDEX IF EXISTS idx_insights_expires;
-        DROP INDEX IF EXISTS idx_sessions_started;
-        DROP INDEX IF EXISTS idx_sections_checksum;
-        DROP INDEX IF EXISTS idx_sections_filepath;
-        DROP INDEX IF EXISTS idx_sections_store_name;
-      `
-    },
-    // Example migration for future use:
-    // {
-    //   name: '002_add_tags_to_sections',
-    //   up: `ALTER TABLE context_sections ADD COLUMN tags_json TEXT;
-    //        CREATE INDEX IF NOT EXISTS idx_sections_tags ON context_sections(tags_json);`,
-    //   down: `DROP INDEX IF EXISTS idx_sections_tags;
-    //          -- Note: SQLite doesn't support DROP COLUMN, would need to recreate table`
-    // }
-  ];
 
   private constructor(config: RLMDatabaseConfig = {}) {
     super();
@@ -111,7 +62,7 @@ export class RLMDatabase extends EventEmitter {
     };
 
     this.contentDir = this.config.contentDir!;
-    this.ensureDirectories();
+    ensureDirectories(this.config.dbPath!, this.contentDir);
     this.db = this.initializeDatabase();
     this.initialized = true;
   }
@@ -134,464 +85,94 @@ export class RLMDatabase extends EventEmitter {
     return this.initialized;
   }
 
-  private ensureDirectories(): void {
-    const dbDir = path.dirname(this.config.dbPath!);
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-    if (!fs.existsSync(this.config.contentDir!)) {
-      fs.mkdirSync(this.config.contentDir!, { recursive: true });
-    }
-  }
-
   private initializeDatabase(): Database.Database {
     const db = new Database(this.config.dbPath!);
 
     if (this.config.enableWAL) {
       db.pragma('journal_mode = WAL');
     }
-    db.pragma(`cache_size = -${this.config.cacheSize! * 1024}`); // Negative = KB
+    db.pragma(`cache_size = -${this.config.cacheSize! * 1024}`);
     db.pragma('foreign_keys = ON');
 
-    this.createTables(db);
-    this.createMigrationsTable(db);
-    this.runMigrations(db);
+    createTables(db);
+    createMigrationsTable(db);
+    runMigrations(
+      db,
+      (name) => this.emit('migration:applied', { name }),
+      (applied) => this.emit('migrations:complete', { applied })
+    );
     this.emit('database:initialized', { path: this.config.dbPath });
     return db;
   }
 
-  private createTables(db: Database.Database): void {
-    // Context Stores table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS context_stores (
-        id TEXT PRIMARY KEY,
-        instance_id TEXT NOT NULL,
-        total_tokens INTEGER DEFAULT 0,
-        total_size INTEGER DEFAULT 0,
-        access_count INTEGER DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        last_accessed INTEGER NOT NULL,
-        config_json TEXT,
-        UNIQUE(instance_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_stores_instance
-        ON context_stores(instance_id);
-      CREATE INDEX IF NOT EXISTS idx_stores_accessed
-        ON context_stores(last_accessed);
-    `);
-
-    // Context Sections table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS context_sections (
-        id TEXT PRIMARY KEY,
-        store_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        name TEXT NOT NULL,
-        source TEXT,
-        start_offset INTEGER NOT NULL,
-        end_offset INTEGER NOT NULL,
-        tokens INTEGER NOT NULL,
-        checksum TEXT,
-        depth INTEGER DEFAULT 0,
-        summarizes_json TEXT,
-        parent_summary_id TEXT,
-        file_path TEXT,
-        language TEXT,
-        source_url TEXT,
-        created_at INTEGER NOT NULL,
-        content_file TEXT,
-        content_inline TEXT,
-        FOREIGN KEY (store_id) REFERENCES context_stores(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_sections_store
-        ON context_sections(store_id);
-      CREATE INDEX IF NOT EXISTS idx_sections_type
-        ON context_sections(type);
-      CREATE INDEX IF NOT EXISTS idx_sections_offset
-        ON context_sections(store_id, start_offset);
-      CREATE INDEX IF NOT EXISTS idx_sections_depth
-        ON context_sections(store_id, depth);
-    `);
-
-    // Search Index table (inverted index)
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS search_index (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        store_id TEXT NOT NULL,
-        term TEXT NOT NULL,
-        section_id TEXT NOT NULL,
-        line_number INTEGER,
-        position INTEGER,
-        snippet TEXT,
-        FOREIGN KEY (store_id) REFERENCES context_stores(id) ON DELETE CASCADE,
-        FOREIGN KEY (section_id) REFERENCES context_sections(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_search_store_term
-        ON search_index(store_id, term);
-      CREATE INDEX IF NOT EXISTS idx_search_section
-        ON search_index(section_id);
-    `);
-
-    // RLM Sessions table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS rlm_sessions (
-        id TEXT PRIMARY KEY,
-        store_id TEXT NOT NULL,
-        instance_id TEXT NOT NULL,
-        started_at INTEGER NOT NULL,
-        ended_at INTEGER,
-        last_activity_at INTEGER NOT NULL,
-        total_queries INTEGER DEFAULT 0,
-        total_root_tokens INTEGER DEFAULT 0,
-        total_sub_query_tokens INTEGER DEFAULT 0,
-        estimated_direct_tokens INTEGER DEFAULT 0,
-        token_savings_percent REAL DEFAULT 0,
-        queries_json TEXT,
-        recursive_calls_json TEXT,
-        FOREIGN KEY (store_id) REFERENCES context_stores(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_sessions_store
-        ON rlm_sessions(store_id);
-      CREATE INDEX IF NOT EXISTS idx_sessions_instance
-        ON rlm_sessions(instance_id);
-    `);
-
-    // Outcomes table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS outcomes (
-        id TEXT PRIMARY KEY,
-        task_type TEXT NOT NULL,
-        success INTEGER NOT NULL,
-        timestamp INTEGER NOT NULL,
-        duration_ms INTEGER,
-        token_usage INTEGER,
-        agent_id TEXT,
-        model TEXT,
-        error_type TEXT,
-        prompt_hash TEXT,
-        tools_json TEXT,
-        metadata_json TEXT
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_outcomes_task
-        ON outcomes(task_type);
-      CREATE INDEX IF NOT EXISTS idx_outcomes_timestamp
-        ON outcomes(timestamp);
-      CREATE INDEX IF NOT EXISTS idx_outcomes_agent
-        ON outcomes(agent_id);
-    `);
-
-    // Patterns table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS patterns (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL,
-        key TEXT NOT NULL,
-        effectiveness REAL NOT NULL,
-        sample_size INTEGER NOT NULL,
-        last_updated INTEGER NOT NULL,
-        metadata_json TEXT,
-        UNIQUE(type, key)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_patterns_type
-        ON patterns(type);
-      CREATE INDEX IF NOT EXISTS idx_patterns_effectiveness
-        ON patterns(effectiveness);
-    `);
-
-    // Experiences table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS experiences (
-        id TEXT PRIMARY KEY,
-        task_type TEXT NOT NULL UNIQUE,
-        success_count INTEGER DEFAULT 0,
-        failure_count INTEGER DEFAULT 0,
-        success_patterns_json TEXT,
-        failure_patterns_json TEXT,
-        example_prompts_json TEXT,
-        last_updated INTEGER NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_experiences_task
-        ON experiences(task_type);
-    `);
-
-    // Insights table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS insights (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT,
-        confidence REAL NOT NULL,
-        supporting_patterns_json TEXT,
-        created_at INTEGER NOT NULL,
-        expires_at INTEGER
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_insights_type
-        ON insights(type);
-      CREATE INDEX IF NOT EXISTS idx_insights_confidence
-        ON insights(confidence);
-    `);
-
-    // Vectors table (for semantic search)
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS vectors (
-        id TEXT PRIMARY KEY,
-        store_id TEXT NOT NULL,
-        section_id TEXT NOT NULL,
-        embedding BLOB NOT NULL,
-        dimensions INTEGER NOT NULL,
-        content_preview TEXT,
-        metadata_json TEXT,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (store_id) REFERENCES context_stores(id) ON DELETE CASCADE,
-        FOREIGN KEY (section_id) REFERENCES context_sections(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_vectors_store
-        ON vectors(store_id);
-      CREATE INDEX IF NOT EXISTS idx_vectors_section
-        ON vectors(section_id);
-    `);
-  }
-
   // ============================================
-  // Migration System
+  // Schema Info
   // ============================================
 
-  private createMigrationsTable(db: Database.Database): void {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS _migrations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        applied_at INTEGER NOT NULL,
-        checksum TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_migrations_name ON _migrations(name);
-    `);
-  }
-
-  private computeMigrationChecksum(migration: Migration): string {
-    return crypto.createHash('sha256').update(migration.up).digest('hex').substring(0, 16);
-  }
-
-  private getAppliedMigrations(db: Database.Database): MigrationRow[] {
-    const stmt = db.prepare(`SELECT * FROM _migrations ORDER BY id ASC`);
-    return stmt.all() as MigrationRow[];
-  }
-
-  private runMigrations(db: Database.Database): void {
-    const appliedMigrations = this.getAppliedMigrations(db);
-    const appliedNames = new Set(appliedMigrations.map(m => m.name));
-
-    // Verify checksums of applied migrations haven't changed
-    for (const applied of appliedMigrations) {
-      const migration = RLMDatabase.MIGRATIONS.find(m => m.name === applied.name);
-      if (migration) {
-        const expectedChecksum = this.computeMigrationChecksum(migration);
-        if (applied.checksum !== expectedChecksum) {
-          throw new Error(
-            `Migration checksum mismatch for "${applied.name}". ` +
-            `Expected ${expectedChecksum}, got ${applied.checksum}. ` +
-            `Migration files should not be modified after being applied.`
-          );
-        }
-      }
-    }
-
-    // Apply pending migrations in a transaction
-    const pendingMigrations = RLMDatabase.MIGRATIONS.filter(m => !appliedNames.has(m.name));
-
-    if (pendingMigrations.length === 0) {
-      return;
-    }
-
-    const applyMigrations = db.transaction(() => {
-      for (const migration of pendingMigrations) {
-        try {
-          db.exec(migration.up);
-
-          const checksum = this.computeMigrationChecksum(migration);
-          const insertStmt = db.prepare(`
-            INSERT INTO _migrations (name, applied_at, checksum)
-            VALUES (?, ?, ?)
-          `);
-          insertStmt.run(migration.name, Date.now(), checksum);
-
-          this.emit('migration:applied', { name: migration.name });
-        } catch (error) {
-          throw new Error(
-            `Failed to apply migration "${migration.name}": ${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-      }
-    });
-
-    applyMigrations();
-    this.emit('migrations:complete', { applied: pendingMigrations.length });
-  }
-
-  /**
-   * Get the current schema version and migration status
-   */
   getSchemaInfo(): {
     version: number;
     appliedMigrations: MigrationRow[];
     pendingMigrations: string[];
   } {
-    const applied = this.getAppliedMigrations(this.db);
-    const appliedNames = new Set(applied.map(m => m.name));
-    const pending = RLMDatabase.MIGRATIONS
-      .filter(m => !appliedNames.has(m.name))
-      .map(m => m.name);
-
-    return {
-      version: RLMDatabase.SCHEMA_VERSION,
-      appliedMigrations: applied,
-      pendingMigrations: pending,
-    };
+    return getSchemaInfo(this.db, SCHEMA_VERSION);
   }
 
   // ============================================
-  // Content File Management
+  // Content File Management (delegated)
   // ============================================
-
-  private getContentPath(sectionId: string): string {
-    // Distribute files across subdirectories to avoid filesystem limits
-    const prefix = sectionId.substring(0, 2);
-    const dir = path.join(this.contentDir, prefix);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    return path.join(dir, `${sectionId}.txt`);
-  }
 
   saveContent(sectionId: string, content: string): string {
-    const filePath = this.getContentPath(sectionId);
-    fs.writeFileSync(filePath, content, 'utf-8');
-    return filePath;
+    const { saveContent } = require('./rlm/rlm-content');
+    return saveContent(this.contentDir, sectionId, content);
   }
 
   loadContent(sectionId: string): string | null {
-    const filePath = this.getContentPath(sectionId);
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf-8');
-    }
-    return null;
+    const { loadContent } = require('./rlm/rlm-content');
+    return loadContent(this.contentDir, sectionId);
   }
 
   deleteContent(sectionId: string): void {
-    const filePath = this.getContentPath(sectionId);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    const { deleteContent } = require('./rlm/rlm-content');
+    deleteContent(this.contentDir, sectionId);
   }
 
   shouldStoreInline(content: string): boolean {
-    return Buffer.byteLength(content, 'utf-8') <= this.INLINE_THRESHOLD;
+    const { shouldStoreInline } = require('./rlm/rlm-content');
+    return shouldStoreInline(content);
   }
 
   // ============================================
-  // Context Store CRUD
+  // Context Store CRUD (delegated)
   // ============================================
 
-  createStore(store: {
-    id: string;
-    instanceId: string;
-    config?: Record<string, unknown>;
-  }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO context_stores
-        (id, instance_id, created_at, last_accessed, config_json)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    const now = Date.now();
-    stmt.run(
-      store.id,
-      store.instanceId,
-      now,
-      now,
-      store.config ? JSON.stringify(store.config) : null
-    );
+  createStore(store: { id: string; instanceId: string; config?: Record<string, unknown> }): void {
+    stores.createStore(this.db, store);
     this.emit('store:created', { id: store.id, instanceId: store.instanceId });
   }
 
   getStore(storeId: string): ContextStoreRow | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM context_stores WHERE id = ?
-    `);
-    return stmt.get(storeId) as ContextStoreRow | null;
+    return stores.getStore(this.db, storeId);
   }
 
   getStoreByInstance(instanceId: string): ContextStoreRow | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM context_stores WHERE instance_id = ?
-    `);
-    return stmt.get(instanceId) as ContextStoreRow | null;
+    return stores.getStoreByInstance(this.db, instanceId);
   }
 
   listStores(): ContextStoreRow[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM context_stores ORDER BY last_accessed DESC
-    `);
-    return stmt.all() as ContextStoreRow[];
+    return stores.listStores(this.db);
   }
 
-  updateStoreStats(storeId: string, stats: {
-    totalTokens?: number;
-    totalSize?: number;
-    accessCount?: number;
-  }): void {
-    const updates: string[] = ['last_accessed = ?'];
-    const params: (string | number)[] = [Date.now()];
-
-    if (stats.totalTokens !== undefined) {
-      updates.push('total_tokens = ?');
-      params.push(stats.totalTokens);
-    }
-    if (stats.totalSize !== undefined) {
-      updates.push('total_size = ?');
-      params.push(stats.totalSize);
-    }
-    if (stats.accessCount !== undefined) {
-      updates.push('access_count = ?');
-      params.push(stats.accessCount);
-    }
-
-    params.push(storeId);
-
-    const stmt = this.db.prepare(`
-      UPDATE context_stores SET ${updates.join(', ')} WHERE id = ?
-    `);
-    stmt.run(...params);
+  updateStoreStats(storeId: string, stats: { totalTokens?: number; totalSize?: number; accessCount?: number }): void {
+    stores.updateStoreStats(this.db, storeId, stats);
   }
 
   deleteStore(storeId: string): void {
-    // Get all sections to delete content files
-    const sections = this.getSections(storeId);
-    for (const section of sections) {
-      if (section.content_file) {
-        this.deleteContent(section.id);
-      }
-    }
-
-    // CASCADE will delete sections, search_index, sessions
-    const stmt = this.db.prepare(`DELETE FROM context_stores WHERE id = ?`);
-    stmt.run(storeId);
+    stores.deleteStore(this.db, this.contentDir, storeId, (id) => this.getSections(id));
     this.emit('store:deleted', { id: storeId });
   }
 
   // ============================================
-  // Section CRUD
+  // Section CRUD (delegated)
   // ============================================
 
   addSection(section: {
@@ -612,65 +193,16 @@ export class RLMDatabase extends EventEmitter {
     sourceUrl?: string;
     content: string;
   }): void {
-    const isInline = this.shouldStoreInline(section.content);
-    let contentFile: string | null = null;
-    let contentInline: string | null = null;
-
-    if (isInline) {
-      contentInline = section.content;
-    } else {
-      contentFile = this.saveContent(section.id, section.content);
-    }
-
-    const stmt = this.db.prepare(`
-      INSERT INTO context_sections
-        (id, store_id, type, name, source, start_offset, end_offset, tokens,
-         checksum, depth, summarizes_json, parent_summary_id, file_path, language,
-         source_url, created_at, content_file, content_inline)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      section.id,
-      section.storeId,
-      section.type,
-      section.name,
-      section.source || null,
-      section.startOffset,
-      section.endOffset,
-      section.tokens,
-      section.checksum || null,
-      section.depth || 0,
-      section.summarizes ? JSON.stringify(section.summarizes) : null,
-      section.parentSummaryId || null,
-      section.filePath || null,
-      section.language || null,
-      section.sourceUrl || null,
-      Date.now(),
-      contentFile,
-      contentInline
-    );
-
-    // Update store stats
-    this.updateStoreStatsForSection(section.storeId, section.tokens, section.content.length, 'add');
+    sections.addSection(this.db, this.contentDir, section);
     this.emit('section:added', { id: section.id, storeId: section.storeId });
   }
 
   getSection(sectionId: string): ContextSectionRow | null {
-    const stmt = this.db.prepare(`
-      SELECT * FROM context_sections WHERE id = ?
-    `);
-    return stmt.get(sectionId) as ContextSectionRow | null;
+    return sections.getSection(this.db, sectionId);
   }
 
   getSectionContent(section: ContextSectionRow): string {
-    if (section.content_inline) {
-      return section.content_inline;
-    }
-    if (section.content_file) {
-      return this.loadContent(section.id) || '';
-    }
-    return '';
+    return sections.getSectionContent(this.contentDir, section);
   }
 
   getSections(storeId: string, options?: {
@@ -680,233 +212,48 @@ export class RLMDatabase extends EventEmitter {
     limit?: number;
     offset?: number;
   }): ContextSectionRow[] {
-    let query = `SELECT * FROM context_sections WHERE store_id = ?`;
-    const params: (string | number)[] = [storeId];
-
-    if (options?.type) {
-      query += ` AND type = ?`;
-      params.push(options.type);
-    }
-    if (options?.minDepth !== undefined) {
-      query += ` AND depth >= ?`;
-      params.push(options.minDepth);
-    }
-    if (options?.maxDepth !== undefined) {
-      query += ` AND depth <= ?`;
-      params.push(options.maxDepth);
-    }
-
-    query += ` ORDER BY start_offset ASC`;
-
-    if (options?.limit) {
-      query += ` LIMIT ?`;
-      params.push(options.limit);
-      if (options?.offset) {
-        query += ` OFFSET ?`;
-        params.push(options.offset);
-      }
-    }
-
-    const stmt = this.db.prepare(query);
-    return stmt.all(...params) as ContextSectionRow[];
+    return sections.getSections(this.db, storeId, options);
   }
 
   removeSection(sectionId: string): void {
     const section = this.getSection(sectionId);
-    if (!section) return;
-
-    // Delete content file if exists
-    if (section.content_file) {
-      this.deleteContent(sectionId);
+    if (section) {
+      sections.removeSection(this.db, this.contentDir, sectionId);
+      this.emit('section:removed', { id: sectionId, storeId: section.store_id });
     }
-
-    // Update store stats
-    const content = this.getSectionContent(section);
-    this.updateStoreStatsForSection(
-      section.store_id,
-      section.tokens,
-      content.length,
-      'remove'
-    );
-
-    // Delete section (CASCADE deletes search_index entries)
-    const stmt = this.db.prepare(`DELETE FROM context_sections WHERE id = ?`);
-    stmt.run(sectionId);
-    this.emit('section:removed', { id: sectionId, storeId: section.store_id });
-  }
-
-  private updateStoreStatsForSection(
-    storeId: string,
-    tokens: number,
-    size: number,
-    operation: 'add' | 'remove'
-  ): void {
-    const multiplier = operation === 'add' ? 1 : -1;
-    const stmt = this.db.prepare(`
-      UPDATE context_stores
-      SET total_tokens = total_tokens + ?,
-          total_size = total_size + ?,
-          last_accessed = ?
-      WHERE id = ?
-    `);
-    stmt.run(tokens * multiplier, size * multiplier, Date.now(), storeId);
   }
 
   // ============================================
-  // Search Index Operations
+  // Search Index Operations (delegated)
   // ============================================
 
   indexSection(storeId: string, sectionId: string, content: string): void {
-    // Clear existing index entries for this section
-    const clearStmt = this.db.prepare(`
-      DELETE FROM search_index WHERE section_id = ?
-    `);
-    clearStmt.run(sectionId);
-
-    // Tokenize and index
-    const lines = content.split('\n');
-    const insertStmt = this.db.prepare(`
-      INSERT INTO search_index (store_id, term, section_id, line_number, position, snippet)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertMany = this.db.transaction((entries: SearchIndexEntry[]) => {
-      for (const entry of entries) {
-        insertStmt.run(
-          entry.storeId,
-          entry.term,
-          entry.sectionId,
-          entry.lineNumber,
-          entry.position,
-          entry.snippet
-        );
-      }
-    });
-
-    const entries: SearchIndexEntry[] = [];
-    let position = 0;
-    const seenTermsInLine = new Set<string>();
-
-    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-      const line = lines[lineNum];
-      const words = line.toLowerCase().match(/\b\w{3,}\b/g) || [];
-      seenTermsInLine.clear();
-
-      for (const word of words) {
-        // Dedupe within same line to avoid index bloat
-        if (seenTermsInLine.has(word)) continue;
-        seenTermsInLine.add(word);
-
-        entries.push({
-          storeId,
-          term: word,
-          sectionId,
-          lineNumber: lineNum + 1,
-          position,
-          snippet: line.substring(0, 200),
-        });
-      }
-      position += line.length + 1;
-    }
-
-    // Batch insert for performance
-    insertMany(entries);
+    search.indexSection(this.db, storeId, sectionId, content);
   }
 
-  searchIndex(storeId: string, pattern: string, options?: {
-    limit?: number;
-    caseSensitive?: boolean;
-  }): SearchResult[] {
-    const limit = options?.limit || 100;
-    const terms = pattern.toLowerCase().match(/\b\w{3,}\b/g) || [pattern.toLowerCase()];
-
-    // Find sections containing all terms
-    const placeholders = terms.map(() => '?').join(',');
-    const stmt = this.db.prepare(`
-      SELECT
-        si.section_id,
-        si.line_number,
-        si.position,
-        si.snippet,
-        cs.type as section_type,
-        cs.name as section_name,
-        cs.source as section_source,
-        COUNT(DISTINCT si.term) as term_matches
-      FROM search_index si
-      JOIN context_sections cs ON si.section_id = cs.id
-      WHERE si.store_id = ?
-        AND si.term IN (${placeholders})
-      GROUP BY si.section_id, si.line_number
-      HAVING term_matches >= ?
-      ORDER BY term_matches DESC, si.line_number ASC
-      LIMIT ?
-    `);
-
-    const minMatches = Math.max(1, Math.ceil(terms.length * 0.5)); // At least 50% of terms
-    const results = stmt.all(storeId, ...terms, minMatches, limit) as SearchResultRow[];
-
-    return results.map(r => ({
-      sectionId: r.section_id,
-      lineNumber: r.line_number,
-      position: r.position,
-      snippet: r.snippet,
-      sectionType: r.section_type,
-      sectionName: r.section_name,
-      sectionSource: r.section_source,
-      relevance: r.term_matches / terms.length,
-    }));
+  searchIndex(storeId: string, pattern: string, options?: { limit?: number; caseSensitive?: boolean }): SearchResult[] {
+    return search.searchIndex(this.db, storeId, pattern, options);
   }
 
   rebuildIndex(storeId: string): void {
-    const sections = this.getSections(storeId, { maxDepth: 0 }); // Only original content
-
-    for (const section of sections) {
-      const content = this.getSectionContent(section);
-      this.indexSection(storeId, section.id, content);
-    }
-    this.emit('index:rebuilt', { storeId, sectionCount: sections.length });
+    const count = search.rebuildIndex(this.db, this.contentDir, storeId);
+    this.emit('index:rebuilt', { storeId, sectionCount: count });
   }
 
   // ============================================
-  // Session Operations
+  // Session Operations (delegated)
   // ============================================
 
-  createSession(session: {
-    id: string;
-    storeId: string;
-    instanceId: string;
-    estimatedDirectTokens: number;
-  }): void {
-    const now = Date.now();
-    const stmt = this.db.prepare(`
-      INSERT INTO rlm_sessions
-        (id, store_id, instance_id, started_at, last_activity_at, estimated_direct_tokens)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      session.id,
-      session.storeId,
-      session.instanceId,
-      now,
-      now,
-      session.estimatedDirectTokens
-    );
+  createSession(session: { id: string; storeId: string; instanceId: string; estimatedDirectTokens: number }): void {
+    sessions.createSession(this.db, session);
   }
 
   getSession(sessionId: string): RLMSessionRow | null {
-    const stmt = this.db.prepare(`SELECT * FROM rlm_sessions WHERE id = ?`);
-    return stmt.get(sessionId) as RLMSessionRow | null;
+    return sessions.getSession(this.db, sessionId);
   }
 
   listSessions(storeId?: string): RLMSessionRow[] {
-    if (storeId) {
-      const stmt = this.db.prepare(`
-        SELECT * FROM rlm_sessions WHERE store_id = ? ORDER BY started_at DESC
-      `);
-      return stmt.all(storeId) as RLMSessionRow[];
-    }
-    const stmt = this.db.prepare(`SELECT * FROM rlm_sessions ORDER BY started_at DESC`);
-    return stmt.all() as RLMSessionRow[];
+    return sessions.listSessions(this.db, storeId);
   }
 
   updateSession(sessionId: string, updates: {
@@ -917,52 +264,15 @@ export class RLMDatabase extends EventEmitter {
     queriesJson?: string;
     recursiveCallsJson?: string;
   }): void {
-    const setClause: string[] = ['last_activity_at = ?'];
-    const params: (string | number)[] = [Date.now()];
-
-    if (updates.totalQueries !== undefined) {
-      setClause.push('total_queries = ?');
-      params.push(updates.totalQueries);
-    }
-    if (updates.totalRootTokens !== undefined) {
-      setClause.push('total_root_tokens = ?');
-      params.push(updates.totalRootTokens);
-    }
-    if (updates.totalSubQueryTokens !== undefined) {
-      setClause.push('total_sub_query_tokens = ?');
-      params.push(updates.totalSubQueryTokens);
-    }
-    if (updates.tokenSavingsPercent !== undefined) {
-      setClause.push('token_savings_percent = ?');
-      params.push(updates.tokenSavingsPercent);
-    }
-    if (updates.queriesJson !== undefined) {
-      setClause.push('queries_json = ?');
-      params.push(updates.queriesJson);
-    }
-    if (updates.recursiveCallsJson !== undefined) {
-      setClause.push('recursive_calls_json = ?');
-      params.push(updates.recursiveCallsJson);
-    }
-
-    params.push(sessionId);
-
-    const stmt = this.db.prepare(`
-      UPDATE rlm_sessions SET ${setClause.join(', ')} WHERE id = ?
-    `);
-    stmt.run(...params);
+    sessions.updateSession(this.db, sessionId, updates);
   }
 
   endSession(sessionId: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE rlm_sessions SET ended_at = ?, last_activity_at = ? WHERE id = ?
-    `);
-    const now = Date.now();
-    stmt.run(now, now, sessionId);
+    sessions.endSession(this.db, sessionId);
   }
 
   // ============================================
-  // Outcome Operations
+  // Learning Operations (delegated)
   // ============================================
 
   addOutcome(outcome: {
@@ -979,64 +289,12 @@ export class RLMDatabase extends EventEmitter {
     tools?: string[];
     metadata?: Record<string, unknown>;
   }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO outcomes
-        (id, task_type, success, timestamp, duration_ms, token_usage, agent_id,
-         model, error_type, prompt_hash, tools_json, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      outcome.id,
-      outcome.taskType,
-      outcome.success ? 1 : 0,
-      outcome.timestamp,
-      outcome.durationMs || null,
-      outcome.tokenUsage || null,
-      outcome.agentId || null,
-      outcome.model || null,
-      outcome.errorType || null,
-      outcome.promptHash || null,
-      outcome.tools ? JSON.stringify(outcome.tools) : null,
-      outcome.metadata ? JSON.stringify(outcome.metadata) : null
-    );
+    learning.addOutcome(this.db, outcome);
   }
 
-  getOutcomes(options?: {
-    taskType?: string;
-    agentId?: string;
-    since?: number;
-    limit?: number;
-  }): OutcomeRow[] {
-    let query = `SELECT * FROM outcomes WHERE 1=1`;
-    const params: (string | number)[] = [];
-
-    if (options?.taskType) {
-      query += ` AND task_type = ?`;
-      params.push(options.taskType);
-    }
-    if (options?.agentId) {
-      query += ` AND agent_id = ?`;
-      params.push(options.agentId);
-    }
-    if (options?.since) {
-      query += ` AND timestamp >= ?`;
-      params.push(options.since);
-    }
-
-    query += ` ORDER BY timestamp DESC`;
-
-    if (options?.limit) {
-      query += ` LIMIT ?`;
-      params.push(options.limit);
-    }
-
-    const stmt = this.db.prepare(query);
-    return stmt.all(...params) as OutcomeRow[];
+  getOutcomes(options?: { taskType?: string; agentId?: string; since?: number; limit?: number }): OutcomeRow[] {
+    return learning.getOutcomes(this.db, options);
   }
-
-  // ============================================
-  // Pattern Operations
-  // ============================================
 
   upsertPattern(pattern: {
     id: string;
@@ -1046,40 +304,12 @@ export class RLMDatabase extends EventEmitter {
     sampleSize: number;
     metadata?: Record<string, unknown>;
   }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO patterns (id, type, key, effectiveness, sample_size, last_updated, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(type, key) DO UPDATE SET
-        effectiveness = excluded.effectiveness,
-        sample_size = excluded.sample_size,
-        last_updated = excluded.last_updated,
-        metadata_json = excluded.metadata_json
-    `);
-    stmt.run(
-      pattern.id,
-      pattern.type,
-      pattern.key,
-      pattern.effectiveness,
-      pattern.sampleSize,
-      Date.now(),
-      pattern.metadata ? JSON.stringify(pattern.metadata) : null
-    );
+    learning.upsertPattern(this.db, pattern);
   }
 
   getPatterns(type?: string): PatternRow[] {
-    if (type) {
-      const stmt = this.db.prepare(`
-        SELECT * FROM patterns WHERE type = ? ORDER BY effectiveness DESC
-      `);
-      return stmt.all(type) as PatternRow[];
-    }
-    const stmt = this.db.prepare(`SELECT * FROM patterns ORDER BY effectiveness DESC`);
-    return stmt.all() as PatternRow[];
+    return learning.getPatterns(this.db, type);
   }
-
-  // ============================================
-  // Experience Operations
-  // ============================================
 
   upsertExperience(experience: {
     id: string;
@@ -1090,44 +320,16 @@ export class RLMDatabase extends EventEmitter {
     failurePatterns?: string[];
     examplePrompts?: string[];
   }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO experiences
-        (id, task_type, success_count, failure_count, success_patterns_json,
-         failure_patterns_json, example_prompts_json, last_updated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(task_type) DO UPDATE SET
-        success_count = excluded.success_count,
-        failure_count = excluded.failure_count,
-        success_patterns_json = excluded.success_patterns_json,
-        failure_patterns_json = excluded.failure_patterns_json,
-        example_prompts_json = excluded.example_prompts_json,
-        last_updated = excluded.last_updated
-    `);
-    stmt.run(
-      experience.id,
-      experience.taskType,
-      experience.successCount,
-      experience.failureCount,
-      experience.successPatterns ? JSON.stringify(experience.successPatterns) : null,
-      experience.failurePatterns ? JSON.stringify(experience.failurePatterns) : null,
-      experience.examplePrompts ? JSON.stringify(experience.examplePrompts) : null,
-      Date.now()
-    );
+    learning.upsertExperience(this.db, experience);
   }
 
   getExperience(taskType: string): ExperienceRow | null {
-    const stmt = this.db.prepare(`SELECT * FROM experiences WHERE task_type = ?`);
-    return stmt.get(taskType) as ExperienceRow | null;
+    return learning.getExperience(this.db, taskType);
   }
 
   getAllExperiences(): ExperienceRow[] {
-    const stmt = this.db.prepare(`SELECT * FROM experiences ORDER BY last_updated DESC`);
-    return stmt.all() as ExperienceRow[];
+    return learning.getAllExperiences(this.db);
   }
-
-  // ============================================
-  // Insight Operations
-  // ============================================
 
   addInsight(insight: {
     id: string;
@@ -1138,43 +340,15 @@ export class RLMDatabase extends EventEmitter {
     supportingPatterns?: string[];
     expiresAt?: number;
   }): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO insights
-        (id, type, title, description, confidence, supporting_patterns_json, created_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      insight.id,
-      insight.type,
-      insight.title,
-      insight.description || null,
-      insight.confidence,
-      insight.supportingPatterns ? JSON.stringify(insight.supportingPatterns) : null,
-      Date.now(),
-      insight.expiresAt || null
-    );
+    learning.addInsight(this.db, insight);
   }
 
   getInsights(type?: string): InsightRow[] {
-    const now = Date.now();
-    if (type) {
-      const stmt = this.db.prepare(`
-        SELECT * FROM insights
-        WHERE type = ? AND (expires_at IS NULL OR expires_at > ?)
-        ORDER BY confidence DESC
-      `);
-      return stmt.all(type, now) as InsightRow[];
-    }
-    const stmt = this.db.prepare(`
-      SELECT * FROM insights
-      WHERE expires_at IS NULL OR expires_at > ?
-      ORDER BY confidence DESC
-    `);
-    return stmt.all(now) as InsightRow[];
+    return learning.getInsights(this.db, type);
   }
 
   // ============================================
-  // Vector Operations (for semantic search)
+  // Vector Operations (delegated)
   // ============================================
 
   addVector(vector: {
@@ -1185,46 +359,27 @@ export class RLMDatabase extends EventEmitter {
     contentPreview?: string;
     metadata?: Record<string, unknown>;
   }): void {
-    const embeddingBuffer = Buffer.from(new Float32Array(vector.embedding).buffer);
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO vectors
-        (id, store_id, section_id, embedding, dimensions, content_preview, metadata_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      vector.id,
-      vector.storeId,
-      vector.sectionId,
-      embeddingBuffer,
-      vector.embedding.length,
-      vector.contentPreview || null,
-      vector.metadata ? JSON.stringify(vector.metadata) : null,
-      Date.now()
-    );
+    vectors.addVector(this.db, vector);
   }
 
   getVectors(storeId: string): VectorRow[] {
-    const stmt = this.db.prepare(`SELECT * FROM vectors WHERE store_id = ?`);
-    return stmt.all(storeId) as VectorRow[];
+    return vectors.getVectors(this.db, storeId);
   }
 
   getVectorBySectionId(sectionId: string): VectorRow | null {
-    const stmt = this.db.prepare(`SELECT * FROM vectors WHERE section_id = ?`);
-    return stmt.get(sectionId) as VectorRow | null;
+    return vectors.getVectorBySectionId(this.db, sectionId);
   }
 
   deleteVector(sectionId: string): void {
-    const stmt = this.db.prepare(`DELETE FROM vectors WHERE section_id = ?`);
-    stmt.run(sectionId);
+    vectors.deleteVector(this.db, sectionId);
   }
 
-  // Helper to convert buffer back to embedding array
   bufferToEmbedding(buffer: Buffer): number[] {
-    return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4));
+    return vectors.bufferToEmbedding(buffer);
   }
 
   // ============================================
-  // Utility Methods
+  // Utility Methods (delegated)
   // ============================================
 
   getStats(): {
@@ -1238,208 +393,43 @@ export class RLMDatabase extends EventEmitter {
     vectors: number;
     dbSizeBytes: number;
   } {
-    const counts = this.db.prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM context_stores) as stores,
-        (SELECT COUNT(*) FROM context_sections) as sections,
-        (SELECT COUNT(*) FROM rlm_sessions) as sessions,
-        (SELECT COUNT(*) FROM outcomes) as outcomes,
-        (SELECT COUNT(*) FROM patterns) as patterns,
-        (SELECT COUNT(*) FROM experiences) as experiences,
-        (SELECT COUNT(*) FROM insights) as insights,
-        (SELECT COUNT(*) FROM vectors) as vectors
-    `).get() as {
-      stores: number;
-      sections: number;
-      sessions: number;
-      outcomes: number;
-      patterns: number;
-      experiences: number;
-      insights: number;
-      vectors: number;
-    };
-
-    const dbStats = fs.statSync(this.config.dbPath!);
-
-    return {
-      stores: counts.stores,
-      sections: counts.sections,
-      sessions: counts.sessions,
-      outcomes: counts.outcomes,
-      patterns: counts.patterns,
-      experiences: counts.experiences,
-      insights: counts.insights,
-      vectors: counts.vectors,
-      dbSizeBytes: dbStats.size,
-    };
+    return backup.getStats(this.db, this.config.dbPath!);
   }
 
   vacuum(): void {
-    this.db.exec('VACUUM');
+    backup.vacuum(this.db);
     this.emit('database:vacuumed');
   }
 
   // ============================================
-  // Backup and Restore
+  // Backup and Restore (delegated)
   // ============================================
 
-  /**
-   * Create a backup of the database to the specified path.
-   * Uses SQLite's backup API for WAL-safe consistent backups.
-   * Also backs up the content directory if includeContent is true.
-   */
   backupDatabase(targetPath: string, options?: { includeContent?: boolean }): {
     dbBackupPath: string;
     contentBackupPath?: string;
     dbSizeBytes: number;
     contentSizeBytes?: number;
   } {
-    const includeContent = options?.includeContent ?? true;
-
-    // Ensure target directory exists
-    const targetDir = path.dirname(targetPath);
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    // Use SQLite's backup API via better-sqlite3's backup method
-    // This is WAL-safe and creates a consistent snapshot
-    this.db.backup(targetPath);
-
-    const dbStats = fs.statSync(targetPath);
-    const result: {
-      dbBackupPath: string;
-      contentBackupPath?: string;
-      dbSizeBytes: number;
-      contentSizeBytes?: number;
-    } = {
-      dbBackupPath: targetPath,
-      dbSizeBytes: dbStats.size,
-    };
-
-    // Optionally backup content directory
-    if (includeContent && fs.existsSync(this.contentDir)) {
-      const contentBackupPath = targetPath.replace(/\.db$/, '') + '_content';
-      this.copyDirectoryRecursive(this.contentDir, contentBackupPath);
-      result.contentBackupPath = contentBackupPath;
-      result.contentSizeBytes = this.getDirectorySize(contentBackupPath);
-    }
-
+    const result = backup.backupDatabase(this.db, this.contentDir, targetPath, options);
     this.emit('database:backed_up', {
       targetPath,
       dbSizeBytes: result.dbSizeBytes,
       contentSizeBytes: result.contentSizeBytes,
     });
-
     return result;
   }
 
-  /**
-   * Restore the database from a backup file.
-   * This will close the current database, replace it with the backup,
-   * and reinitialize. The content directory is also restored if present.
-   */
   restoreDatabase(sourcePath: string, options?: { includeContent?: boolean }): void {
-    const includeContent = options?.includeContent ?? true;
-
-    if (!fs.existsSync(sourcePath)) {
-      throw new Error(`Backup file not found: ${sourcePath}`);
-    }
-
-    // Verify backup is a valid SQLite database
-    try {
-      const testDb = new Database(sourcePath, { readonly: true });
-      testDb.pragma('integrity_check');
-      testDb.close();
-    } catch (error) {
-      throw new Error(
-        `Invalid backup file: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-
-    const dbPath = this.config.dbPath!;
-
-    // Close current database
     this.db.close();
-
-    // In WAL mode, we need to checkpoint and remove WAL files
-    const walPath = dbPath + '-wal';
-    const shmPath = dbPath + '-shm';
-
-    // Remove existing database files
-    if (fs.existsSync(dbPath)) {
-      fs.unlinkSync(dbPath);
-    }
-    if (fs.existsSync(walPath)) {
-      fs.unlinkSync(walPath);
-    }
-    if (fs.existsSync(shmPath)) {
-      fs.unlinkSync(shmPath);
-    }
-
-    // Copy backup to database location
-    fs.copyFileSync(sourcePath, dbPath);
-
-    // Restore content directory if present
-    if (includeContent) {
-      const contentBackupPath = sourcePath.replace(/\.db$/, '') + '_content';
-      if (fs.existsSync(contentBackupPath)) {
-        // Remove existing content directory
-        if (fs.existsSync(this.contentDir)) {
-          fs.rmSync(this.contentDir, { recursive: true, force: true });
-        }
-        this.copyDirectoryRecursive(contentBackupPath, this.contentDir);
-      }
-    }
-
-    // Reinitialize database connection
+    backup.restoreDatabase(sourcePath, this.config.dbPath!, this.contentDir, options);
     this.db = this.initializeDatabase();
-
     this.emit('database:restored', { sourcePath });
   }
 
-  /**
-   * Create a checkpoint in WAL mode to ensure all changes are written to the main db file.
-   * Useful before taking filesystem-level backups.
-   */
   checkpoint(): void {
-    this.db.pragma('wal_checkpoint(TRUNCATE)');
+    backup.checkpoint(this.db);
     this.emit('database:checkpoint');
-  }
-
-  private copyDirectoryRecursive(source: string, target: string): void {
-    if (!fs.existsSync(target)) {
-      fs.mkdirSync(target, { recursive: true });
-    }
-
-    const entries = fs.readdirSync(source, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const srcPath = path.join(source, entry.name);
-      const destPath = path.join(target, entry.name);
-
-      if (entry.isDirectory()) {
-        this.copyDirectoryRecursive(srcPath, destPath);
-      } else {
-        fs.copyFileSync(srcPath, destPath);
-      }
-    }
-  }
-
-  private getDirectorySize(dirPath: string): number {
-    let size = 0;
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const entryPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        size += this.getDirectorySize(entryPath);
-      } else {
-        size += fs.statSync(entryPath).size;
-      }
-    }
-
-    return size;
   }
 
   close(): void {
@@ -1449,7 +439,6 @@ export class RLMDatabase extends EventEmitter {
     }
   }
 
-  // Get database path for debugging
   getDatabasePath(): string {
     return this.config.dbPath!;
   }

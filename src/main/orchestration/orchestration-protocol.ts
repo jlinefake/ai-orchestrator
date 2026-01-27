@@ -150,8 +150,9 @@ You are a **parent instance** in Claude Orchestrator. You can spawn and manage c
 Don't spawn for: simple questions, single-file tasks, or sequential dependencies.
 
 ### Managing Children
-- Give children ALL context they need (they can't see your conversation)
-- Check progress with \`get_child_output\`
+- Children automatically receive your recent conversation context (last 50 messages)
+- For additional context, include it in the task description
+- Check progress with \`get_child_output\` (returns last 100 messages by default)
 - **Always terminate children when done**
 
 ### Intelligent Model Routing
@@ -208,11 +209,18 @@ export function generateChildPrompt(
   childId: string,
   parentId: string,
   task: string,
-  taskId?: string
+  taskId?: string,
+  parentContext?: string
 ): string {
   const taskIdInfo = taskId ? ` (Task: ${taskId})` : '';
-  return `## 👶 Child Instance${taskIdInfo}
 
+  // Build parent context section if provided
+  const contextSection = parentContext
+    ? `\n## Parent Context\nThe following is recent context from your parent instance to help you understand the broader situation:\n\n${parentContext}\n\n---\n`
+    : '';
+
+  return `## 👶 Child Instance${taskIdInfo}
+${contextSection}
 **Your Task:** ${task}
 
 Focus only on this task. Be thorough but concise. You cannot spawn children.

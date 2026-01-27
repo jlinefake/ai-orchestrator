@@ -6,7 +6,7 @@
  */
 
 import { Component, output, signal, computed, inject, OnInit } from '@angular/core';
-import { ElectronIpcService, CopilotModelInfo } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService, CopilotModelInfo } from '../../core/services/ipc';
 
 export interface CopilotModel {
   id: string;

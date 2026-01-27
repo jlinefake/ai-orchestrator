@@ -1,0 +1,837 @@
+/**
+ * Instance Orchestration Manager - Handles child instance spawning and fast-path retrieval
+ */
+
+import { spawn } from 'child_process';
+import { OrchestrationHandler } from '../orchestration/orchestration-handler';
+import { OutcomeTracker } from '../learning/outcome-tracker';
+import { StrategyLearner } from '../learning/strategy-learner';
+import { getTaskManager } from '../orchestration/task-manager';
+import { getModelRouter, type RoutingDecision } from '../routing';
+import { getUnifiedMemory } from '../memory';
+import { getAgentById, getDefaultAgent } from '../../shared/types/agent.types';
+import type {
+  SpawnChildCommand,
+  MessageChildCommand,
+  TerminateChildCommand,
+  GetChildOutputCommand
+} from '../orchestration/orchestration-protocol';
+import type { Instance, OutputMessage } from '../../shared/types/instance.types';
+import type { TaskExecution } from '../../shared/types/task.types';
+import type { ToolUsageRecord } from '../../shared/types/self-improvement.types';
+import type { FastPathResult } from './instance-types';
+
+/**
+ * Dependencies required by the orchestration manager
+ */
+export interface OrchestrationDependencies {
+  getInstance: (id: string) => Instance | undefined;
+  getInstanceCount: () => number;
+  createChildInstance: (parentId: string, command: SpawnChildCommand, routingDecision: RoutingDecision) => Promise<Instance>;
+  sendInput: (instanceId: string, message: string) => Promise<void>;
+  terminateInstance: (instanceId: string, graceful: boolean) => Promise<void>;
+  getAdapter: (id: string) => any;
+}
+
+export class InstanceOrchestrationManager {
+  private orchestration: OrchestrationHandler;
+  private outcomeTracker = OutcomeTracker.getInstance();
+  private strategyLearner = StrategyLearner.getInstance();
+  private unifiedMemory = getUnifiedMemory();
+  private deps: OrchestrationDependencies;
+
+  constructor(deps: OrchestrationDependencies) {
+    this.deps = deps;
+    this.orchestration = new OrchestrationHandler();
+  }
+
+  /**
+   * Get the orchestration handler
+   */
+  getOrchestrationHandler(): OrchestrationHandler {
+    return this.orchestration;
+  }
+
+  /**
+   * Register an instance with orchestration
+   */
+  registerInstance(instanceId: string, workingDirectory: string, parentId: string | null): void {
+    this.orchestration.registerInstance(instanceId, workingDirectory, parentId);
+  }
+
+  /**
+   * Unregister an instance from orchestration
+   */
+  unregisterInstance(instanceId: string): void {
+    this.orchestration.unregisterInstance(instanceId);
+  }
+
+  /**
+   * Process orchestration output
+   */
+  processOrchestrationOutput(instanceId: string, content: string): void {
+    this.orchestration.processOutput(instanceId, content);
+  }
+
+  /**
+   * Get orchestration prompt for first message
+   */
+  getOrchestrationPrompt(instanceId: string): string {
+    return this.orchestration.getOrchestrationPrompt(instanceId);
+  }
+
+  // ============================================
+  // Orchestration Event Handlers Setup
+  // ============================================
+
+  /**
+   * Set up orchestration event handlers
+   */
+  setupOrchestrationHandlers(
+    settings: { maxTotalInstances: number; maxChildrenPerParent: number },
+    addToOutputBuffer: (instance: Instance, message: OutputMessage) => void,
+    emit: (event: string, payload: any) => void
+  ): void {
+    // Handle spawn child requests
+    this.orchestration.on(
+      'spawn-child',
+      async (parentId: string, command: SpawnChildCommand) => {
+        const parent = this.deps.getInstance(parentId);
+        if (!parent) return;
+
+        // Check max total instances limit
+        if (
+          settings.maxTotalInstances > 0 &&
+          this.deps.getInstanceCount() >= settings.maxTotalInstances
+        ) {
+          console.log(
+            `Cannot spawn child: max total instances (${settings.maxTotalInstances}) reached`
+          );
+          this.orchestration.notifyError(
+            parentId,
+            `Cannot spawn child: maximum total instances (${settings.maxTotalInstances}) reached`
+          );
+          return;
+        }
+
+        // Check max children per parent limit
+        if (
+          settings.maxChildrenPerParent > 0 &&
+          parent.childrenIds.length >= settings.maxChildrenPerParent
+        ) {
+          console.log(
+            `Cannot spawn child: max children per parent (${settings.maxChildrenPerParent}) reached`
+          );
+          this.orchestration.notifyError(
+            parentId,
+            `Cannot spawn child: maximum children per parent (${settings.maxChildrenPerParent}) reached`
+          );
+          return;
+        }
+
+        try {
+          // Fast-path retrieval: skip spawning a child for simple lookup tasks
+          if (await this.tryFastPathRetrieval(parent, command)) {
+            return;
+          }
+
+          const childAgentId = this.resolveChildAgentId(command);
+
+          // Use intelligent model routing if no explicit model specified
+          const routingDecision = this.routeChildModel(
+            command.task,
+            command.model,
+            childAgentId
+          );
+
+          console.log(
+            `[ModelRouting] Child task routed to ${routingDecision.model} (${routingDecision.complexity}, ${routingDecision.confidence.toFixed(2)} confidence): ${routingDecision.reason}`
+          );
+          if (
+            routingDecision.estimatedSavingsPercent &&
+            routingDecision.estimatedSavingsPercent > 0
+          ) {
+            console.log(
+              `[ModelRouting] Estimated cost savings: ${routingDecision.estimatedSavingsPercent}%`
+            );
+          }
+
+          const child = await this.deps.createChildInstance(parentId, command, routingDecision);
+
+          this.orchestration.notifyChildSpawned(
+            parentId,
+            child.id,
+            child.displayName,
+            routingDecision
+          );
+        } catch (error) {
+          console.error('Failed to spawn child:', error);
+          this.orchestration.notifyError(
+            parentId,
+            `Failed to spawn child: ${error}`
+          );
+        }
+      }
+    );
+
+    // Handle message child requests
+    this.orchestration.on(
+      'message-child',
+      async (parentId: string, command: MessageChildCommand) => {
+        try {
+          await this.deps.sendInput(command.childId, command.message);
+          this.orchestration.notifyMessageSent(parentId, command.childId);
+        } catch (error) {
+          console.error('Failed to message child:', error);
+        }
+      }
+    );
+
+    // Handle get children requests
+    this.orchestration.on(
+      'get-children',
+      (parentId: string, callback: (children: any[]) => void) => {
+        const parent = this.deps.getInstance(parentId);
+        if (!parent) {
+          callback([]);
+          return;
+        }
+
+        const children = parent.childrenIds
+          .map((childId) => {
+            const child = this.deps.getInstance(childId);
+            return child
+              ? {
+                  id: child.id,
+                  name: child.displayName,
+                  status: child.status,
+                  createdAt: child.createdAt
+                }
+              : null;
+          })
+          .filter(Boolean);
+
+        callback(children);
+      }
+    );
+
+    // Handle terminate child requests
+    this.orchestration.on(
+      'terminate-child',
+      async (parentId: string, command: TerminateChildCommand) => {
+        try {
+          await this.deps.terminateInstance(command.childId, true);
+          this.orchestration.notifyChildTerminated(parentId, command.childId);
+        } catch (error) {
+          console.error('Failed to terminate child:', error);
+        }
+      }
+    );
+
+    // Handle get child output requests
+    this.orchestration.on(
+      'get-child-output',
+      (
+        parentId: string,
+        command: GetChildOutputCommand,
+        callback: (output: string[]) => void
+      ) => {
+        const child = this.deps.getInstance(command.childId);
+        if (!child) {
+          callback([]);
+          return;
+        }
+
+        const lastN = command.lastN || 100;
+        const messages = child.outputBuffer.slice(-lastN).map((msg) => {
+          return `[${msg.type}] ${msg.content}`;
+        });
+
+        callback(messages);
+      }
+    );
+
+    this.orchestration.on(
+      'task-complete',
+      (parentId: string, childId: string, task: TaskExecution) => {
+        this.recordOrchestrationOutcome(parentId, childId, task, true);
+      }
+    );
+
+    this.orchestration.on(
+      'task-error',
+      (
+        parentId: string,
+        childId: string,
+        error: { code: string; message: string }
+      ) => {
+        const task = this.findTaskForChild(parentId, childId);
+        this.recordOrchestrationOutcome(parentId, childId, task, false, error);
+      }
+    );
+
+    // Handle response injection
+    this.orchestration.on(
+      'inject-response',
+      async (instanceId: string, response: string) => {
+        const adapter = this.deps.getAdapter(instanceId);
+        const instance = this.deps.getInstance(instanceId);
+
+        if (adapter && instance) {
+          const actionMatch = response.match(/Action:\s*(\w+)/);
+          const statusMatch = response.match(/Status:\s*(\w+)/);
+          const action = actionMatch ? actionMatch[1] : 'unknown';
+          const status = statusMatch ? statusMatch[1] : 'unknown';
+
+          let data: any = {};
+          try {
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              data = JSON.parse(jsonMatch[0]);
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+
+          let friendlyContent = this.buildFriendlyOrchestrationMessage(action, status, data);
+
+          const orchestrationMessage = {
+            id: `orch-${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'system' as const,
+            content: friendlyContent,
+            metadata: { source: 'orchestration', action, status, rawData: data }
+          };
+          addToOutputBuffer(instance, orchestrationMessage);
+          emit('output', {
+            instanceId,
+            message: orchestrationMessage
+          });
+
+          await adapter.sendInput(response);
+        }
+      }
+    );
+  }
+
+  // ============================================
+  // Model Routing
+  // ============================================
+
+  /**
+   * Route a child task to the optimal model based on complexity
+   */
+  routeChildModel(
+    task: string,
+    explicitModel?: string,
+    agentId?: string
+  ): RoutingDecision {
+    const router = getModelRouter();
+
+    if (explicitModel) {
+      return router.route(task, explicitModel);
+    }
+
+    if (agentId) {
+      const agent = getAgentById(agentId);
+      if (agent?.modelOverride) {
+        return {
+          model: agent.modelOverride,
+          complexity: 'simple',
+          tier: router.getModelTier(agent.modelOverride),
+          confidence: 1.0,
+          reason: `Agent "${agent.name}" has model override configured`
+        };
+      }
+    }
+
+    const recommendation = this.getOutcomeRecommendation(task);
+    if (
+      recommendation &&
+      recommendation.confidence >= 0.6 &&
+      recommendation.recommendedModel
+    ) {
+      return {
+        model: recommendation.recommendedModel,
+        complexity: 'moderate',
+        tier: router.getModelTier(recommendation.recommendedModel),
+        confidence: recommendation.confidence,
+        reason: `Outcome-driven routing for "${recommendation.taskType}"`
+      };
+    }
+
+    return router.route(task, explicitModel);
+  }
+
+  // ============================================
+  // Task Classification
+  // ============================================
+
+  resolveChildAgentId(command: SpawnChildCommand): string | undefined {
+    if (command.agentId) {
+      const resolved = getAgentById(command.agentId);
+      if (resolved) return command.agentId;
+      console.warn(
+        `[Orchestration] Unknown agentId "${command.agentId}", using default agent.`
+      );
+      return undefined;
+    }
+
+    if (this.isRetrievalTask(command.task)) {
+      const retriever = getAgentById('retriever');
+      if (retriever) return retriever.id;
+    }
+
+    const recommendation = this.getOutcomeRecommendation(command.task);
+    if (recommendation && recommendation.confidence >= 0.6) {
+      const recommendedAgentId = this.normalizeRecommendedAgentId(
+        recommendation.recommendedAgent
+      );
+      if (recommendedAgentId) {
+        return recommendedAgentId;
+      }
+    }
+
+    return undefined;
+  }
+
+  isRetrievalTask(task: string): boolean {
+    const text = task.toLowerCase();
+    const retrievalHints = [
+      'find', 'search', 'locate', 'list files', 'enumerate', 'identify',
+      'where is', 'grep', 'ripgrep', 'rg ', 'references', 'reference',
+      'usages', 'usage', 'occurrences', 'occurrence', 'show me', 'look for',
+      'scan', 'file path', 'files containing', 'open file', 'read file'
+    ];
+    const changeHints = [
+      'implement', 'modify', 'edit', 'refactor', 'fix', 'add',
+      'remove', 'create', 'write', 'build', 'update', 'delete', 'rename'
+    ];
+
+    if (changeHints.some((hint) => text.includes(hint))) {
+      return false;
+    }
+
+    return retrievalHints.some((hint) => text.includes(hint));
+  }
+
+  private isListFilesTask(task: string): boolean {
+    const text = task.toLowerCase();
+    return (
+      text.includes('list files') ||
+      text.includes('file list') ||
+      text.includes('show files') ||
+      text.includes('files in') ||
+      text.includes('list directories')
+    );
+  }
+
+  classifyTaskType(task: string): string {
+    const text = task.toLowerCase();
+
+    if (this.isRetrievalTask(task)) return 'retrieval';
+    if (text.includes('security') || text.includes('vulnerability'))
+      return 'security-review';
+    if (text.includes('review')) return 'review';
+    if (text.includes('refactor')) return 'refactor';
+    if (text.includes('test') || text.includes('testing')) return 'testing';
+    if (text.includes('bug') || text.includes('fix')) return 'bug-fix';
+    if (
+      text.includes('feature') ||
+      text.includes('implement') ||
+      text.includes('add')
+    )
+      return 'feature-development';
+    return 'general';
+  }
+
+  private getOutcomeRecommendation(task: string) {
+    const taskType = this.classifyTaskType(task);
+    const recommendation = this.strategyLearner.getRecommendation(
+      taskType,
+      task
+    );
+    return { ...recommendation, taskType };
+  }
+
+  private normalizeRecommendedAgentId(
+    agentId: string | undefined
+  ): string | undefined {
+    if (!agentId) return undefined;
+    if (agentId === 'default') return getDefaultAgent().id;
+    const resolved = getAgentById(agentId);
+    return resolved ? resolved.id : undefined;
+  }
+
+  // ============================================
+  // Fast-Path Retrieval
+  // ============================================
+
+  private shouldUseFastPath(command: SpawnChildCommand): boolean {
+    if (command.model || command.agentId) return false;
+    if (!this.isRetrievalTask(command.task)) return false;
+    return command.task.trim().length <= 220;
+  }
+
+  async tryFastPathRetrieval(
+    parent: Instance,
+    command: SpawnChildCommand
+  ): Promise<boolean> {
+    if (!this.shouldUseFastPath(command)) return false;
+
+    const cwd = command.workingDirectory || parent.workingDirectory;
+    try {
+      const result = await this.runFastPathSearch(command.task, cwd);
+      if (!result) return false;
+
+      const summary = this.buildFastPathSummary(command.task, result);
+      this.orchestration.notifyFastPathResult(parent.id, {
+        summary,
+        task: command.task,
+        mode: result.mode,
+        command: result.command,
+        args: result.args,
+        totalMatches: result.totalMatches,
+        lines: result.lines,
+        cwd: result.cwd
+      });
+      return true;
+    } catch (error) {
+      console.warn(
+        '[FastPath] Retrieval failed, falling back to child instance:',
+        error
+      );
+      return false;
+    }
+  }
+
+  private async runFastPathSearch(
+    task: string,
+    cwd: string
+  ): Promise<FastPathResult | null> {
+    const terms = this.extractQueryTerms(task);
+    const pattern = terms.length > 0 ? this.buildLexicalPattern(terms) : '';
+    const lineLimit = 40;
+
+    if (this.isListFilesTask(task) || !pattern) {
+      const fileList = await this.runFastPathFileList(cwd);
+      if (!fileList) return null;
+      const filtered =
+        terms.length > 0
+          ? fileList.files.filter((file) =>
+              terms.some((term) => file.toLowerCase().includes(term))
+            )
+          : fileList.files;
+      const lines = filtered.slice(0, lineLimit);
+      return {
+        mode: 'files',
+        command: fileList.command,
+        args: fileList.args,
+        totalMatches: filtered.length,
+        lines,
+        rawOutput: filtered.join('\n'),
+        cwd
+      };
+    }
+
+    const result = await this.runFastPathGrep(pattern, cwd);
+    if (!result) return null;
+
+    const lines = result.rawOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, lineLimit);
+
+    return {
+      mode: 'grep',
+      command: result.command,
+      args: result.args,
+      totalMatches: result.totalMatches,
+      lines,
+      rawOutput: result.rawOutput,
+      cwd
+    };
+  }
+
+  private async runFastPathFileList(
+    cwd: string
+  ): Promise<{ files: string[]; command: string; args: string[] } | null> {
+    const gitArgs = ['ls-files'];
+    const gitResult = await this.runFastPathCommand('git', gitArgs, cwd, 4000);
+    if (gitResult && gitResult.exitCode === 0) {
+      const files = gitResult.stdout.split('\n').filter(Boolean);
+      return { files, command: 'git', args: gitArgs };
+    }
+
+    const findArgs = [
+      '.', '-maxdepth', '3', '-type', 'f',
+      '-not', '-path', '*/node_modules/*',
+      '-not', '-path', '*/.git/*'
+    ];
+    const findResult = await this.runFastPathCommand('find', findArgs, cwd, 5000);
+    if (findResult && findResult.exitCode === 0) {
+      const files = findResult.stdout.split('\n').filter(Boolean);
+      return { files, command: 'find', args: findArgs };
+    }
+
+    return null;
+  }
+
+  private async runFastPathGrep(
+    pattern: string,
+    cwd: string
+  ): Promise<{
+    command: string;
+    args: string[];
+    rawOutput: string;
+    totalMatches: number;
+  } | null> {
+    const rgArgs = ['-n', '--no-heading', '-S', pattern, '.'];
+    const rgResult = await this.runFastPathCommand('rg', rgArgs, cwd, 5000);
+    if (rgResult && (rgResult.exitCode === 0 || rgResult.exitCode === 1)) {
+      const output = rgResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'rg',
+        args: rgArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    const gitArgs = ['grep', '-n', '-e', pattern];
+    const gitResult = await this.runFastPathCommand('git', gitArgs, cwd, 5000);
+    if (gitResult && (gitResult.exitCode === 0 || gitResult.exitCode === 1)) {
+      const output = gitResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'git',
+        args: gitArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    const grepArgs = [
+      '-RIn', '--exclude-dir=node_modules', '--exclude-dir=.git',
+      '-e', pattern, '.'
+    ];
+    const grepResult = await this.runFastPathCommand('grep', grepArgs, cwd, 5000);
+    if (grepResult && (grepResult.exitCode === 0 || grepResult.exitCode === 1)) {
+      const output = grepResult.stdout || '';
+      const lines = output.split('\n').filter(Boolean);
+      return {
+        command: 'grep',
+        args: grepArgs,
+        rawOutput: output,
+        totalMatches: lines.length
+      };
+    }
+
+    return null;
+  }
+
+  private async runFastPathCommand(
+    command: string,
+    args: string[],
+    cwd: string,
+    timeoutMs: number
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+  } | null> {
+    return new Promise((resolve) => {
+      const proc = spawn(command, args, { cwd });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
+        settled = true;
+        resolve({ stdout, stderr, exitCode });
+      };
+
+      proc.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+      proc.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+      proc.on('error', () => finish(null));
+      proc.on('close', (code) => finish(code));
+
+      const timer = setTimeout(() => {
+        proc.kill('SIGTERM');
+        finish(proc.exitCode ?? null);
+      }, timeoutMs);
+
+      proc.on('close', () => clearTimeout(timer));
+    });
+  }
+
+  private buildFastPathSummary(task: string, result: FastPathResult): string {
+    const matchLabel = result.mode === 'files' ? 'files' : 'matches';
+    const shown = result.lines.length;
+    const total = result.totalMatches;
+    const header = `Fast-path retrieval complete (${matchLabel}: ${total}, showing ${shown}).`;
+    const commandLine =
+      `Command: ${result.command} ${result.args.join(' ')}`.trim();
+    const lines =
+      result.lines.length > 0 ? result.lines.join('\n') : 'No matches found.';
+
+    return [
+      '[Fast Retrieval]',
+      header,
+      `Task: ${task}`,
+      commandLine,
+      lines,
+      '[End Fast Retrieval]'
+    ].join('\n');
+  }
+
+  // ============================================
+  // Outcome Recording
+  // ============================================
+
+  private recordOrchestrationOutcome(
+    parentId: string,
+    childId: string,
+    task: TaskExecution | undefined,
+    success: boolean,
+    error?: { code: string; message: string }
+  ): void {
+    const child = this.deps.getInstance(childId);
+    const duration =
+      task?.startedAt && task?.completedAt
+        ? task.completedAt - task.startedAt
+        : 0;
+
+    try {
+      this.outcomeTracker.recordOutcome({
+        instanceId: childId,
+        taskType: 'orchestration-task',
+        taskDescription: task?.task || error?.message || 'Orchestration task',
+        prompt: task?.task || error?.message || 'Orchestration task',
+        context: task?.result?.summary,
+        agentUsed: child?.agentId || 'unknown',
+        modelUsed: 'unknown',
+        workflowUsed: task?.name,
+        toolsUsed: this.buildToolUsage(child),
+        tokensUsed: child?.totalTokensUsed || 0,
+        duration,
+        success,
+        completionScore: success ? 1 : 0,
+        errorType: success ? undefined : error?.code,
+        errorMessage: success ? undefined : error?.message
+      });
+    } catch (recordError) {
+      console.error(
+        `[Learning] Failed to record outcome for task ${task?.taskId || 'unknown'}:`,
+        recordError
+      );
+    }
+
+    this.unifiedMemory.recordTaskOutcome(
+      task?.taskId || `${parentId}:${childId}`,
+      success,
+      success ? 1 : 0
+    );
+  }
+
+  private findTaskForChild(
+    parentId: string,
+    childId: string
+  ): TaskExecution | undefined {
+    const taskManager = getTaskManager();
+    const history = taskManager.getTaskHistory(parentId);
+    return history.recentTasks.find((task) => task.childId === childId);
+  }
+
+  private buildToolUsage(instance?: Instance): ToolUsageRecord[] {
+    if (!instance) return [];
+
+    const counts = new Map<string, { count: number }>();
+
+    for (const message of instance.outputBuffer) {
+      if (message.type !== 'tool_use') continue;
+
+      const toolName =
+        typeof message.metadata?.['name'] === 'string'
+          ? (message.metadata?.['name'] as string)
+          : 'unknown';
+      const entry = counts.get(toolName) || { count: 0 };
+      entry.count += 1;
+      counts.set(toolName, entry);
+    }
+
+    return Array.from(counts.entries()).map(([tool, entry]) => ({
+      tool,
+      count: entry.count,
+      avgDuration: 0,
+      errorCount: 0
+    }));
+  }
+
+  // ============================================
+  // Helper Methods
+  // ============================================
+
+  private extractQueryTerms(message: string): string[] {
+    const matches = message.toLowerCase().match(/[a-z0-9_]{3,}/g) || [];
+    const unique = Array.from(
+      new Set(matches.filter((term) => term.length >= 4))
+    );
+    return unique.slice(0, 12);
+  }
+
+  private buildLexicalPattern(terms: string[]): string {
+    return terms
+      .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+  }
+
+  private buildFriendlyOrchestrationMessage(action: string, status: string, data: any): string {
+    switch (action) {
+      case 'spawn_child':
+        if (status === 'SUCCESS') {
+          return `**Child Spawned:** ${data.name || 'Child instance'}\n\nID: \`${data.childId}\``;
+        } else {
+          return `**Failed to spawn child:** ${data.error || 'Unknown error'}`;
+        }
+      case 'message_child':
+        return status === 'SUCCESS'
+          ? `**Message sent** to child \`${data.childId}\``
+          : `**Failed to send message:** ${data.error || 'Unknown error'}`;
+      case 'terminate_child':
+        return status === 'SUCCESS'
+          ? `**Child terminated:** \`${data.childId}\``
+          : `**Failed to terminate child:** ${data.error || 'Unknown error'}`;
+      case 'task_complete':
+        return `**Task completed** by child \`${data.childId}\`\n\n${data.result?.summary || data.message || 'No summary'}`;
+      case 'task_progress':
+        return `**Progress update** from child \`${data.childId}\`: ${data.progress?.percentage || 0}% - ${data.progress?.currentStep || 'Working...'}`;
+      case 'task_error':
+        return `**Error** from child \`${data.childId}\`:\n\n${data.error?.message || data.message || 'Unknown error'}`;
+      case 'get_children':
+        if (data.children && data.children.length > 0) {
+          const childList = data.children
+            .map((c: any) => `- **${c.name}** (\`${c.id}\`) - ${c.status}`)
+            .join('\n');
+          return `**Active children:**\n\n${childList}`;
+        } else {
+          return `**No active children**`;
+        }
+      case 'get_child_output':
+        if (data.output && data.output.length > 0) {
+          return `**Output from child \`${data.childId}\`:**\n\n\`\`\`\n${data.output.join('\n')}\n\`\`\``;
+        } else {
+          return `**No output from child** \`${data.childId}\``;
+        }
+      default:
+        return `**Orchestration:** ${action} - ${status}`;
+    }
+  }
+}

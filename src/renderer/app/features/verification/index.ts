@@ -1,38 +1,46 @@
 /**
  * Verification Module Exports
+ *
+ * Organized into subdomains:
+ * - dashboard/ - Main verification dashboard
+ * - config/    - Verification rule configuration, CLI settings, API keys
+ * - execution/ - Running verification, progress tracking
+ * - results/   - Displaying results, export, analysis
+ * - history/   - Historical runs, comparison (future)
+ * - shared/    - Shared components, services
  */
 
-// Core Components
-export { VerificationDashboardComponent } from './verification-dashboard.component';
-export { AgentCardComponent } from './agent-card.component';
-export { AgentConfigPanelComponent } from './agent-config-panel.component';
-export { VerificationMonitorComponent } from './verification-monitor.component';
-export { VerificationResultsComponent } from './verification-results.component';
-export { ConsensusHeatmapComponent } from './consensus-heatmap.component';
+// === Dashboard ===
+export { VerificationDashboardComponent } from './dashboard/verification-dashboard.component';
 
-// Settings Components
-export { CliSettingsPanelComponent } from './cli-settings-panel.component';
-export { ApiKeyManagerComponent } from './api-key-manager.component';
-export { VerificationPreferencesComponent } from './verification-preferences.component';
+// === Config ===
+export { CliSettingsPanelComponent } from './config/cli-settings-panel.component';
+export { ApiKeyManagerComponent } from './config/api-key-manager.component';
+export { VerificationPreferencesComponent } from './config/verification-preferences.component';
+export { AgentConfigPanelComponent } from './config/agent-config-panel.component';
+export { AgentPersonalityPickerComponent } from './config/agent-personality-picker.component';
+export { CliDetectionPanelComponent } from './config/cli-detection-panel.component';
 
-// Export Panel
-export { ExportPanelComponent, type ExportFormat } from './export-panel.component';
+// === Execution ===
+export { VerificationLauncherComponent } from './execution/verification-launcher.component';
+export { VerificationMonitorComponent } from './execution/verification-monitor.component';
+export { AgentSelectorComponent } from './execution/agent-selector.component';
+export { AgentResponseStreamComponent } from './execution/agent-response-stream.component';
+export { ProgressTrackerComponent } from './execution/progress-tracker.component';
 
-// CLI/Agent Components (new)
-export { CliStatusIndicatorComponent } from './cli-status-indicator.component';
-export { AgentCapabilityBadgesComponent } from './agent-capability-badges.component';
-export { AgentPersonalityPickerComponent } from './agent-personality-picker.component';
-export { CliDetectionPanelComponent } from './cli-detection-panel.component';
-export { AgentSelectorComponent } from './agent-selector.component';
+// === Results ===
+export { VerificationResultsComponent } from './results/verification-results.component';
+export { ConsensusHeatmapComponent } from './results/consensus-heatmap.component';
+export { SynthesisViewerComponent } from './results/synthesis-viewer.component';
+export { DebateRoundViewerComponent } from './results/debate-round-viewer.component';
+export { ExportPanelComponent, type ExportFormat } from './results/export-panel.component';
 
-// Verification Components (new)
-export { VerificationLauncherComponent } from './verification-launcher.component';
-export { AgentResponseStreamComponent } from './agent-response-stream.component';
-export { ProgressTrackerComponent } from './progress-tracker.component';
-export { SynthesisViewerComponent } from './synthesis-viewer.component';
-export { DebateRoundViewerComponent } from './debate-round-viewer.component';
+// === Shared Components ===
+export { CliStatusIndicatorComponent } from './shared/components/cli-status-indicator.component';
+export { AgentCapabilityBadgesComponent } from './shared/components/agent-capability-badges.component';
+export { AgentCardComponent } from './shared/components/agent-card.component';
 
-// Services
-export { VerificationService } from './services/verification.service';
-export { AgentStreamService } from './services/agent-stream.service';
-export { CliDetectionService } from './services/cli-detection.service';
+// === Shared Services ===
+export { VerificationService } from './shared/services/verification.service';
+export { AgentStreamService } from './shared/services/agent-stream.service';
+export { CliDetectionService } from './shared/services/cli-detection.service';

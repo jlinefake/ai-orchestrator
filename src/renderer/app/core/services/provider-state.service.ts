@@ -5,7 +5,7 @@
  */
 
 import { Injectable, signal, computed, inject, effect } from '@angular/core';
-import { ElectronIpcService } from './electron-ipc.service';
+import { ElectronIpcService } from './ipc';
 import type { CliType } from '../../../../shared/types/settings.types';
 
 export type ProviderType = 'claude' | 'openai' | 'gemini' | 'copilot' | 'auto';
@@ -18,8 +18,8 @@ export class ProviderStateService {
   /** Currently selected provider */
   readonly selectedProvider = signal<ProviderType>('claude');
 
-  /** Currently selected model (used for Copilot) */
-  readonly selectedModel = signal<string>('claude-sonnet-4-5');
+  /** Currently selected model */
+  readonly selectedModel = signal<string>('claude-opus-4-5');
 
   /** Whether Copilot is the selected provider */
   readonly isCopilot = computed(() => this.selectedProvider() === 'copilot');
@@ -40,7 +40,7 @@ export class ProviderStateService {
     effect(() => {
       const model = this.selectedModel();
       if (this.initialized) {
-        this.ipc.setSetting('defaultCopilotModel', model);
+        this.ipc.setSetting('defaultModel', model);
       }
     });
 
@@ -49,15 +49,15 @@ export class ProviderStateService {
       const change = data as { key?: string; value?: unknown; settings?: Record<string, unknown> };
       if (change.key === 'defaultCli' && change.value) {
         this.selectedProvider.set(change.value as ProviderType);
-      } else if (change.key === 'defaultCopilotModel' && change.value) {
+      } else if (change.key === 'defaultModel' && change.value) {
         this.selectedModel.set(change.value as string);
       } else if (change.settings) {
         // Bulk settings update
         if (change.settings['defaultCli']) {
           this.selectedProvider.set(change.settings['defaultCli'] as ProviderType);
         }
-        if (change.settings['defaultCopilotModel']) {
-          this.selectedModel.set(change.settings['defaultCopilotModel'] as string);
+        if (change.settings['defaultModel']) {
+          this.selectedModel.set(change.settings['defaultModel'] as string);
         }
       }
     });
@@ -74,8 +74,8 @@ export class ProviderStateService {
         if (settings['defaultCli']) {
           this.selectedProvider.set(settings['defaultCli'] as ProviderType);
         }
-        if (settings['defaultCopilotModel']) {
-          this.selectedModel.set(settings['defaultCopilotModel'] as string);
+        if (settings['defaultModel']) {
+          this.selectedModel.set(settings['defaultModel'] as string);
         }
       }
     } catch (error) {
@@ -109,9 +109,9 @@ export class ProviderStateService {
   }
 
   /**
-   * Get the model for instance creation (only for Copilot)
+   * Get the model for instance creation (for all providers)
    */
   getModelForCreation(): string | undefined {
-    return this.isCopilot() ? this.selectedModel() : undefined;
+    return this.selectedModel();
   }
 }

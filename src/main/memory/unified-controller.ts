@@ -29,7 +29,7 @@ import type { MemoryEntry } from '../../shared/types/memory-r1.types';
 import {
   MemoryManagerAgent,
   getMemoryManager
-} from '../memory-r1/memory-manager';
+} from './r1-memory-manager';
 import { RLMContextManager } from '../rlm/context-manager';
 
 export class UnifiedMemoryController extends EventEmitter {

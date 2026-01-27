@@ -5,9 +5,9 @@
 
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/types/ipc.types';
-import { getMemoryManager } from '../memory-r1/memory-manager';
+import { getMemoryManager } from '../memory/r1-memory-manager';
 import { getUnifiedMemory } from '../memory/unified-controller';
-import { getDebateCoordinator } from '../debate/debate-coordinator';
+import { getDebateCoordinator } from '../orchestration/debate-coordinator';
 // Training handlers moved to training-ipc-handler.ts
 import type {
   MemoryManagerConfig,

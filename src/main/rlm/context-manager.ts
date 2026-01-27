@@ -6,29 +6,80 @@
  * Achieves 85%+ token savings vs direct context feeding
  *
  * Now with SQLite persistence layer for data durability
+ *
+ * This is the main coordinator class that delegates to sub-modules:
+ * - context-storage: Store and section CRUD operations
+ * - context-search: Grep, semantic search operations
+ * - context-session: Session lifecycle management
+ * - context-cache: Bloom filter and search indexing
+ * - context-analytics: Statistics and metrics
+ * - context-serialization: Import/export functionality
+ * - context-query-engine: Query execution
  */
 
-import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
-import {
+import type {
   ContextStore,
   ContextSection,
   ContextQuery,
   ContextQueryResult,
   RLMSession,
   RLMConfig,
-  RecursiveCall,
-  TermLocation,
-  SummaryLevel,
   RLMStoreStats,
-  RLMSessionStats,
-  BloomFilter
+  RLMSessionStats
 } from '../../shared/types/rlm.types';
 import { RLMDatabase, getRLMDatabase } from '../persistence/rlm-database';
-import { ContextSectionRow } from '../persistence/rlm-database.types';
+import type { ContextSectionRow } from '../persistence/rlm-database.types';
 import { VectorStore, getVectorStore } from './vector-store';
 import { LLMService, getLLMService } from './llm-service';
 import { HyDEService, getHyDEService } from './hyde-service';
+
+// Import from decomposed modules
+import type {
+  ExportedStore,
+  ImportStoreOptions,
+  SectionInput,
+  StorageStats
+} from './context';
+import {
+  // Storage
+  createStore as createStoreOp,
+  addSection as addSectionOp,
+  addSectionsBatch as addSectionsBatchOp,
+  removeSection as removeSectionOp,
+  deleteStore as deleteStoreOp,
+  type StorageDependencies,
+  // Search
+  executeGrep,
+  searchStoreOptimized,
+  getSection as getSectionOp,
+  // Session
+  startSession as startSessionOp,
+  endSession as endSessionOp,
+  getSessionStats as getSessionStatsOp,
+  updateSessionAfterQuery,
+  updateSessionTokens,
+  type SessionDependencies,
+  // Cache
+  rebuildBloomFilterForStore,
+  mightContainTerm,
+  updateSearchIndex,
+  createSearchIndex,
+  // Analytics
+  getTokenSavingsHistory as getTokenSavingsHistoryOp,
+  getQueryStats as getQueryStatsOp,
+  getStorageStats as getStorageStatsOp,
+  getStoreStats as getStoreStatsOp,
+  type AnalyticsDependencies,
+  // Serialization
+  exportStore as exportStoreOp,
+  importStore as importStoreOp,
+  // Query engine
+  executeQuery as executeQueryOp,
+  type QueryEngineDependencies,
+  // Utilities
+  estimateTokens as defaultEstimateTokens
+} from './context';
 
 export class RLMContextManager extends EventEmitter {
   private static instance: RLMContextManager;
@@ -65,9 +116,48 @@ export class RLMContextManager extends EventEmitter {
     this.initializePersistence();
   }
 
-  /**
-   * Initialize database persistence and load existing data
-   */
+  // ============ Dependencies ============
+
+  private getStorageDeps(): StorageDependencies {
+    return {
+      db: this.db,
+      vectorStore: this.vectorStore,
+      persistenceEnabled: this.persistenceEnabled,
+      maxSectionTokens: this.config.maxSectionTokens,
+      summaryThreshold: this.config.summaryThreshold,
+      tokenEstimator: this.estimateTokens.bind(this)
+    };
+  }
+
+  private getSessionDeps(): SessionDependencies {
+    return {
+      db: this.db,
+      persistenceEnabled: this.persistenceEnabled
+    };
+  }
+
+  private getAnalyticsDeps(): AnalyticsDependencies {
+    return {
+      db: this.db,
+      persistenceEnabled: this.persistenceEnabled
+    };
+  }
+
+  private getQueryEngineDeps(): QueryEngineDependencies {
+    return {
+      vectorStore: this.vectorStore,
+      hydeService: this.hydeService,
+      config: this.config,
+      tokenEstimator: this.estimateTokens.bind(this),
+      onSummarizeRequest: (request) => this.emit('summarize:request', request),
+      onSubQueryRequest: (request) => this.emit('sub_query:request', request),
+      onHyDE: (event) => this.emit('semantic:hyde', event),
+      storageDeps: this.getStorageDeps()
+    };
+  }
+
+  // ============ Initialization ============
+
   private initializePersistence(): void {
     try {
       this.db = getRLMDatabase();
@@ -84,13 +174,9 @@ export class RLMContextManager extends EventEmitter {
     }
   }
 
-  /**
-   * Setup handlers for LLM-based operations
-   */
   private setupLLMHandlers(): void {
     if (!this.llmService) return;
 
-    // Handle summarization requests
     this.on(
       'summarize:request',
       async (request: {
@@ -106,16 +192,13 @@ export class RLMContextManager extends EventEmitter {
             targetTokens: request.targetTokens,
             preserveKeyPoints: true
           });
-
           request.callback(summary);
         } catch (error) {
           console.error('[RLM] LLM summarization failed:', error);
-          // Fallback handled internally by LLMService
         }
       }
     );
 
-    // Handle sub-query requests
     this.on(
       'sub_query:request',
       async (request: {
@@ -153,9 +236,6 @@ export class RLMContextManager extends EventEmitter {
     );
   }
 
-  /**
-   * Load persisted data into memory on startup
-   */
   private loadFromPersistence(): void {
     if (!this.db) return;
 
@@ -172,11 +252,7 @@ export class RLMContextManager extends EventEmitter {
         sections: sectionRows.map((s) => this.rowToSection(s)),
         totalTokens: row.total_tokens,
         totalSize: row.total_size,
-        searchIndex: {
-          terms: new Map(),
-          sectionBoundaries: [],
-          lastRebuilt: Date.now()
-        },
+        searchIndex: createSearchIndex(),
         createdAt: row.created_at,
         lastAccessed: row.last_accessed,
         accessCount: row.access_count
@@ -185,7 +261,7 @@ export class RLMContextManager extends EventEmitter {
       // Rebuild in-memory search index
       for (const section of store.sections) {
         if (section.depth === 0) {
-          this.updateSearchIndex(store, section);
+          updateSearchIndex(store.searchIndex!, section);
         }
       }
 
@@ -223,9 +299,6 @@ export class RLMContextManager extends EventEmitter {
     });
   }
 
-  /**
-   * Convert database row to ContextSection
-   */
   private rowToSection(row: ContextSectionRow): ContextSection {
     const content = this.db ? this.db.getSectionContent(row) : '';
 
@@ -249,16 +322,12 @@ export class RLMContextManager extends EventEmitter {
     };
   }
 
-  /**
-   * Check if persistence is available
-   */
+  // ============ Configuration ============
+
   isPersistenceEnabled(): boolean {
     return this.persistenceEnabled && this.db !== null;
   }
 
-  /**
-   * Get database statistics
-   */
   getDatabaseStats(): ReturnType<RLMDatabase['getStats']> | null {
     return this.db?.getStats() || null;
   }
@@ -274,36 +343,7 @@ export class RLMContextManager extends EventEmitter {
   // ============ Store Management ============
 
   createStore(instanceId: string): ContextStore {
-    // Check if store already exists for this instance
-    const existing = this.getStoreByInstance(instanceId);
-    if (existing) {
-      return existing;
-    }
-
-    const store: ContextStore = {
-      id: `ctx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      instanceId,
-      sections: [],
-      totalTokens: 0,
-      totalSize: 0,
-      createdAt: Date.now(),
-      lastAccessed: Date.now(),
-      accessCount: 0
-    };
-
-    // Persist to database
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.createStore({
-          id: store.id,
-          instanceId: store.instanceId
-        });
-      } catch (error) {
-        console.error('[RLM] Failed to persist store:', error);
-      }
-    }
-
-    this.stores.set(store.id, store);
+    const store = createStoreOp(instanceId, this.stores, this.getStorageDeps());
     this.emit('store:created', store);
     return store;
   }
@@ -318,244 +358,49 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) throw new Error(`Store not found: ${storeId}`);
 
-    const tokens = this.estimateTokens(content);
-
-    // Check if we need to split large sections
-    if (tokens > this.config.maxSectionTokens) {
-      return this.addLargeSection(store, type, name, content, metadata);
-    }
-
-    const section: ContextSection = {
-      id: `sec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    const section = addSectionOp(
+      store,
       type,
       name,
       content,
-      tokens,
-      startOffset: store.totalSize,
-      endOffset: store.totalSize + content.length,
-      checksum: this.computeChecksum(content),
-      depth: 0,
-      ...metadata
-    };
-
-    store.sections.push(section);
-    store.totalTokens += tokens;
-    store.totalSize += content.length;
-
-    // Persist section to database
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.addSection({
-          id: section.id,
-          storeId,
-          type: section.type,
-          name: section.name,
-          startOffset: section.startOffset,
-          endOffset: section.endOffset,
-          tokens: section.tokens,
-          checksum: section.checksum,
-          depth: section.depth,
-          summarizes: section.summarizes,
-          parentSummaryId: section.parentSummaryId,
-          filePath: section.filePath,
-          language: section.language,
-          sourceUrl: section.sourceUrl,
-          content: section.content
-        });
-        // Also index the section for search
-        this.db.indexSection(storeId, section.id, section.content);
-      } catch (error) {
-        console.error('[RLM] Failed to persist section:', error);
-      }
-    }
-
-    // Rebuild search index incrementally (in-memory)
-    this.updateSearchIndex(store, section);
-
-    // Add vector for semantic search (async, don't await)
-    if (this.vectorStore) {
-      this.vectorStore
-        .addSection(storeId, section.id, section.content, {
-          type: section.type,
-          name: section.name,
-          filePath: section.filePath,
-          language: section.language
-        })
-        .catch((error) => {
-          console.error('[RLM] Failed to add vector for section:', error);
-        });
-    }
-
-    // Check if summarization needed
-    if (store.totalTokens > this.config.summaryThreshold) {
-      this.prepareSummaryLevel(store);
-    }
+      metadata,
+      this.getStorageDeps()
+    );
 
     this.emit('section:added', { store, section });
     return section;
   }
 
-  private addLargeSection(
-    store: ContextStore,
-    type: ContextSection['type'],
-    name: string,
-    content: string,
-    metadata?: Partial<ContextSection>
-  ): ContextSection {
-    // Split by logical boundaries (paragraphs, code blocks, etc.)
-    const chunks = this.splitContent(content);
-    const sections: ContextSection[] = [];
+  async addSectionsBatch(
+    storeId: string,
+    sections: SectionInput[]
+  ): Promise<string[]> {
+    const store = this.stores.get(storeId);
+    if (!store) throw new Error(`Store not found: ${storeId}`);
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkSection: ContextSection = {
-        id: `sec-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`,
-        type,
-        name: `${name} (part ${i + 1}/${chunks.length})`,
-        content: chunks[i],
-        tokens: this.estimateTokens(chunks[i]),
-        startOffset: store.totalSize,
-        endOffset: store.totalSize + chunks[i].length,
-        checksum: this.computeChecksum(chunks[i]),
-        depth: 0,
-        ...metadata
-      };
+    const ids = await addSectionsBatchOp(
+      store,
+      sections,
+      this.getStorageDeps()
+    );
 
-      store.sections.push(chunkSection);
-      store.totalTokens += chunkSection.tokens;
-      store.totalSize += chunks[i].length;
-
-      // Persist each chunk to database
-      if (this.db && this.persistenceEnabled) {
-        try {
-          this.db.addSection({
-            id: chunkSection.id,
-            storeId: store.id,
-            type: chunkSection.type,
-            name: chunkSection.name,
-            startOffset: chunkSection.startOffset,
-            endOffset: chunkSection.endOffset,
-            tokens: chunkSection.tokens,
-            checksum: chunkSection.checksum,
-            depth: chunkSection.depth,
-            filePath: chunkSection.filePath,
-            language: chunkSection.language,
-            sourceUrl: chunkSection.sourceUrl,
-            content: chunkSection.content
-          });
-          this.db.indexSection(store.id, chunkSection.id, chunkSection.content);
-        } catch (error) {
-          console.error('[RLM] Failed to persist chunk section:', error);
-        }
-      }
-
-      // Add vector for semantic search (async, don't await)
-      if (this.vectorStore) {
-        this.vectorStore
-          .addSection(store.id, chunkSection.id, chunkSection.content, {
-            type: chunkSection.type,
-            name: chunkSection.name,
-            filePath: chunkSection.filePath,
-            language: chunkSection.language
-          })
-          .catch((error) => {
-            console.error(
-              '[RLM] Failed to add vector for chunk section:',
-              error
-            );
-          });
-      }
-
-      this.updateSearchIndex(store, chunkSection);
-      sections.push(chunkSection);
-    }
-
-    // Return first section as reference
-    return sections[0];
+    this.emit('sections:batch_added', { storeId, count: sections.length, ids });
+    return ids;
   }
 
-  private splitContent(content: string): string[] {
-    const maxChunkTokens = this.config.maxSectionTokens;
-    const chunks: string[] = [];
-
-    // Try to split by double newlines (paragraphs)
-    const paragraphs = content.split(/\n\n+/);
-    let currentChunk = '';
-
-    for (const para of paragraphs) {
-      const combined = currentChunk + (currentChunk ? '\n\n' : '') + para;
-      if (this.estimateTokens(combined) > maxChunkTokens) {
-        if (currentChunk) chunks.push(currentChunk);
-        currentChunk = para;
-      } else {
-        currentChunk = combined;
-      }
-    }
-
-    if (currentChunk) chunks.push(currentChunk);
-
-    // If still too large, force split
-    return chunks.flatMap((chunk) => {
-      if (this.estimateTokens(chunk) > maxChunkTokens) {
-        return this.forceSplit(chunk, maxChunkTokens);
-      }
-      return [chunk];
-    });
-  }
-
-  private forceSplit(content: string, maxTokens: number): string[] {
-    const chunks: string[] = [];
-    const lines = content.split('\n');
-    let currentChunk = '';
-
-    for (const line of lines) {
-      const combined = currentChunk + (currentChunk ? '\n' : '') + line;
-      if (this.estimateTokens(combined) > maxTokens) {
-        if (currentChunk) chunks.push(currentChunk);
-        currentChunk = line;
-      } else {
-        currentChunk = combined;
-      }
-    }
-
-    if (currentChunk) chunks.push(currentChunk);
-    return chunks;
-  }
-
-  // ============ Query Engine (RLM Pattern) ============
+  // ============ Query Engine ============
 
   async startSession(storeId: string, instanceId: string): Promise<RLMSession> {
     const store = this.stores.get(storeId);
     if (!store) throw new Error(`Store not found: ${storeId}`);
 
-    const session: RLMSession = {
-      id: `rlm-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      storeId,
+    const session = startSessionOp(
+      store,
       instanceId,
-      queries: [],
-      recursiveCalls: [],
-      totalRootTokens: 0,
-      totalSubQueryTokens: 0,
-      estimatedDirectTokens: store.totalTokens,
-      tokenSavingsPercent: 0,
-      startedAt: Date.now(),
-      lastActivityAt: Date.now()
-    };
+      this.sessions,
+      this.getSessionDeps()
+    );
 
-    // Persist session to database
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.createSession({
-          id: session.id,
-          storeId: session.storeId,
-          instanceId: session.instanceId,
-          estimatedDirectTokens: session.estimatedDirectTokens
-        });
-      } catch (error) {
-        console.error('[RLM] Failed to persist session:', error);
-      }
-    }
-
-    this.sessions.set(session.id, session);
     this.emit('session:started', session);
     return session;
   }
@@ -575,929 +420,27 @@ export class RLMContextManager extends EventEmitter {
     store.accessCount++;
     session.lastActivityAt = Date.now();
 
-    const startTime = Date.now();
-    let result: string;
-    let sectionsAccessed: string[] = [];
-    let subQueries: ContextQueryResult[] = [];
-
-    switch (query.type) {
-      case 'grep':
-        ({ result, sectionsAccessed } = this.executeGrep(
-          store,
-          query.params as { pattern: string; maxResults?: number }
-        ));
-        break;
-
-      case 'slice':
-        ({ result, sectionsAccessed } = this.executeSlice(
-          store,
-          query.params as { start: number; end: number }
-        ));
-        break;
-
-      case 'get_section':
-        ({ result, sectionsAccessed } = this.getSection(
-          store,
-          query.params as { sectionId: string }
-        ));
-        break;
-
-      case 'summarize':
-        result = await this.executeSummarize(
-          session,
-          store,
-          query.params as { sectionIds: string[] }
-        );
-        sectionsAccessed = (query.params as { sectionIds: string[] })
-          .sectionIds;
-        break;
-
-      case 'sub_query': {
-        const subResult = await this.executeSubQuery(
-          session,
-          store,
-          query.params as { prompt: string; contextHints?: string[] },
-          depth
-        );
-        result = subResult.result;
-        sectionsAccessed = subResult.sectionsAccessed;
-        subQueries = subResult.subQueries || [];
-        break;
-      }
-
-      case 'semantic_search':
-        ({ result, sectionsAccessed } = await this.executeSemanticSearch(
-          store,
-          query.params as { query: string; topK?: number }
-        ));
-        break;
-
-      default:
-        throw new Error(`Unknown query type: ${query.type}`);
-    }
-
-    const tokensUsed =
-      query.type === 'sub_query' ? 0 : this.estimateTokens(result);
-    const queryResult: ContextQueryResult = {
+    const queryResult = await executeQueryOp(
+      session,
+      store,
       query,
-      result,
-      tokensUsed,
-      sectionsAccessed,
-      duration: Date.now() - startTime,
-      subQueries,
-      depth
-    };
-
-    // Track costs
-    if (depth === 0) {
-      session.totalRootTokens += tokensUsed;
-    } else {
-      session.totalSubQueryTokens += tokensUsed;
-    }
-
-    const totalUsed = session.totalRootTokens + session.totalSubQueryTokens;
-    session.tokenSavingsPercent = Math.max(
-      0,
-      ((session.estimatedDirectTokens - totalUsed) /
-        session.estimatedDirectTokens) *
-        100
+      depth,
+      this.getQueryEngineDeps()
     );
 
+    // Update session token tracking
+    updateSessionTokens(session, queryResult.tokensUsed, depth);
     session.queries.push(queryResult);
 
     // Persist session updates
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.updateSession(session.id, {
-          totalQueries: session.queries.length,
-          totalRootTokens: session.totalRootTokens,
-          totalSubQueryTokens: session.totalSubQueryTokens,
-          tokenSavingsPercent: session.tokenSavingsPercent,
-          queriesJson: JSON.stringify(session.queries),
-          recursiveCallsJson: JSON.stringify(session.recursiveCalls)
-        });
-        // Also update store access stats
-        this.db.updateStoreStats(store.id, {
-          accessCount: store.accessCount
-        });
-      } catch (error) {
-        console.error('[RLM] Failed to persist session update:', error);
-      }
-    }
+    updateSessionAfterQuery(session, store, this.getSessionDeps());
 
     this.emit('query:executed', { session, queryResult });
-
     return queryResult;
   }
 
-  private executeGrep(
-    store: ContextStore,
-    params: { pattern: string; maxResults?: number }
-  ): { result: string; sectionsAccessed: string[] } {
-    const { pattern, maxResults = 10 } = params;
+  // ============ Search Operations ============
 
-    // Validate regex pattern to prevent crashes
-    let regex: RegExp;
-    try {
-      regex = new RegExp(pattern, 'gi');
-    } catch (error) {
-      console.warn(
-        '[RLM] Invalid regex pattern, falling back to literal search:',
-        error
-      );
-      const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      regex = new RegExp(escaped, 'gi');
-    }
-
-    const matches: {
-      section: ContextSection;
-      match: RegExpMatchArray;
-      context: string;
-    }[] = [];
-    const sectionsAccessed: string[] = [];
-
-    for (const section of store.sections) {
-      if (section.depth > 0) continue; // Skip summaries
-
-      const sectionMatches = [...section.content.matchAll(regex)];
-
-      for (const match of sectionMatches) {
-        if (matches.length >= maxResults) break;
-
-        // Extract context around match
-        const windowSize = this.config.searchWindowSize;
-        const start = Math.max(0, match.index! - windowSize);
-        const end = Math.min(
-          section.content.length,
-          match.index! + match[0].length + windowSize
-        );
-        const context = section.content.slice(start, end);
-
-        matches.push({ section, match, context });
-        if (!sectionsAccessed.includes(section.id)) {
-          sectionsAccessed.push(section.id);
-        }
-      }
-
-      if (matches.length >= maxResults) break;
-    }
-
-    const result = matches
-      .map(
-        (m, i) =>
-          `[Match ${i + 1}] ${m.section.name} (${m.section.type}):\n...${m.context}...`
-      )
-      .join('\n\n---\n\n');
-
-    return { result: result || 'No matches found.', sectionsAccessed };
-  }
-
-  private executeSlice(
-    store: ContextStore,
-    params: { start: number; end: number }
-  ): { result: string; sectionsAccessed: string[] } {
-    const { start, end } = params;
-    const sectionsAccessed: string[] = [];
-    let result = '';
-
-    for (const section of store.sections) {
-      if (section.depth > 0) continue;
-      if (section.endOffset < start) continue;
-      if (section.startOffset > end) break;
-
-      const sliceStart = Math.max(0, start - section.startOffset);
-      const sliceEnd = Math.min(
-        section.content.length,
-        end - section.startOffset
-      );
-
-      result += section.content.slice(sliceStart, sliceEnd);
-      sectionsAccessed.push(section.id);
-    }
-
-    return { result, sectionsAccessed };
-  }
-
-  private getSection(
-    store: ContextStore,
-    params: { sectionId: string }
-  ): { result: string; sectionsAccessed: string[] } {
-    const section = store.sections.find((s) => s.id === params.sectionId);
-    if (!section) {
-      return {
-        result: `Section not found: ${params.sectionId}`,
-        sectionsAccessed: []
-      };
-    }
-
-    return {
-      result: `[${section.name}] (${section.tokens} tokens)\n\n${section.content}`,
-      sectionsAccessed: [section.id]
-    };
-  }
-
-  private async executeSummarize(
-    session: RLMSession,
-    store: ContextStore,
-    params: { sectionIds: string[] }
-  ): Promise<string> {
-    const sections = store.sections.filter((s) =>
-      params.sectionIds.includes(s.id)
-    );
-    const content = sections
-      .map((s) => `## ${s.name}\n${s.content}`)
-      .join('\n\n---\n\n');
-
-    const totalTokens = sections.reduce((sum, s) => sum + s.tokens, 0);
-    const targetTokens = Math.ceil(
-      totalTokens * this.config.summaryTargetRatio
-    );
-
-    // Emit event for LLM to summarize
-    return new Promise((resolve) => {
-      let resolved = false;
-
-      this.emit('summarize:request', {
-        sessionId: session.id,
-        content,
-        targetTokens,
-        callback: (summary: string) => {
-          if (resolved) return;
-          resolved = true;
-
-          // Store the summary as a new section
-          this.persistSummary(store, summary, params.sectionIds, sections);
-
-          resolve(summary);
-        }
-      });
-
-      // Fallback if not handled
-      setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-
-        const fallbackSummary = `[Summary of ${sections.length} sections, ~${totalTokens} tokens → ~${targetTokens} target tokens]\n\nKey content from: ${sections.map((s) => s.name).join(', ')}`;
-
-        // Store even the fallback summary
-        this.persistSummary(
-          store,
-          fallbackSummary,
-          params.sectionIds,
-          sections
-        );
-
-        resolve(fallbackSummary);
-      }, 5000);
-    });
-  }
-
-  /**
-   * Persist a summary as a new section in the store
-   */
-  private persistSummary(
-    store: ContextStore,
-    summaryContent: string,
-    summarizedSectionIds: string[],
-    summarizedSections: ContextSection[]
-  ): void {
-    try {
-      const summaryTokens = this.estimateTokens(summaryContent);
-
-      const summaryDepth = Math.max(
-        1,
-        ...summarizedSections.map((s) => s.depth + 1)
-      );
-      const summarySection: ContextSection = {
-        id: `sum-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: 'summary',
-        name: `Summary of ${summarizedSections.length} sections`,
-        content: summaryContent,
-        tokens: summaryTokens,
-        startOffset: store.totalSize,
-        endOffset: store.totalSize + summaryContent.length,
-        checksum: this.computeChecksum(summaryContent),
-        depth: summaryDepth,
-        summarizes: summarizedSectionIds
-      };
-
-      store.sections.push(summarySection);
-      store.totalTokens += summaryTokens;
-      store.totalSize += summaryContent.length;
-
-      // Persist to database
-      if (this.db && this.persistenceEnabled) {
-        this.db.addSection({
-          id: summarySection.id,
-          storeId: store.id,
-          type: summarySection.type,
-          name: summarySection.name,
-          startOffset: summarySection.startOffset,
-          endOffset: summarySection.endOffset,
-          tokens: summarySection.tokens,
-          checksum: summarySection.checksum,
-          depth: summarySection.depth,
-          summarizes: summarySection.summarizes,
-          content: summarySection.content
-        });
-      }
-
-      // Update summary index
-      if (!store.summaryIndex) {
-        store.summaryIndex = { levels: [], sectionToSummary: new Map() };
-      }
-      for (const sectionId of summarizedSectionIds) {
-        store.summaryIndex.sectionToSummary.set(sectionId, summarySection.id);
-      }
-
-      this.emit('summary:created', {
-        storeId: store.id,
-        section: summarySection
-      });
-      console.log(
-        `[RLM] Created summary section ${summarySection.id} for ${summarizedSectionIds.length} sections`
-      );
-    } catch (error) {
-      console.error('[RLM] Failed to persist summary:', error);
-    }
-  }
-
-  private async executeSubQuery(
-    session: RLMSession,
-    store: ContextStore,
-    params: { prompt: string; contextHints?: string[] },
-    depth: number
-  ): Promise<{
-    result: string;
-    sectionsAccessed: string[];
-    subQueries?: ContextQueryResult[];
-  }> {
-    if (depth >= this.config.maxRecursionDepth) {
-      return {
-        result: '[Max recursion depth reached. Please refine your query.]',
-        sectionsAccessed: []
-      };
-    }
-
-    // Build context window from hints or use summaries
-    let contextWindow = '';
-    let sectionsAccessed: string[] = [];
-
-    if (params.contextHints && params.contextHints.length > 0) {
-      // Search for relevant context based on hints
-      for (const hint of params.contextHints.slice(0, 3)) {
-        const grepResult = this.executeGrep(store, {
-          pattern: hint,
-          maxResults: 3
-        });
-        contextWindow += grepResult.result + '\n\n';
-        sectionsAccessed.push(...grepResult.sectionsAccessed);
-      }
-    } else {
-      // Use top-level summaries if available
-      const summaries = store.sections.filter(
-        (s) => s.type === 'summary' && s.depth === 1
-      );
-      if (summaries.length > 0) {
-        contextWindow = summaries.map((s) => s.content).join('\n\n---\n\n');
-        sectionsAccessed = summaries.map((s) => s.id);
-      } else {
-        // Fall back to section names overview
-        const overview = store.sections
-          .filter((s) => s.depth === 0)
-          .map((s) => `- ${s.name} (${s.tokens} tokens, ${s.type})`)
-          .join('\n');
-        contextWindow = `Available sections:\n${overview}`;
-      }
-    }
-
-    // Create recursive call record
-    const recursiveCall: RecursiveCall = {
-      id: `rc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      parentId:
-        session.recursiveCalls.length > 0
-          ? session.recursiveCalls[session.recursiveCalls.length - 1].id
-          : undefined,
-      depth: depth + 1,
-      prompt: params.prompt,
-      contextWindow: contextWindow.slice(0, 2000), // Store sample
-      tokens: { input: 0, output: 0 },
-      duration: 0,
-      status: 'pending'
-    };
-    session.recursiveCalls.push(recursiveCall);
-
-    // Emit event for recursive LLM call
-    return new Promise((resolve) => {
-      recursiveCall.status = 'running';
-      const startTime = Date.now();
-
-      this.emit('sub_query:request', {
-        sessionId: session.id,
-        callId: recursiveCall.id,
-        prompt: params.prompt,
-        context: contextWindow,
-        depth: depth + 1,
-        callback: (
-          response: string,
-          tokens: { input: number; output: number }
-        ) => {
-          recursiveCall.response = response;
-          recursiveCall.tokens = tokens;
-          recursiveCall.duration = Date.now() - startTime;
-          recursiveCall.status = 'completed';
-
-          session.totalSubQueryTokens += tokens.input + tokens.output;
-
-          resolve({
-            result: response,
-            sectionsAccessed
-          });
-        }
-      });
-
-      // Timeout handler
-      setTimeout(() => {
-        if (recursiveCall.status === 'running') {
-          recursiveCall.status = 'failed';
-          resolve({
-            result: '[Sub-query timed out]',
-            sectionsAccessed
-          });
-        }
-      }, this.config.subQueryTimeout);
-    });
-  }
-
-  private async executeSemanticSearch(
-    store: ContextStore,
-    params: {
-      query: string;
-      topK?: number;
-      minSimilarity?: number;
-      useHyDE?: boolean;
-    }
-  ): Promise<{ result: string; sectionsAccessed: string[] }> {
-    const { query, topK = 5, minSimilarity = 0.5, useHyDE = true } = params;
-
-    // Use vector store for semantic search if available
-    if (this.vectorStore) {
-      try {
-        // Use HyDE (Hypothetical Document Embeddings) for better search on vague queries
-        // HyDE generates a hypothetical answer, embeds it, and uses that for search
-        let searchEmbedding: number[] | undefined;
-        let hydeInfo: { used: boolean; generationTimeMs: number } = {
-          used: false,
-          generationTimeMs: 0
-        };
-
-        if (useHyDE && this.hydeService) {
-          try {
-            const hydeResult = await this.hydeService.embed(query);
-            if (hydeResult.hydeUsed) {
-              searchEmbedding = hydeResult.embedding;
-              hydeInfo = {
-                used: true,
-                generationTimeMs: hydeResult.generationTimeMs
-              };
-              this.emit('semantic:hyde', {
-                query,
-                hydeResult: {
-                  used: hydeResult.hydeUsed,
-                  cached: hydeResult.cached,
-                  generationTimeMs: hydeResult.generationTimeMs,
-                  hypotheticalPreview:
-                    hydeResult.hypotheticalDocuments[0]?.substring(0, 200)
-                }
-              });
-            }
-          } catch (hydeError) {
-            console.warn(
-              '[RLM] HyDE failed, using direct query embedding:',
-              hydeError
-            );
-          }
-        }
-
-        // If HyDE provided an embedding, search using the precomputed embedding
-        // Otherwise fall back to standard search which embeds the query directly
-        let searchResults;
-        if (searchEmbedding) {
-          // Use the HyDE embedding for vector search
-          searchResults = await this.vectorStoreSearchWithEmbedding(
-            store.id,
-            searchEmbedding,
-            { topK, minSimilarity }
-          );
-        } else {
-          // Standard search - embeds the query directly
-          searchResults = await this.vectorStore.search(store.id, query, {
-            topK,
-            minSimilarity
-          });
-        }
-
-        if (searchResults.length > 0) {
-          const sectionsAccessed: string[] = [];
-          const matches: string[] = [];
-
-          for (const result of searchResults) {
-            const section = store.sections.find(
-              (s) => s.id === result.entry.sectionId
-            );
-            if (section) {
-              sectionsAccessed.push(section.id);
-              const hydeTag = hydeInfo.used ? ' [HyDE]' : '';
-              matches.push(
-                `[Similarity: ${(result.similarity * 100).toFixed(1)}%${hydeTag}] ${section.name} (${section.type}):\n...${result.entry.contentPreview}...`
-              );
-            }
-          }
-
-          return {
-            result: matches.join('\n\n---\n\n') || 'No matches found.',
-            sectionsAccessed
-          };
-        }
-      } catch (error) {
-        console.error(
-          '[RLM] Semantic search failed, falling back to keyword search:',
-          error
-        );
-      }
-    }
-
-    // Fall back to keyword search if vector store unavailable or returned no results
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((w) => w.length > 3);
-    const pattern = keywords.join('|');
-
-    return this.executeGrep(store, { pattern, maxResults: topK });
-  }
-
-  /**
-   * Search vector store using a precomputed embedding (used with HyDE)
-   */
-  private async vectorStoreSearchWithEmbedding(
-    storeId: string,
-    embedding: number[],
-    options: { topK: number; minSimilarity: number }
-  ): Promise<
-    {
-      entry: { sectionId: string; contentPreview: string };
-      similarity: number;
-    }[]
-  > {
-    if (!this.vectorStore) {
-      return [];
-    }
-
-    // Access the vector store's internal cache to find matches
-    // This is a workaround since VectorStore.search() always embeds the query
-    const vectorStore = this.vectorStore as unknown as {
-      storeVectorIds: Map<string, Set<string>>;
-      vectorCache: Map<
-        string,
-        {
-          id: string;
-          sectionId: string;
-          embedding: number[];
-          contentPreview: string;
-        }
-      >;
-    };
-
-    const storeVectors = vectorStore.storeVectorIds.get(storeId);
-    if (!storeVectors || storeVectors.size === 0) {
-      return [];
-    }
-
-    // Collect candidates
-    const candidates: {
-      id: string;
-      sectionId: string;
-      embedding: number[];
-      contentPreview: string;
-    }[] = [];
-    for (const vectorId of storeVectors) {
-      const entry = vectorStore.vectorCache.get(vectorId);
-      if (entry) {
-        candidates.push(entry);
-      }
-    }
-
-    // Calculate similarities
-    const results: {
-      entry: { sectionId: string; contentPreview: string };
-      similarity: number;
-    }[] = [];
-    for (const candidate of candidates) {
-      const similarity = this.cosineSimilarity(embedding, candidate.embedding);
-      if (similarity >= options.minSimilarity) {
-        results.push({
-          entry: {
-            sectionId: candidate.sectionId,
-            contentPreview: candidate.contentPreview
-          },
-          similarity
-        });
-      }
-    }
-
-    // Sort by similarity and take top K
-    results.sort((a, b) => b.similarity - a.similarity);
-    return results.slice(0, options.topK);
-  }
-
-  /**
-   * Calculate cosine similarity between two vectors
-   */
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) {
-      return 0;
-    }
-
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-
-    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-    if (denominator === 0) {
-      return 0;
-    }
-
-    return dotProduct / denominator;
-  }
-
-  // ============ Indexing ============
-
-  private updateSearchIndex(
-    store: ContextStore,
-    section: ContextSection
-  ): void {
-    if (!store.searchIndex) {
-      store.searchIndex = {
-        terms: new Map(),
-        sectionBoundaries: [],
-        lastRebuilt: Date.now()
-      };
-    }
-
-    // Simple word tokenization and indexing
-    const words = section.content.toLowerCase().match(/\b\w{3,}\b/g) || [];
-    const contentLower = section.content.toLowerCase(); // Use lowercase for searching
-    let lineNumber = 1;
-    let charIndex = 0;
-
-    for (const word of words) {
-      const locations = store.searchIndex.terms.get(word) || [];
-      // Search in lowercase content to match lowercase word
-      const nextIndex = contentLower.indexOf(word, charIndex);
-
-      if (nextIndex >= 0) {
-        lineNumber += (
-          section.content.slice(charIndex, nextIndex).match(/\n/g) || []
-        ).length;
-        const location: TermLocation = {
-          sectionId: section.id,
-          offset: nextIndex,
-          lineNumber
-        };
-        locations.push(location);
-        store.searchIndex.terms.set(word, locations);
-        charIndex = nextIndex + word.length;
-      }
-    }
-
-    store.searchIndex.sectionBoundaries.push(section.endOffset);
-  }
-
-  private prepareSummaryLevel(store: ContextStore): void {
-    // Initialize summary index if needed
-    if (!store.summaryIndex) {
-      store.summaryIndex = {
-        levels: [],
-        sectionToSummary: new Map()
-      };
-    }
-
-    // Group original sections for potential summarization
-    // (Actual summarization is lazy - done only when needed)
-    const originalSections = store.sections.filter((s) => s.depth === 0);
-    const groupSize = 10;
-
-    for (let i = 0; i < originalSections.length; i += groupSize) {
-      const group = originalSections.slice(i, i + groupSize);
-      const groupTokens = group.reduce((sum, s) => sum + s.tokens, 0);
-
-      // Only create placeholder if group is large enough
-      if (groupTokens > this.config.maxSectionTokens * 2) {
-        const placeholder: ContextSection = {
-          id: `summary-placeholder-${Date.now()}-${i}`,
-          type: 'summary',
-          name: `Summary: ${group[0].name} - ${group[group.length - 1].name}`,
-          content: `[Pending summary of ${group.length} sections, ~${groupTokens} tokens]`,
-          tokens: 100, // Placeholder estimate
-          startOffset: 0,
-          endOffset: 0,
-          checksum: '',
-          summarizes: group.map((s) => s.id),
-          depth: 1
-        };
-
-        // Track in summary index
-        const level: SummaryLevel = {
-          depth: 1,
-          sections: [placeholder],
-          totalTokens: 100,
-          compressionRatio: groupTokens / 100
-        };
-        store.summaryIndex.levels.push(level);
-
-        for (const s of group) {
-          store.summaryIndex.sectionToSummary.set(s.id, placeholder.id);
-        }
-      }
-    }
-  }
-
-  // ============ Utilities ============
-
-  private estimateTokens(text: string): number {
-    if (this.llmService) {
-      return this.llmService.getTokenCounter().countTokens(text);
-    }
-    // Rough estimate: 1 token ≈ 4 characters for English
-    return Math.ceil(text.length / 4);
-  }
-
-  private computeChecksum(content: string): string {
-    return crypto.createHash('md5').update(content).digest('hex').slice(0, 12);
-  }
-
-  // ============ Performance Optimizations ============
-
-  /**
-   * Simple Bloom Filter implementation for fast negative lookups
-   * Uses multiple hash functions to minimize false positives
-   */
-  private createBloomFilter(expectedItems = 10000): BloomFilter {
-    const size = Math.max(1000, expectedItems * 10); // ~10 bits per item
-    const hashCount = 4;
-    return {
-      bits: new Uint8Array(Math.ceil(size / 8)),
-      size,
-      hashCount
-    };
-  }
-
-  private bloomAdd(filter: BloomFilter, item: string): void {
-    const hashes = this.getBloomHashes(item, filter.hashCount, filter.size);
-    for (const hash of hashes) {
-      const byteIndex = Math.floor(hash / 8);
-      const bitIndex = hash % 8;
-      filter.bits[byteIndex] |= 1 << bitIndex;
-    }
-  }
-
-  private bloomMightContain(filter: BloomFilter, item: string): boolean {
-    const hashes = this.getBloomHashes(item, filter.hashCount, filter.size);
-    for (const hash of hashes) {
-      const byteIndex = Math.floor(hash / 8);
-      const bitIndex = hash % 8;
-      if (!(filter.bits[byteIndex] & (1 << bitIndex))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private getBloomHashes(item: string, count: number, size: number): number[] {
-    const hashes: number[] = [];
-    // Simple hash function using DJB2 with different seeds
-    for (let i = 0; i < count; i++) {
-      let hash = 5381 + i * 33;
-      for (let j = 0; j < item.length; j++) {
-        hash = ((hash << 5) + hash) ^ item.charCodeAt(j);
-      }
-      hashes.push(Math.abs(hash) % size);
-    }
-    return hashes;
-  }
-
-  /**
-   * Batch add multiple sections with deferred index rebuild
-   * Much faster than adding sections one by one
-   */
-  async addSectionsBatch(
-    storeId: string,
-    sections: {
-      type: ContextSection['type'];
-      name: string;
-      content: string;
-      metadata?: Partial<ContextSection>;
-    }[]
-  ): Promise<string[]> {
-    const store = this.stores.get(storeId);
-    if (!store) throw new Error(`Store not found: ${storeId}`);
-
-    const ids: string[] = [];
-    const addedSections: ContextSection[] = [];
-
-    // Process all sections without rebuilding index each time
-    for (const input of sections) {
-      const tokens = this.estimateTokens(input.content);
-      const section: ContextSection = {
-        id: `sec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: input.type,
-        name: input.name,
-        content: input.content,
-        tokens,
-        startOffset: store.totalSize,
-        endOffset: store.totalSize + input.content.length,
-        checksum: this.computeChecksum(input.content),
-        depth: 0,
-        ...input.metadata
-      };
-
-      store.sections.push(section);
-      store.totalTokens += tokens;
-      store.totalSize += input.content.length;
-      ids.push(section.id);
-      addedSections.push(section);
-
-      // Persist section to database
-      if (this.db && this.persistenceEnabled) {
-        try {
-          this.db.addSection({
-            id: section.id,
-            storeId,
-            type: section.type,
-            name: section.name,
-            startOffset: section.startOffset,
-            endOffset: section.endOffset,
-            tokens: section.tokens,
-            checksum: section.checksum,
-            depth: section.depth,
-            filePath: section.filePath,
-            language: section.language,
-            sourceUrl: section.sourceUrl,
-            content: section.content
-          });
-        } catch (error) {
-          console.error('[RLM] Failed to persist batch section:', error);
-        }
-      }
-    }
-
-    // Rebuild search index once for all sections
-    for (const section of addedSections) {
-      this.updateSearchIndex(store, section);
-    }
-
-    // Batch index sections in database
-    if (this.db && this.persistenceEnabled) {
-      for (const section of addedSections) {
-        try {
-          this.db.indexSection(storeId, section.id, section.content);
-        } catch (error) {
-          console.error('[RLM] Failed to index batch section:', error);
-        }
-      }
-    }
-
-    // Batch generate embeddings for semantic search
-    if (this.vectorStore) {
-      try {
-        await this.vectorStore.indexStore(
-          storeId,
-          addedSections.map((s) => ({ id: s.id, content: s.content }))
-        );
-      } catch (error) {
-        console.error('[RLM] Failed to batch index vectors:', error);
-      }
-    }
-
-    this.emit('sections:batch_added', {
-      storeId,
-      count: addedSections.length,
-      ids
-    });
-    return ids;
-  }
-
-  /**
-   * Get section content with lazy loading support
-   * Content is loaded from DB only when accessed
-   */
   getSectionContentLazy(storeId: string, sectionId: string): string {
     const store = this.stores.get(storeId);
     if (!store) return '';
@@ -1505,18 +448,15 @@ export class RLMContextManager extends EventEmitter {
     const section = store.sections.find((s) => s.id === sectionId);
     if (!section) return '';
 
-    // If content is already loaded, return it
     if (section.content) {
       return section.content;
     }
 
-    // Load from database if available
     if (this.db && this.persistenceEnabled) {
       try {
         const row = this.db.getSection(sectionId);
         if (row) {
           const content = this.db.getSectionContent(row);
-          // Cache the loaded content
           section.content = content;
           return content;
         }
@@ -1528,41 +468,23 @@ export class RLMContextManager extends EventEmitter {
     return '';
   }
 
-  /**
-   * Quick check if a term might exist in the store using bloom filter
-   * Returns false if definitely not present, true if possibly present
-   */
   mightContainTerm(storeId: string, term: string): boolean {
     const store = this.stores.get(storeId);
-    if (!store || !store.bloomFilter) return true; // If no filter, assume might contain
-
-    return this.bloomMightContain(store.bloomFilter, term.toLowerCase());
+    if (!store) return true;
+    return mightContainTerm(store, term);
   }
 
-  /**
-   * Rebuild the bloom filter for a store
-   */
   rebuildBloomFilter(storeId: string): void {
     const store = this.stores.get(storeId);
     if (!store) return;
 
-    const filter = this.createBloomFilter(store.sections.length * 100);
-
-    for (const section of store.sections) {
-      if (section.depth > 0) continue; // Skip summaries
-      const words = section.content.toLowerCase().match(/\b\w{3,}\b/g) || [];
-      for (const word of words) {
-        this.bloomAdd(filter, word);
-      }
-    }
-
-    store.bloomFilter = filter;
-    this.emit('bloom_filter:rebuilt', { storeId, termCount: filter.size });
+    store.bloomFilter = rebuildBloomFilterForStore(store);
+    this.emit('bloom_filter:rebuilt', {
+      storeId,
+      termCount: store.bloomFilter.size
+    });
   }
 
-  /**
-   * Optimized search using bloom filter for fast negative lookups
-   */
   searchStoreOptimized(
     storeId: string,
     terms: string[],
@@ -1571,21 +493,12 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) return { result: '', sectionsAccessed: [] };
 
-    // Quick check with bloom filter
-    if (store.bloomFilter) {
-      const possibleTerms = terms.filter((term) =>
-        this.bloomMightContain(store.bloomFilter!, term.toLowerCase())
-      );
-
-      // If none of the terms might be present, return early
-      if (possibleTerms.length === 0) {
-        return { result: 'No matches found.', sectionsAccessed: [] };
-      }
-    }
-
-    // Proceed with actual search
-    const pattern = terms.join('|');
-    return this.executeGrep(store, { pattern, maxResults });
+    return searchStoreOptimized(
+      store,
+      terms,
+      maxResults,
+      this.config.searchWindowSize
+    );
   }
 
   // ============ Queries ============
@@ -1615,86 +528,26 @@ export class RLMContextManager extends EventEmitter {
   getSessionStats(sessionId: string): RLMSessionStats | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
-
-    const avgDuration =
-      session.queries.length > 0
-        ? session.queries.reduce((sum, q) => sum + q.duration, 0) /
-          session.queries.length
-        : 0;
-
-    return {
-      totalQueries: session.queries.length,
-      totalRecursiveCalls: session.recursiveCalls.length,
-      rootTokens: session.totalRootTokens,
-      subQueryTokens: session.totalSubQueryTokens,
-      estimatedSavings: session.tokenSavingsPercent,
-      avgQueryDuration: avgDuration
-    };
+    return getSessionStatsOp(session);
   }
 
   getStoreStats(storeId: string): RLMStoreStats | undefined {
     const store = this.stores.get(storeId);
     if (!store) return undefined;
-
-    const originalSections = store.sections.filter((s) => s.depth === 0).length;
-    const summaries = store.sections.filter((s) => s.depth > 0).length;
-    const maxDepth = Math.max(0, ...store.sections.map((s) => s.depth));
-
-    return {
-      sections: store.sections.length,
-      originalSections,
-      summaries,
-      totalTokens: store.totalTokens,
-      summaryLevels: maxDepth + 1,
-      indexedTerms: store.searchIndex?.terms.size || 0
-    };
+    return getStoreStatsOp(store);
   }
 
   // ============ Cleanup ============
 
   deleteStore(storeId: string): void {
-    // Delete from database first (cascades to sections, search index, sessions)
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.deleteStore(storeId);
-      } catch (error) {
-        console.error('[RLM] Failed to delete store from database:', error);
-      }
-    }
-
-    // Clear vectors for this store
-    if (this.vectorStore) {
-      try {
-        this.vectorStore.clearStore(storeId);
-      } catch (error) {
-        console.error('[RLM] Failed to clear vectors for store:', error);
-      }
-    }
-
-    this.stores.delete(storeId);
-    // Also clean up related sessions from memory
-    for (const [sessionId, session] of this.sessions) {
-      if (session.storeId === storeId) {
-        this.sessions.delete(sessionId);
-      }
-    }
+    deleteStoreOp(storeId, this.stores, this.sessions, this.getStorageDeps());
     this.emit('store:deleted', { storeId });
   }
 
   endSession(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
+    const session = endSessionOp(sessionId, this.sessions, this.getSessionDeps());
     if (session) {
-      // Mark session as ended in database
-      if (this.db && this.persistenceEnabled) {
-        try {
-          this.db.endSession(sessionId);
-        } catch (error) {
-          console.error('[RLM] Failed to end session in database:', error);
-        }
-      }
-
       this.emit('session:ended', session);
-      this.sessions.delete(sessionId);
     }
   }
 
@@ -1710,65 +563,30 @@ export class RLMContextManager extends EventEmitter {
     const store = this.stores.get(storeId);
     if (!store) return false;
 
-    const index = store.sections.findIndex((s) => s.id === sectionId);
-    if (index === -1) return false;
-
-    const section = store.sections[index];
-
-    // Remove from database
-    if (this.db && this.persistenceEnabled) {
-      try {
-        this.db.removeSection(sectionId);
-      } catch (error) {
-        console.error('[RLM] Failed to remove section from database:', error);
-      }
+    const section = removeSectionOp(store, sectionId, this.getStorageDeps());
+    if (section) {
+      this.emit('section:removed', { store, section });
+      return true;
     }
-
-    // Remove from vector store
-    if (this.vectorStore) {
-      try {
-        this.vectorStore.removeSection(sectionId);
-      } catch (error) {
-        console.error(
-          '[RLM] Failed to remove section from vector store:',
-          error
-        );
-      }
-    }
-
-    store.sections.splice(index, 1);
-    store.totalTokens -= section.tokens;
-
-    this.emit('section:removed', { store, section });
-    return true;
+    return false;
   }
 
-  /**
-   * Force reload data from persistence layer
-   */
   reloadFromPersistence(): void {
     this.stores.clear();
     this.sessions.clear();
     this.loadFromPersistence();
   }
 
-  /**
-   * Get persistence database path for debugging
-   */
   getDatabasePath(): string | null {
     return this.db?.getDatabasePath() || null;
   }
 
-  /**
-   * Get vector store statistics
-   */
+  // ============ Vector Store ============
+
   getVectorStoreStats(): ReturnType<VectorStore['getStats']> | null {
     return this.vectorStore?.getStats() || null;
   }
 
-  /**
-   * Index all sections in a store for semantic search
-   */
   async indexStoreForSemanticSearch(
     storeId: string
   ): Promise<{ indexed: number; skipped: number } | null> {
@@ -1778,382 +596,94 @@ export class RLMContextManager extends EventEmitter {
     if (!store) return null;
 
     const sections = store.sections
-      .filter((s) => s.depth === 0) // Only index original sections, not summaries
+      .filter((s) => s.depth === 0)
       .map((s) => ({ id: s.id, content: s.content }));
 
     return this.vectorStore.indexStore(storeId, sections);
   }
 
-  /**
-   * Check if semantic search is available
-   */
   isSemanticSearchAvailable(): boolean {
     return this.vectorStore !== null;
   }
 
-  /**
-   * Check if LLM service is available for summarization/sub-queries
-   */
+  // ============ LLM Service ============
+
   async isLLMAvailable(): Promise<boolean> {
     return this.llmService?.isAvailable() || false;
   }
 
-  /**
-   * Get LLM service status
-   */
   getLLMStatus(): ReturnType<LLMService['getProviderStatus']> | null {
     return this.llmService?.getProviderStatus() || null;
   }
 
-  /**
-   * Configure LLM service
-   */
   configureLLM(config: Parameters<LLMService['configure']>[0]): void {
     this.llmService?.configure(config);
   }
 
-  // ============================================
-  // Analytics Methods
-  // ============================================
+  // ============ Analytics ============
 
-  /**
-   * Get token savings history for analytics
-   */
-  getTokenSavingsHistory(days: number): {
+  getTokenSavingsHistory(
+    days: number
+  ): {
     date: string;
     directTokens: number;
     actualTokens: number;
     savingsPercent: number;
   }[] {
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    const history = new Map<string, { direct: number; actual: number }>();
-
-    const sessionRows =
-      this.db && this.persistenceEnabled ? this.db.listSessions() : [];
-
-    if (sessionRows.length > 0) {
-      for (const row of sessionRows) {
-        if (row.started_at < cutoff) continue;
-        const date = new Date(row.started_at).toISOString().split('T')[0];
-        const existing = history.get(date) || { direct: 0, actual: 0 };
-
-        existing.direct += row.estimated_direct_tokens || 0;
-        existing.actual +=
-          (row.total_root_tokens || 0) + (row.total_sub_query_tokens || 0);
-        history.set(date, existing);
-      }
-    } else {
-      for (const session of this.sessions.values()) {
-        if (session.startedAt < cutoff) continue;
-
-        const date = new Date(session.startedAt).toISOString().split('T')[0];
-        const existing = history.get(date) || { direct: 0, actual: 0 };
-
-        existing.direct += session.estimatedDirectTokens;
-        existing.actual +=
-          session.totalRootTokens + session.totalSubQueryTokens;
-        history.set(date, existing);
-      }
-    }
-
-    return Array.from(history.entries())
-      .map(([date, data]) => ({
-        date,
-        directTokens: data.direct,
-        actualTokens: data.actual,
-        savingsPercent:
-          data.direct > 0
-            ? ((data.direct - data.actual) / data.direct) * 100
-            : 0
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    return getTokenSavingsHistoryOp(days, this.sessions, this.getAnalyticsDeps());
   }
 
-  /**
-   * Get query statistics for analytics
-   */
-  getQueryStats(days: number): {
+  getQueryStats(
+    days: number
+  ): {
     type: string;
     count: number;
     avgDuration: number;
     avgTokens: number;
   }[] {
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    const stats = new Map<
-      string,
-      { count: number; totalDuration: number; totalTokens: number }
-    >();
-
-    const sessionRows =
-      this.db && this.persistenceEnabled ? this.db.listSessions() : [];
-
-    if (sessionRows.length > 0) {
-      for (const row of sessionRows) {
-        if (row.started_at < cutoff) continue;
-        if (!row.queries_json) continue;
-        const queries = JSON.parse(row.queries_json) as ContextQueryResult[];
-
-        for (const queryResult of queries) {
-          const queryType = queryResult.query.type;
-          const existing = stats.get(queryType) || {
-            count: 0,
-            totalDuration: 0,
-            totalTokens: 0
-          };
-          existing.count++;
-          existing.totalDuration += queryResult.duration || 0;
-          existing.totalTokens += queryResult.tokensUsed || 0;
-          stats.set(queryType, existing);
-        }
-      }
-    } else {
-      for (const session of this.sessions.values()) {
-        if (session.startedAt < cutoff) continue;
-
-        for (const queryResult of session.queries) {
-          const queryType = queryResult.query.type;
-          const existing = stats.get(queryType) || {
-            count: 0,
-            totalDuration: 0,
-            totalTokens: 0
-          };
-          existing.count++;
-          existing.totalDuration += queryResult.duration || 0;
-          existing.totalTokens += queryResult.tokensUsed || 0;
-          stats.set(queryType, existing);
-        }
-      }
-    }
-
-    return Array.from(stats.entries())
-      .map(([type, data]) => ({
-        type,
-        count: data.count,
-        avgDuration: data.count > 0 ? data.totalDuration / data.count : 0,
-        avgTokens: data.count > 0 ? data.totalTokens / data.count : 0
-      }))
-      .sort((a, b) => b.count - a.count);
+    return getQueryStatsOp(days, this.sessions, this.getAnalyticsDeps());
   }
 
-  /**
-   * Get storage statistics for analytics
-   */
-  getStorageStats(): {
-    totalStores: number;
-    totalSections: number;
-    totalTokens: number;
-    totalSizeBytes: number;
-    byType: { type: string; count: number; tokens: number }[];
-  } {
-    let totalSections = 0;
-    let totalTokens = 0;
-    let totalSize = 0;
-    const byType = new Map<string, { count: number; tokens: number }>();
-
-    for (const store of this.stores.values()) {
-      for (const section of store.sections) {
-        totalSections++;
-        totalTokens += section.tokens;
-        totalSize += section.content.length;
-
-        const existing = byType.get(section.type) || { count: 0, tokens: 0 };
-        existing.count++;
-        existing.tokens += section.tokens;
-        byType.set(section.type, existing);
-      }
-    }
-
-    return {
-      totalStores: this.stores.size,
-      totalSections,
-      totalTokens,
-      totalSizeBytes: totalSize,
-      byType: Array.from(byType.entries())
-        .map(([type, data]) => ({ type, ...data }))
-        .sort((a, b) => b.tokens - a.tokens)
-    };
+  getStorageStats(): StorageStats {
+    return getStorageStatsOp(this.stores);
   }
 
-  // ============================================
-  // Export/Import Methods
-  // ============================================
+  // ============ Import/Export ============
 
-  /**
-   * Export store to portable format
-   */
   exportStore(storeId: string): ExportedStore | null {
     const store = this.stores.get(storeId);
     if (!store) return null;
-
-    return {
-      version: '1.0',
-      exportedAt: Date.now(),
-      store: {
-        id: store.id,
-        instanceId: store.instanceId,
-        sections: store.sections.map((s) => ({
-          id: s.id,
-          type: s.type,
-          name: s.name,
-          content: s.content,
-          tokens: s.tokens,
-          startOffset: s.startOffset,
-          endOffset: s.endOffset,
-          checksum: s.checksum,
-          depth: s.depth,
-          summarizes: s.summarizes,
-          parentSummaryId: s.parentSummaryId,
-          filePath: s.filePath,
-          language: s.language,
-          sourceUrl: s.sourceUrl
-        })),
-        totalTokens: store.totalTokens,
-        totalSize: store.totalSize,
-        createdAt: store.createdAt,
-        accessCount: store.accessCount
-      }
-    };
+    return exportStoreOp(store);
   }
 
-  /**
-   * Import store from exported format
-   */
-  importStore(
-    data: ExportedStore,
-    options?: {
-      newId?: boolean;
-      merge?: boolean;
-      targetStoreId?: string;
-      instanceId?: string;
-    }
-  ): string {
-    const storeId = options?.newId
-      ? `store-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      : options?.targetStoreId || data.store.id;
-
-    if (options?.merge && this.stores.has(storeId)) {
-      // Merge into existing store
-      const existing = this.stores.get(storeId)!;
-      for (const section of data.store.sections) {
-        const exists = existing.sections.some((s) => s.id === section.id);
-        if (!exists) {
-          this.addSection(
-            storeId,
-            section.type,
-            section.name,
-            section.content,
-            {
-              filePath: section.filePath,
-              language: section.language,
-              sourceUrl: section.sourceUrl
-            } as Partial<ContextSection>
-          );
-        }
-      }
-      this.emit('store:imported', {
-        storeId,
-        sectionCount: data.store.sections.length,
-        merged: true
-      });
-      return storeId;
-    }
-
-    // Create new store using the existing createStore method
-    const instanceId = options?.instanceId || data.store.instanceId;
-    const store = this.createStore(instanceId);
-
-    // If newId was requested, use the generated ID
-    // Otherwise, we need to update the store ID
-    if (!options?.newId && storeId !== store.id) {
-      // Remove the auto-generated store and recreate with correct ID
-      this.stores.delete(store.id);
-
-      const newStore: ContextStore = {
-        id: storeId,
-        instanceId,
-        sections: [],
-        totalTokens: 0,
-        totalSize: 0,
-        searchIndex: {
-          terms: new Map(),
-          sectionBoundaries: [],
-          lastRebuilt: Date.now()
-        },
-        accessCount: 0,
-        createdAt: Date.now(),
-        lastAccessed: Date.now()
-      };
-
-      this.stores.set(storeId, newStore);
-
-      // Persist the store
-      if (this.db && this.persistenceEnabled) {
-        try {
-          this.db.createStore({
-            id: storeId,
-            instanceId
-          });
-        } catch (error) {
-          console.error('[RLM] Failed to persist imported store:', error);
-        }
-      }
-    }
-
-    const finalStoreId = options?.newId ? store.id : storeId;
-
-    // Add sections
-    for (const section of data.store.sections) {
-      this.addSection(
-        finalStoreId,
-        section.type,
-        section.name,
-        section.content,
-        {
-          filePath: section.filePath,
-          language: section.language,
-          sourceUrl: section.sourceUrl
-        } as Partial<ContextSection>
-      );
-    }
+  importStore(data: ExportedStore, options?: ImportStoreOptions): string {
+    const storeId = importStoreOp(
+      data,
+      options,
+      this.stores,
+      (store, type, name, content, metadata) =>
+        addSectionOp(store, type, name, content, metadata, this.getStorageDeps()),
+      { db: this.db, persistenceEnabled: this.persistenceEnabled }
+    );
 
     this.emit('store:imported', {
-      storeId: finalStoreId,
+      storeId,
       sectionCount: data.store.sections.length,
-      merged: false
+      merged: options?.merge || false
     });
-    return finalStoreId;
+
+    return storeId;
+  }
+
+  // ============ Utilities ============
+
+  private estimateTokens(text: string): number {
+    if (this.llmService) {
+      return this.llmService.getTokenCounter().countTokens(text);
+    }
+    return defaultEstimateTokens(text);
   }
 }
 
-// ============================================
-// Export/Import Types
-// ============================================
-
-export interface ExportedStore {
-  version: string;
-  exportedAt: number;
-  store: {
-    id: string;
-    instanceId: string;
-    sections: {
-      id: string;
-      type: ContextSection['type'];
-      name: string;
-      content: string;
-      tokens: number;
-      startOffset: number;
-      endOffset: number;
-      checksum: string;
-      depth: number;
-      summarizes?: string[];
-      parentSummaryId?: string;
-      filePath?: string;
-      language?: string;
-      sourceUrl?: string;
-    }[];
-    totalTokens: number;
-    totalSize: number;
-    createdAt: number;
-    accessCount: number;
-  };
-}
+// Re-export types for backwards compatibility
+export type { ExportedStore } from './context';

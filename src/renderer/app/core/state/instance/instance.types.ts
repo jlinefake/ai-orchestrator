@@ -1,0 +1,101 @@
+/**
+ * Instance Store Type Definitions
+ */
+
+import type { AgentMode } from '../../../../../shared/types/agent.types';
+import type { FileAttachment } from '../../../../../shared/types/instance.types';
+
+// ============================================
+// Core Types
+// ============================================
+
+export type InstanceStatus =
+  | 'initializing'
+  | 'idle'
+  | 'busy'
+  | 'waiting_for_input'
+  | 'error'
+  | 'terminated';
+
+export interface ContextUsage {
+  used: number;
+  total: number;
+  percentage: number;
+  costEstimate?: number; // Estimated cost in dollars
+}
+
+export interface OutputMessage {
+  id: string;
+  timestamp: number;
+  type: 'assistant' | 'user' | 'system' | 'tool_use' | 'tool_result' | 'error';
+  content: string;
+  metadata?: Record<string, unknown>;
+  /** File attachments for user messages */
+  attachments?: FileAttachment[];
+}
+
+export type InstanceProvider = 'claude' | 'codex' | 'gemini' | 'ollama' | 'copilot';
+
+export interface Instance {
+  id: string;
+  displayName: string;
+  createdAt: number;
+  parentId: string | null;
+  childrenIds: string[];
+  agentId: string; // Agent profile ID ('build', 'plan', 'review', etc.)
+  agentMode: AgentMode; // Agent mode type
+  provider: InstanceProvider; // CLI provider being used
+  status: InstanceStatus;
+  contextUsage: ContextUsage;
+  lastActivity: number;
+  currentActivity?: string; // Human-readable activity description
+  currentTool?: string; // Current tool being used
+  sessionId: string;
+  workingDirectory: string;
+  yoloMode: boolean;
+  outputBuffer: OutputMessage[];
+}
+
+// ============================================
+// Store State
+// ============================================
+
+export interface InstanceStoreState {
+  instances: Map<string, Instance>;
+  selectedInstanceId: string | null;
+  loading: boolean;
+  error: string | null;
+}
+
+// ============================================
+// Message Queue Types
+// ============================================
+
+export interface QueuedMessage {
+  message: string;
+  files?: File[];
+}
+
+// ============================================
+// Configuration Types
+// ============================================
+
+export interface CreateInstanceConfig {
+  workingDirectory?: string;
+  displayName?: string;
+  parentId?: string;
+  yoloMode?: boolean;
+  agentId?: string;
+  provider?: 'claude' | 'openai' | 'gemini' | 'copilot' | 'auto';
+  model?: string;
+}
+
+// ============================================
+// File Handling Constants
+// ============================================
+
+export const FILE_LIMITS = {
+  MAX_IMAGE_SIZE: 5 * 1024 * 1024,     // 5MB for images (API hard limit)
+  MAX_FILE_SIZE: 30 * 1024 * 1024,      // 30MB for other files (API limit)
+  MAX_IMAGE_DIMENSION: 8000,            // Maximum dimension for images
+} as const;

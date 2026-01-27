@@ -1,139 +1,55 @@
 /**
- * Enhanced Hook Executor
+ * Enhanced Hook Executor - Thin Coordinator
  *
  * Advanced hook execution with:
  * - Blocking hooks that can modify/cancel tool execution
  * - Enhanced shell execution with streaming output
  * - Hook chaining and dependency resolution
  * - Conditional execution based on previous results
+ *
+ * This is a facade that delegates to focused sub-modules.
  */
 
 import { EventEmitter } from 'events';
-import { spawn, ChildProcess } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import { dialog, BrowserWindow } from 'electron';
+import { ChildProcess } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
-import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 
-export type HookTiming = 'pre' | 'post';
-export type HookAction = 'allow' | 'block' | 'modify' | 'skip';
+// Import from decomposed modules
+import {
+  type HookTiming,
+  type HookAction,
+  type EnhancedHookConfig,
+  type EnhancedHookHandler,
+  type HookCondition,
+  type HookExecutionContext,
+  type HookExecutionResult,
+  type BlockingResult,
+  DEFAULT_ALLOWED_EXEC_DIRS
+} from './executor/hook-types';
 
-export interface EnhancedHookConfig {
-  id: string;
-  name: string;
-  enabled: boolean;
-  event: string;
-  timing: HookTiming;
-  handler: EnhancedHookHandler;
-  /** Priority for execution order (lower = earlier) */
-  priority?: number;
-  /** Dependencies on other hooks */
-  dependsOn?: string[];
-  /** Conditions for execution */
-  conditions?: HookCondition[];
-  /** Whether this hook can block execution */
-  blocking?: boolean;
-  /** Timeout in milliseconds */
-  timeout?: number;
-  /** Require explicit approval before execution */
-  approvalRequired?: boolean;
-  /** Whether this hook has been approved */
-  approved?: boolean;
-}
+import { checkConditions } from './executor/hook-validation';
+import { executeCommand } from './executor/hook-command';
+import { executeScript } from './executor/hook-script';
+import { executePrompt } from './executor/hook-prompt';
+import { executeFunction } from './executor/hook-function';
+import {
+  resolveDependencies,
+  sortByPriority,
+  checkDependenciesSucceeded
+} from './executor/hook-dependencies';
+import { requestApproval } from './executor/hook-approval';
 
-export interface EnhancedHookHandler {
-  type: 'command' | 'prompt' | 'script' | 'function';
-  /** Command string for 'command' type */
-  command?: string;
-  /** Script path for 'script' type */
-  scriptPath?: string;
-  /** Prompt template for 'prompt' type */
-  prompt?: string;
-  /** Model for prompt evaluation */
-  model?: string;
-  /** Function name for 'function' type */
-  functionName?: string;
-  /** Capture and stream output */
-  streamOutput?: boolean;
-  /** Environment variables */
-  env?: Record<string, string>;
-  /** Working directory */
-  workingDirectory?: string;
-  /** Allow shell features like pipes/redirects (disabled by default) */
-  allowShell?: boolean;
-  /** Allow script execution (disabled by default) */
-  allowScript?: boolean;
-  /** Allowed executables (absolute paths or basenames) */
-  allowedExecutables?: string[];
-  /** Allowed script directories (absolute paths) */
-  allowedScriptDirs?: string[];
-}
-
-export interface HookCondition {
-  type: 'file_pattern' | 'tool_name' | 'content_match' | 'env_var' | 'custom';
-  value: string;
-  operator?: 'equals' | 'contains' | 'matches' | 'not_equals' | 'exists';
-}
-
-export interface HookExecutionContext {
-  instanceId?: string;
-  workingDirectory?: string;
-  env?: Record<string, string>;
-  filePath?: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
-  command?: string;
-  content?: string;
-  dryRun?: boolean;
-  /** Results from previous hooks in chain */
-  previousResults?: HookExecutionResult[];
-  /** Original tool call data */
-  originalToolCall?: {
-    name: string;
-    input: Record<string, unknown>;
-  };
-}
-
-export interface HookExecutionResult {
-  hookId: string;
-  hookName: string;
-  success: boolean;
-  action: HookAction;
-  output?: string;
-  error?: string;
-  duration: number;
-  timestamp: number;
-  /** Modified data if action is 'modify' */
-  modifiedData?: Record<string, unknown>;
-  /** Reason for blocking if action is 'block' */
-  blockReason?: string;
-  /** Stream output chunks if streaming */
-  streamChunks?: string[];
-}
-
-export interface BlockingResult {
-  blocked: boolean;
-  reason?: string;
-  modifiedInput?: Record<string, unknown>;
-}
-
-const DEFAULT_TIMEOUT = 30000;
-const MAX_OUTPUT_SIZE = 1024 * 1024; // 1MB
-const SHELL_METACHAR_PATTERN = /[|&;<>()`$\n\r]/;
-
-const DEFAULT_ALLOWED_EXEC_DIRS = (() => {
-  const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '';
-  return [
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-    `${homeDir}/.local/bin`,
-    `${homeDir}/.npm-global/bin`,
-    `${homeDir}/.nvm/versions/node/current/bin`,
-    '/usr/bin',
-    '/bin'
-  ].filter(Boolean);
-})();
+// Re-export types for backwards compatibility
+export type {
+  HookTiming,
+  HookAction,
+  EnhancedHookConfig,
+  EnhancedHookHandler,
+  HookCondition,
+  HookExecutionContext,
+  HookExecutionResult,
+  BlockingResult
+};
 
 export class EnhancedHookExecutor extends EventEmitter {
   private static instance: EnhancedHookExecutor | null = null;
@@ -223,7 +139,7 @@ export class EnhancedHookExecutor extends EventEmitter {
     };
 
     // Check conditions
-    if (hook.conditions && !this.checkConditions(hook.conditions, context)) {
+    if (hook.conditions && !checkConditions(hook.conditions, context)) {
       return {
         ...baseResult,
         success: true,
@@ -234,7 +150,7 @@ export class EnhancedHookExecutor extends EventEmitter {
     }
 
     if (hook.approvalRequired && !hook.approved) {
-      const approved = this.requestApproval(hook, context);
+      const approved = requestApproval(hook, context, this);
       if (!approved.approved) {
         this.emit('hook:approval-denied', { hookId: hook.id, hook, context });
         return {
@@ -260,13 +176,26 @@ export class EnhancedHookExecutor extends EventEmitter {
     try {
       switch (hook.handler.type) {
         case 'command':
-          return await this.executeCommand(hook, context);
+          return await executeCommand(
+            hook,
+            context,
+            this.allowedExecutableDirs,
+            this.activeProcesses,
+            this
+          );
         case 'script':
-          return await this.executeScript(hook, context);
+          return await executeScript(
+            hook,
+            context,
+            this.allowedExecutableDirs,
+            this.allowedScriptDirs,
+            this.activeProcesses,
+            this
+          );
         case 'prompt':
-          return await this.executePrompt(hook, context);
+          return await executePrompt(hook, context, this.anthropic);
         case 'function':
-          return await this.executeFunction(hook, context);
+          return await executeFunction(hook, context, this.registeredFunctions);
         default:
           return {
             ...baseResult,
@@ -299,13 +228,9 @@ export class EnhancedHookExecutor extends EventEmitter {
     blocked: boolean;
     modifiedData?: Record<string, unknown>;
   }> {
-    // Sort by priority
-    const sortedHooks = [...hooks].sort(
-      (a, b) => (a.priority || 0) - (b.priority || 0)
-    );
-
-    // Resolve dependencies
-    const orderedHooks = this.resolveDependencies(sortedHooks);
+    // Sort by priority then resolve dependencies
+    const sortedHooks = sortByPriority(hooks);
+    const orderedHooks = resolveDependencies(sortedHooks);
 
     const results: HookExecutionResult[] = [];
     let finalAction: HookAction = 'allow';
@@ -313,24 +238,17 @@ export class EnhancedHookExecutor extends EventEmitter {
 
     for (const hook of orderedHooks) {
       // Check if dependencies succeeded
-      if (hook.dependsOn && hook.dependsOn.length > 0) {
-        const depsFailed = hook.dependsOn.some((depId) => {
-          const depResult = results.find((r) => r.hookId === depId);
-          return !depResult || !depResult.success;
+      if (!checkDependenciesSucceeded(hook, results)) {
+        results.push({
+          hookId: hook.id,
+          hookName: hook.name,
+          success: false,
+          action: 'skip',
+          error: 'Dependency failed',
+          duration: 0,
+          timestamp: Date.now()
         });
-
-        if (depsFailed) {
-          results.push({
-            hookId: hook.id,
-            hookName: hook.name,
-            success: false,
-            action: 'skip',
-            error: 'Dependency failed',
-            duration: 0,
-            timestamp: Date.now()
-          });
-          continue;
-        }
+        continue;
       }
 
       const result = await this.execute(hook, {
@@ -386,885 +304,6 @@ export class EnhancedHookExecutor extends EventEmitter {
       this.emit('hook-cancelled', { hookId });
     }
     this.activeProcesses.clear();
-  }
-
-  // ============ Condition Checking ============
-
-  private checkConditions(
-    conditions: HookCondition[],
-    context: HookExecutionContext
-  ): boolean {
-    return conditions.every((condition) =>
-      this.checkCondition(condition, context)
-    );
-  }
-
-  private checkCondition(
-    condition: HookCondition,
-    context: HookExecutionContext
-  ): boolean {
-    const operator = condition.operator || 'equals';
-
-    switch (condition.type) {
-      case 'file_pattern': {
-        if (!context.filePath) return operator === 'not_equals';
-        return this.matchPattern(context.filePath, condition.value, operator);
-      }
-
-      case 'tool_name': {
-        if (!context.toolName) return operator === 'not_equals';
-        return this.matchPattern(context.toolName, condition.value, operator);
-      }
-
-      case 'content_match': {
-        if (!context.content) return operator === 'not_equals';
-        return this.matchPattern(context.content, condition.value, operator);
-      }
-
-      case 'env_var': {
-        const [varName, expectedValue] = condition.value.split('=');
-        const actualValue = context.env?.[varName] || process.env[varName];
-
-        if (operator === 'exists') {
-          return actualValue !== undefined;
-        }
-
-        if (!actualValue) return operator === 'not_equals';
-        return this.matchPattern(actualValue, expectedValue || '', operator);
-      }
-
-      case 'custom':
-        // Custom conditions need external evaluation
-        return true;
-
-      default:
-        return true;
-    }
-  }
-
-  private matchPattern(
-    value: string,
-    pattern: string,
-    operator: string
-  ): boolean {
-    switch (operator) {
-      case 'equals':
-        return value === pattern;
-      case 'not_equals':
-        return value !== pattern;
-      case 'contains':
-        return value.includes(pattern);
-      case 'matches':
-        try {
-          return new RegExp(pattern).test(value);
-        } catch {
-          return false;
-        }
-      default:
-        return false;
-    }
-  }
-
-  // ============ Command Execution ============
-
-  private async executeCommand(
-    hook: EnhancedHookConfig,
-    context: HookExecutionContext
-  ): Promise<HookExecutionResult> {
-    const startTime = Date.now();
-    const handler = hook.handler;
-    const command = this.interpolateString(handler.command || '', context, {
-      escapeShell: true
-    });
-    const timeout = hook.timeout || DEFAULT_TIMEOUT;
-
-    if (context.dryRun) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: true,
-        action: 'allow',
-        output: `[DRY RUN] Would execute: ${command}`,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    if (!command.trim()) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: 'Empty command',
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    const containsShellMetachars = SHELL_METACHAR_PATTERN.test(command);
-    if (containsShellMetachars && !handler.allowShell) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: hook.blocking ? 'block' : 'skip',
-        error:
-          'Shell features are disabled for hooks. Set allowShell: true to enable.',
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    const cwd =
-      handler.workingDirectory || context.workingDirectory || process.cwd();
-    const env = { ...process.env, ...context.env, ...handler.env };
-
-    if (!containsShellMetachars) {
-      const parsed = this.parseCommand(command);
-      if (!parsed) {
-        return {
-          hookId: hook.id,
-          hookName: hook.name,
-          success: false,
-          action: 'skip',
-          error: 'Failed to parse command',
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        };
-      }
-
-      const resolvedExecutable = this.resolveExecutable(parsed.command, cwd);
-      if (!resolvedExecutable) {
-        return {
-          hookId: hook.id,
-          hookName: hook.name,
-          success: false,
-          action: hook.blocking ? 'block' : 'skip',
-          error: `Executable not found: ${parsed.command}`,
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        };
-      }
-
-      if (
-        !this.isExecutableAllowed(
-          resolvedExecutable,
-          handler.allowedExecutables
-        )
-      ) {
-        return {
-          hookId: hook.id,
-          hookName: hook.name,
-          success: false,
-          action: hook.blocking ? 'block' : 'skip',
-          error: `Executable not allowed: ${resolvedExecutable}`,
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        };
-      }
-
-      return new Promise<HookExecutionResult>((resolve) => {
-        let output = '';
-        let errorOutput = '';
-        let timedOut = false;
-        const streamChunks: string[] = [];
-
-        const proc = spawn(resolvedExecutable, parsed.args, { cwd, env });
-
-        this.activeProcesses.set(hook.id, proc);
-
-        const timeoutId = setTimeout(() => {
-          timedOut = true;
-          proc.kill('SIGTERM');
-        }, timeout);
-
-        proc.stdout.on('data', (data) => {
-          const chunk = data.toString();
-          if (output.length + chunk.length <= MAX_OUTPUT_SIZE) {
-            output += chunk;
-          }
-          if (handler.streamOutput) {
-            streamChunks.push(chunk);
-            this.emit('hook-output', {
-              hookId: hook.id,
-              chunk,
-              stream: 'stdout'
-            });
-          }
-        });
-
-        proc.stderr.on('data', (data) => {
-          const chunk = data.toString();
-          if (errorOutput.length + chunk.length <= MAX_OUTPUT_SIZE) {
-            errorOutput += chunk;
-          }
-          if (handler.streamOutput) {
-            streamChunks.push(chunk);
-            this.emit('hook-output', {
-              hookId: hook.id,
-              chunk,
-              stream: 'stderr'
-            });
-          }
-        });
-
-        proc.on('close', (code) => {
-          clearTimeout(timeoutId);
-          this.activeProcesses.delete(hook.id);
-
-          const duration = Date.now() - startTime;
-
-          if (timedOut) {
-            resolve({
-              hookId: hook.id,
-              hookName: hook.name,
-              success: false,
-              action: 'skip',
-              error: `Command timed out after ${timeout}ms`,
-              output,
-              duration,
-              timestamp: startTime,
-              streamChunks: handler.streamOutput ? streamChunks : undefined
-            });
-            return;
-          }
-
-          // Parse blocking result from output if blocking hook
-          let action: HookAction = 'allow';
-          let blockReason: string | undefined;
-          let modifiedData: Record<string, unknown> | undefined;
-
-          if (hook.blocking && code !== 0) {
-            action = 'block';
-            blockReason = errorOutput || `Hook exited with code ${code}`;
-          } else if (output.includes('HOOK_BLOCK:')) {
-            action = 'block';
-            blockReason = output.split('HOOK_BLOCK:')[1]?.trim();
-          } else if (output.includes('HOOK_MODIFY:')) {
-            action = 'modify';
-            try {
-              const jsonStr = output.split('HOOK_MODIFY:')[1]?.trim();
-              modifiedData = JSON.parse(jsonStr);
-            } catch {
-              // Invalid JSON, ignore modification
-            }
-          }
-
-          resolve({
-            hookId: hook.id,
-            hookName: hook.name,
-            success: code === 0 || action === 'allow',
-            action,
-            output,
-            error: code !== 0 ? errorOutput || `Exit code ${code}` : undefined,
-            duration,
-            timestamp: startTime,
-            blockReason,
-            modifiedData,
-            streamChunks: handler.streamOutput ? streamChunks : undefined
-          });
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(timeoutId);
-          this.activeProcesses.delete(hook.id);
-
-          resolve({
-            hookId: hook.id,
-            hookName: hook.name,
-            success: false,
-            action: 'skip',
-            error: `Failed to execute: ${err.message}`,
-            duration: Date.now() - startTime,
-            timestamp: startTime
-          });
-        });
-      });
-    }
-
-    return new Promise<HookExecutionResult>((resolve) => {
-      let output = '';
-      let errorOutput = '';
-      let timedOut = false;
-      const streamChunks: string[] = [];
-
-      const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
-      const shellArgs =
-        process.platform === 'win32' ? ['/c', command] : ['-c', command];
-
-      const proc = spawn(shell, shellArgs, { cwd, env });
-
-      this.activeProcesses.set(hook.id, proc);
-
-      const timeoutId = setTimeout(() => {
-        timedOut = true;
-        proc.kill('SIGTERM');
-      }, timeout);
-
-      proc.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        if (output.length + chunk.length <= MAX_OUTPUT_SIZE) {
-          output += chunk;
-        }
-        if (handler.streamOutput) {
-          streamChunks.push(chunk);
-          this.emit('hook-output', {
-            hookId: hook.id,
-            chunk,
-            stream: 'stdout'
-          });
-        }
-      });
-
-      proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        if (errorOutput.length + chunk.length <= MAX_OUTPUT_SIZE) {
-          errorOutput += chunk;
-        }
-        if (handler.streamOutput) {
-          streamChunks.push(chunk);
-          this.emit('hook-output', {
-            hookId: hook.id,
-            chunk,
-            stream: 'stderr'
-          });
-        }
-      });
-
-      proc.on('close', (code) => {
-        clearTimeout(timeoutId);
-        this.activeProcesses.delete(hook.id);
-
-        const duration = Date.now() - startTime;
-
-        if (timedOut) {
-          resolve({
-            hookId: hook.id,
-            hookName: hook.name,
-            success: false,
-            action: 'skip',
-            error: `Command timed out after ${timeout}ms`,
-            output,
-            duration,
-            timestamp: startTime,
-            streamChunks: handler.streamOutput ? streamChunks : undefined
-          });
-          return;
-        }
-
-        // Parse blocking result from output if blocking hook
-        let action: HookAction = 'allow';
-        let blockReason: string | undefined;
-        let modifiedData: Record<string, unknown> | undefined;
-
-        if (hook.blocking && code !== 0) {
-          action = 'block';
-          blockReason = errorOutput || `Hook exited with code ${code}`;
-        } else if (output.includes('HOOK_BLOCK:')) {
-          action = 'block';
-          blockReason = output.split('HOOK_BLOCK:')[1]?.trim();
-        } else if (output.includes('HOOK_MODIFY:')) {
-          action = 'modify';
-          try {
-            const jsonStr = output.split('HOOK_MODIFY:')[1]?.trim();
-            modifiedData = JSON.parse(jsonStr);
-          } catch {
-            // Invalid JSON, ignore modification
-          }
-        }
-
-        resolve({
-          hookId: hook.id,
-          hookName: hook.name,
-          success: code === 0 || action === 'allow',
-          action,
-          output,
-          error: code !== 0 ? errorOutput || `Exit code ${code}` : undefined,
-          duration,
-          timestamp: startTime,
-          blockReason,
-          modifiedData,
-          streamChunks: handler.streamOutput ? streamChunks : undefined
-        });
-      });
-
-      proc.on('error', (err) => {
-        clearTimeout(timeoutId);
-        this.activeProcesses.delete(hook.id);
-
-        resolve({
-          hookId: hook.id,
-          hookName: hook.name,
-          success: false,
-          action: 'skip',
-          error: `Failed to execute: ${err.message}`,
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        });
-      });
-    });
-  }
-
-  // ============ Script Execution ============
-
-  private async executeScript(
-    hook: EnhancedHookConfig,
-    context: HookExecutionContext
-  ): Promise<HookExecutionResult> {
-    const handler = hook.handler;
-    if (!handler.allowScript) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: hook.blocking ? 'block' : 'skip',
-        error:
-          'Script execution is disabled for hooks. Set allowScript: true to enable.',
-        duration: 0,
-        timestamp: Date.now()
-      };
-    }
-
-    const scriptPath = this.interpolateString(
-      handler.scriptPath || '',
-      context
-    );
-    const cwd =
-      handler.workingDirectory || context.workingDirectory || process.cwd();
-    const resolvedScriptPath = path.resolve(cwd, scriptPath);
-
-    if (!fs.existsSync(resolvedScriptPath)) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: hook.blocking ? 'block' : 'skip',
-        error: `Script not found: ${resolvedScriptPath}`,
-        duration: 0,
-        timestamp: Date.now()
-      };
-    }
-
-    if (
-      !this.isScriptAllowed(resolvedScriptPath, handler.allowedScriptDirs, cwd)
-    ) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: hook.blocking ? 'block' : 'skip',
-        error: `Script path not allowed: ${resolvedScriptPath}`,
-        duration: 0,
-        timestamp: Date.now()
-      };
-    }
-
-    // Determine script type by extension
-    const ext = path.extname(scriptPath).toLowerCase();
-    let interpreter: string;
-
-    switch (ext) {
-      case '.js':
-        interpreter = 'node';
-        break;
-      case '.py':
-        interpreter = 'python3';
-        break;
-      case '.rb':
-        interpreter = 'ruby';
-        break;
-      case '.sh':
-        interpreter = '/bin/bash';
-        break;
-      case '.ps1':
-        interpreter = 'powershell';
-        break;
-      default:
-        interpreter = '/bin/bash';
-    }
-
-    // Execute as command with interpreter
-    const commandHook: EnhancedHookConfig = {
-      ...hook,
-      handler: {
-        ...handler,
-        type: 'command',
-        command: `${interpreter} "${resolvedScriptPath}"`,
-        allowShell: false
-      }
-    };
-
-    return this.executeCommand(commandHook, context);
-  }
-
-  // ============ Prompt Execution ============
-
-  private async executePrompt(
-    hook: EnhancedHookConfig,
-    context: HookExecutionContext
-  ): Promise<HookExecutionResult> {
-    const startTime = Date.now();
-    const handler = hook.handler;
-    const prompt = this.interpolateString(handler.prompt || '', context);
-
-    if (context.dryRun) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: true,
-        action: 'allow',
-        output: `[DRY RUN] Would evaluate prompt: ${prompt.slice(0, 100)}...`,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    if (!this.anthropic) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: 'Anthropic client not initialized for prompt hooks',
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    try {
-      const response = await this.anthropic.messages.create({
-        model: handler.model || CLAUDE_MODELS.HAIKU,
-        max_tokens: 1024,
-        system: `You are a security and code review assistant evaluating whether a tool call should be allowed.
-
-Respond with a JSON object:
-- action: "allow", "block", or "modify"
-- reason: explanation of your decision
-- modification: (optional) modified parameters if action is "modify"
-
-Be concise and security-focused.`,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      });
-
-      const responseText =
-        response.content[0].type === 'text' ? response.content[0].text : '';
-
-      // Parse response
-      try {
-        const parsed = JSON.parse(responseText);
-        return {
-          hookId: hook.id,
-          hookName: hook.name,
-          success: true,
-          action: parsed.action || 'allow',
-          output: parsed.reason,
-          blockReason: parsed.action === 'block' ? parsed.reason : undefined,
-          modifiedData: parsed.modification,
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        };
-      } catch {
-        // Non-JSON response, assume allow
-        return {
-          hookId: hook.id,
-          hookName: hook.name,
-          success: true,
-          action: 'allow',
-          output: responseText,
-          duration: Date.now() - startTime,
-          timestamp: startTime
-        };
-      }
-    } catch (error) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: (error as Error).message,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-  }
-
-  // ============ Function Execution ============
-
-  private async executeFunction(
-    hook: EnhancedHookConfig,
-    context: HookExecutionContext
-  ): Promise<HookExecutionResult> {
-    const startTime = Date.now();
-    const functionName = hook.handler.functionName;
-
-    if (!functionName) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: 'No function name specified',
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    const fn = this.registeredFunctions.get(functionName);
-    if (!fn) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: `Function not registered: ${functionName}`,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-
-    try {
-      const result = await fn(context);
-      return {
-        ...result,
-        hookId: hook.id,
-        hookName: hook.name,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    } catch (error) {
-      return {
-        hookId: hook.id,
-        hookName: hook.name,
-        success: false,
-        action: 'skip',
-        error: (error as Error).message,
-        duration: Date.now() - startTime,
-        timestamp: startTime
-      };
-    }
-  }
-
-  // ============ Dependency Resolution ============
-
-  private resolveDependencies(
-    hooks: EnhancedHookConfig[]
-  ): EnhancedHookConfig[] {
-    const resolved: EnhancedHookConfig[] = [];
-    const seen = new Set<string>();
-    const visiting = new Set<string>();
-
-    const visit = (hook: EnhancedHookConfig): void => {
-      if (seen.has(hook.id)) return;
-      if (visiting.has(hook.id)) {
-        throw new Error(`Circular dependency detected: ${hook.id}`);
-      }
-
-      visiting.add(hook.id);
-
-      // Visit dependencies first
-      if (hook.dependsOn) {
-        for (const depId of hook.dependsOn) {
-          const depHook = hooks.find((h) => h.id === depId);
-          if (depHook) {
-            visit(depHook);
-          }
-        }
-      }
-
-      visiting.delete(hook.id);
-      seen.add(hook.id);
-      resolved.push(hook);
-    };
-
-    for (const hook of hooks) {
-      visit(hook);
-    }
-
-    return resolved;
-  }
-
-  // ============ String Interpolation ============
-
-  private interpolateString(
-    str: string,
-    context: HookExecutionContext,
-    options: { escapeShell?: boolean } = {}
-  ): string {
-    const apply = (value: string): string => {
-      if (!options.escapeShell) return value;
-      return this.escapeShellValue(value);
-    };
-
-    return str
-      .replace(/\$\{file\}/g, apply(context.filePath || ''))
-      .replace(/\$\{tool\}/g, apply(context.toolName || ''))
-      .replace(/\$\{command\}/g, apply(context.command || ''))
-      .replace(/\$\{content\}/g, apply(context.content || ''))
-      .replace(/\$\{cwd\}/g, apply(context.workingDirectory || process.cwd()))
-      .replace(/\$\{instanceId\}/g, apply(context.instanceId || ''))
-      .replace(
-        /\$\{toolInput\}/g,
-        apply(JSON.stringify(context.toolInput || {}))
-      )
-      .replace(/\$\{env\.(\w+)\}/g, (_, name) =>
-        apply(context.env?.[name] || process.env[name] || '')
-      );
-  }
-
-  private escapeShellValue(value: string): string {
-    if (value === '') return "''";
-    return `'${value.replace(/'/g, `'"'"'`)}'`;
-  }
-
-  private parseCommand(
-    command: string
-  ): { command: string; args: string[] } | null {
-    const args: string[] = [];
-    let current = '';
-    let inSingle = false;
-    let inDouble = false;
-    let escaped = false;
-
-    for (let i = 0; i < command.length; i++) {
-      const ch = command[i];
-      if (escaped) {
-        current += ch;
-        escaped = false;
-        continue;
-      }
-      if (ch === '\\' && !inSingle) {
-        escaped = true;
-        continue;
-      }
-      if (ch === "'" && !inDouble) {
-        inSingle = !inSingle;
-        continue;
-      }
-      if (ch === '"' && !inSingle) {
-        inDouble = !inDouble;
-        continue;
-      }
-      if (!inSingle && !inDouble && /\s/.test(ch)) {
-        if (current) {
-          args.push(current);
-          current = '';
-        }
-        continue;
-      }
-      current += ch;
-    }
-
-    if (escaped || inSingle || inDouble) {
-      return null;
-    }
-
-    if (current) args.push(current);
-    if (args.length === 0) return null;
-    const [cmd, ...rest] = args;
-    return { command: cmd, args: rest };
-  }
-
-  private resolveExecutable(command: string, cwd: string): string | null {
-    const hasPath = command.includes('/') || command.includes('\\');
-    const candidate = hasPath ? path.resolve(cwd, command) : command;
-    if (hasPath && fs.existsSync(candidate)) {
-      return candidate;
-    }
-
-    const pathEntries = (process.env['PATH'] || '')
-      .split(path.delimiter)
-      .filter(Boolean);
-    for (const entry of pathEntries) {
-      const fullPath = path.join(entry, command);
-      if (fs.existsSync(fullPath)) {
-        return fullPath;
-      }
-    }
-
-    return null;
-  }
-
-  private isExecutableAllowed(
-    resolvedPath: string,
-    allowedExecutables?: string[]
-  ): boolean {
-    if (allowedExecutables && allowedExecutables.length > 0) {
-      const baseName = path.basename(resolvedPath);
-      return allowedExecutables.some((allowed) => {
-        if (allowed === baseName) return true;
-        return path.resolve(allowed) === path.resolve(resolvedPath);
-      });
-    }
-
-    return this.allowedExecutableDirs.some((dir) =>
-      resolvedPath.startsWith(path.resolve(dir) + path.sep)
-    );
-  }
-
-  private isScriptAllowed(
-    resolvedPath: string,
-    allowedDirs: string[] | undefined,
-    cwd: string
-  ): boolean {
-    const dirs =
-      allowedDirs && allowedDirs.length > 0
-        ? allowedDirs
-        : this.allowedScriptDirs.length > 0
-          ? this.allowedScriptDirs
-          : [cwd];
-
-    return dirs.some((dir) => {
-      const base = path.resolve(dir) + path.sep;
-      return resolvedPath.startsWith(base);
-    });
-  }
-
-  private requestApproval(
-    hook: EnhancedHookConfig,
-    context: HookExecutionContext
-  ): { approved: boolean; remember: boolean } {
-    this.emit('hook:approval-required', { hookId: hook.id, hook, context });
-
-    const window =
-      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    if (!window) {
-      return { approved: false, remember: false };
-    }
-
-    const detailLines = [
-      `Hook: ${hook.name}`,
-      `Type: ${hook.handler.type}`,
-      hook.handler.command ? `Command: ${hook.handler.command}` : undefined,
-      hook.handler.scriptPath
-        ? `Script: ${hook.handler.scriptPath}`
-        : undefined,
-      context.toolName ? `Tool: ${context.toolName}` : undefined,
-      context.filePath ? `File: ${context.filePath}` : undefined
-    ].filter(Boolean);
-
-    const result = dialog.showMessageBoxSync(window, {
-      type: 'warning',
-      title: 'Approve hook execution',
-      message: 'A hook requires approval before it can run.',
-      detail: detailLines.join('\n'),
-      buttons: ['Approve once', 'Always allow', 'Deny'],
-      defaultId: 0,
-      cancelId: 2
-    });
-
-    if (result === 0) {
-      return { approved: true, remember: false };
-    }
-    if (result === 1) {
-      return { approved: true, remember: true };
-    }
-    return { approved: false, remember: false };
   }
 }
 

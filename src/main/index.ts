@@ -72,8 +72,12 @@ class ClaudeOrchestratorApp {
 
     // Forward input-required events (permission prompts) to renderer
     this.instanceManager.on('instance:input-required', (payload) => {
-      console.log('Forwarding input-required to renderer:', payload.requestId);
+      console.log('=== [MainApp] FORWARDING INPUT_REQUIRED TO RENDERER ===');
+      console.log('[MainApp] Payload:', JSON.stringify(payload, null, 2));
+      console.log('[MainApp] WindowManager ready:', !!this.windowManager);
       this.windowManager.sendToRenderer('instance:input-required', payload);
+      console.log('[MainApp] sendToRenderer called for instance:input-required');
+      console.log('=== [MainApp] FORWARD COMPLETE ===');
     });
 
     // Forward user action requests from orchestrator to renderer

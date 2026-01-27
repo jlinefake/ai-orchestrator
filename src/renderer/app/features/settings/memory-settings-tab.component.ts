@@ -1,0 +1,39 @@
+/**
+ * Memory Settings Tab Component - Memory and context-related settings
+ */
+
+import { Component, inject } from '@angular/core';
+import { SettingsStore } from '../../core/state/settings.store';
+import { SettingRowComponent } from './setting-row.component';
+import type { AppSettings } from '../../../../shared/types/settings.types';
+
+@Component({
+  selector: 'app-memory-settings-tab',
+  standalone: true,
+  imports: [SettingRowComponent],
+  template: `
+    @for (setting of store.memorySettings(); track setting.key) {
+      <app-setting-row
+        [setting]="setting"
+        [value]="store.get(setting.key)"
+        (valueChange)="onSettingChange($event)"
+      />
+    }
+  `,
+  styles: [
+    `
+      :host {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-md);
+      }
+    `
+  ]
+})
+export class MemorySettingsTabComponent {
+  store = inject(SettingsStore);
+
+  onSettingChange(event: { key: string; value: unknown }): void {
+    this.store.set(event.key as keyof AppSettings, event.value as any);
+  }
+}

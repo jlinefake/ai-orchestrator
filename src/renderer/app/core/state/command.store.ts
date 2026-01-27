@@ -3,7 +3,7 @@
  */
 
 import { Injectable, inject, signal, computed } from '@angular/core';
-import { ElectronIpcService } from '../services/electron-ipc.service';
+import { ElectronIpcService } from '../services/ipc';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
 
 @Injectable({ providedIn: 'root' })

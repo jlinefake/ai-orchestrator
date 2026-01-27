@@ -34,7 +34,7 @@ import { PatternAnalyticsComponent, type PatternData } from './components/patter
 import { LearningInsightsFeedComponent, type LearningInsight } from './components/learning-insights-feed.component';
 import { GrpoConfigPanelComponent, type GRPOConfig } from './components/grpo-config-panel.component';
 import { TrainingExportService } from './services/training-export.service';
-import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc';
 
 /** Pattern distribution data for charts */
 export interface PatternTypeDistribution {

@@ -16,3 +16,6 @@ export type {
   TaskExecutionContext,
   TaskManagerConfig,
 } from './background-task-manager';
+
+// Todo Management
+export { TodoManager, getTodoManager } from './todo-manager';

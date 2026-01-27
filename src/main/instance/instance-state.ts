@@ -1,0 +1,202 @@
+/**
+ * Instance State Manager - Manages instance state, adapters, and batch updates
+ */
+
+import { EventEmitter } from 'events';
+import type { CliAdapter } from '../cli/adapters/adapter-factory';
+import type {
+  Instance,
+  InstanceStatus,
+  ContextUsage
+} from '../../shared/types/instance.types';
+import type {
+  InstanceStateUpdatePayload,
+  BatchUpdatePayload
+} from '../../shared/types/ipc.types';
+import { LIMITS } from '../../shared/constants/limits';
+
+export class InstanceStateManager extends EventEmitter {
+  private instances: Map<string, Instance> = new Map();
+  private adapters: Map<string, CliAdapter> = new Map();
+  private pendingUpdates: Map<string, InstanceStateUpdatePayload> = new Map();
+  private batchTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    super();
+    this.startBatchTimer();
+  }
+
+  // ============================================
+  // Instance Accessors
+  // ============================================
+
+  /**
+   * Get an instance by ID
+   */
+  getInstance(id: string): Instance | undefined {
+    return this.instances.get(id);
+  }
+
+  /**
+   * Check if an instance exists
+   */
+  hasInstance(id: string): boolean {
+    return this.instances.has(id);
+  }
+
+  /**
+   * Get all instances
+   */
+  getAllInstances(): Instance[] {
+    return Array.from(this.instances.values());
+  }
+
+  /**
+   * Get all instances serialized for IPC
+   */
+  getAllInstancesForIpc(): Record<string, unknown>[] {
+    return this.getAllInstances().map((i) => this.serializeForIpc(i));
+  }
+
+  /**
+   * Get the number of instances
+   */
+  getInstanceCount(): number {
+    return this.instances.size;
+  }
+
+  /**
+   * Store an instance
+   */
+  setInstance(instance: Instance): void {
+    this.instances.set(instance.id, instance);
+  }
+
+  /**
+   * Remove an instance
+   */
+  deleteInstance(id: string): boolean {
+    return this.instances.delete(id);
+  }
+
+  /**
+   * Iterate over all instances
+   */
+  forEachInstance(callback: (instance: Instance, id: string) => void): void {
+    this.instances.forEach(callback);
+  }
+
+  // ============================================
+  // Adapter Accessors
+  // ============================================
+
+  /**
+   * Get an adapter by instance ID
+   */
+  getAdapter(instanceId: string): CliAdapter | undefined {
+    return this.adapters.get(instanceId);
+  }
+
+  /**
+   * Check if an adapter exists
+   */
+  hasAdapter(instanceId: string): boolean {
+    return this.adapters.has(instanceId);
+  }
+
+  /**
+   * Store an adapter
+   */
+  setAdapter(instanceId: string, adapter: CliAdapter): void {
+    this.adapters.set(instanceId, adapter);
+  }
+
+  /**
+   * Remove an adapter
+   */
+  deleteAdapter(instanceId: string): boolean {
+    return this.adapters.delete(instanceId);
+  }
+
+  /**
+   * Get all adapter entries for iteration
+   */
+  getAdapterEntries(): IterableIterator<[string, CliAdapter]> {
+    return this.adapters.entries();
+  }
+
+  // ============================================
+  // Batch Update System
+  // ============================================
+
+  /**
+   * Queue a state update for batching
+   */
+  queueUpdate(
+    instanceId: string,
+    status: InstanceStatus,
+    contextUsage?: ContextUsage
+  ): void {
+    this.pendingUpdates.set(instanceId, {
+      instanceId,
+      status,
+      contextUsage
+    });
+  }
+
+  /**
+   * Start the batch update timer
+   */
+  private startBatchTimer(): void {
+    this.batchTimer = setInterval(() => {
+      this.flushUpdates();
+    }, LIMITS.OUTPUT_BATCH_INTERVAL_MS);
+  }
+
+  /**
+   * Flush pending updates to renderer
+   */
+  private flushUpdates(): void {
+    if (this.pendingUpdates.size === 0) return;
+
+    const updates = Array.from(this.pendingUpdates.values());
+    this.pendingUpdates.clear();
+
+    const batchPayload: BatchUpdatePayload = {
+      updates,
+      timestamp: Date.now()
+    };
+
+    this.emit('batch-update', batchPayload);
+  }
+
+  // ============================================
+  // Serialization
+  // ============================================
+
+  /**
+   * Serialize instance for IPC (convert Maps to Objects)
+   */
+  serializeForIpc(instance: Instance): Record<string, unknown> {
+    return {
+      ...instance,
+      communicationTokens: Object.fromEntries(instance.communicationTokens)
+    };
+  }
+
+  // ============================================
+  // Cleanup
+  // ============================================
+
+  /**
+   * Stop batch timer on shutdown
+   */
+  destroy(): void {
+    if (this.batchTimer) {
+      clearInterval(this.batchTimer);
+      this.batchTimer = null;
+    }
+    // Flush any remaining updates
+    this.flushUpdates();
+  }
+}

@@ -57,3 +57,6 @@ export type {
   RevisionResult,
   ReflectionResult,
 } from './critique-agent';
+
+// Memory-R1 Manager
+export { MemoryManagerAgent, getMemoryManager } from './r1-memory-manager';

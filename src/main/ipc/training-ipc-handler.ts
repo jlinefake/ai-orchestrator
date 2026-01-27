@@ -9,7 +9,7 @@
 
 import { ipcMain } from 'electron';
 import type { IpcResponse, ErrorInfo } from '../../shared/types/ipc.types';
-import type { GRPOConfig, TrainingOutcome, GRPOBatch, TrainingStats } from '../training/grpo-trainer';
+import type { GRPOConfig, TrainingOutcome, GRPOBatch, TrainingStats } from '../learning/grpo-trainer';
 
 // Helper function to create ErrorInfo from Error
 function createErrorInfo(error: unknown, code: string = 'TRAINING_ERROR'): ErrorInfo {
@@ -69,7 +69,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_TRAINING_STATS,
     async (): Promise<IpcResponse<TrainingStatsResponse>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const stats = trainer.getStats();
 
@@ -97,7 +97,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_REWARD_DATA,
     async (): Promise<IpcResponse<RewardDataPoint[]>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const stats = trainer.getStats();
 
@@ -125,7 +125,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_ADVANTAGE_DATA,
     async (): Promise<IpcResponse<{ value: number; count: number }[]>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const exported = trainer.exportTrainingData();
 
@@ -162,7 +162,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_STRATEGIES,
     async (_event, payload?: { limit?: number }): Promise<IpcResponse<StrategyData[]>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const strategies = trainer.getTopStrategies(payload?.limit || 10);
 
@@ -184,7 +184,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_CONFIG,
     async (): Promise<IpcResponse<GRPOConfig>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const config = trainer.getConfig();
 
@@ -204,9 +204,9 @@ export function registerTrainingHandlers(): void {
   // Update config
   ipcMain.handle(
     TRAINING_IPC_CHANNELS.UPDATE_CONFIG,
-    async (_event, payload: { config: Partial<import('../training/grpo-trainer').GRPOConfig> }): Promise<IpcResponse<void>> => {
+    async (_event, payload: { config: Partial<import('../learning/grpo-trainer').GRPOConfig> }): Promise<IpcResponse<void>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         trainer.configure(payload.config);
 
@@ -228,7 +228,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.EXPORT_DATA,
     async (): Promise<IpcResponse<{ outcomes: TrainingOutcome[]; batches: GRPOBatch[]; stats: Omit<TrainingStats, 'strategyPerformance'> & { strategyPerformance: Record<string, { avgReward: number; count: number }> } }>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const data = trainer.exportTrainingData();
 
@@ -258,7 +258,7 @@ export function registerTrainingHandlers(): void {
     TRAINING_IPC_CHANNELS.GET_REWARD_TREND,
     async (): Promise<IpcResponse<RewardTrendResponse>> => {
       try {
-        const { getGRPOTrainer } = await import('../training/grpo-trainer');
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
         const trend = trainer.getRewardTrend();
 

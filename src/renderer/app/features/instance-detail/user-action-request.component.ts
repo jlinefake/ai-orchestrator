@@ -12,7 +12,7 @@ import {
   input,
   effect
 } from '@angular/core';
-import { ElectronIpcService } from '../../core/services/electron-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc';
 import { InstanceStore } from '../../core/state/instance.store';
 
 export interface UserActionRequest {
@@ -29,6 +29,14 @@ export interface UserActionRequest {
   }[];
   context?: Record<string, unknown>;
   createdAt: number;
+  /** Permission metadata for input_required requests (action, path, etc.) */
+  permissionMetadata?: {
+    type?: string;
+    tool_use_id?: string;
+    action?: string;
+    path?: string;
+    originalContent?: string;
+  };
 }
 
 @Component({
@@ -300,22 +308,42 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
     });
 
     // Subscribe to input required events (CLI permission prompts)
+    console.log('[UserActionRequestComponent] Setting up onInputRequired subscription');
     this.unsubscribeInputRequired = this.ipc.onInputRequired((payload) => {
+      console.log('=== [UserActionRequestComponent] INPUT_REQUIRED CALLBACK TRIGGERED ===');
+      console.log('[UserActionRequestComponent] Payload:', JSON.stringify(payload, null, 2));
+
       const currentInstanceId = this.instanceId();
+      console.log('[UserActionRequestComponent] Current instance ID:', currentInstanceId);
+      console.log('[UserActionRequestComponent] Payload instance ID:', payload.instanceId);
 
       // Only show for this instance
       if (!currentInstanceId || payload.instanceId === currentInstanceId) {
+        console.log('[UserActionRequestComponent] Instance ID matches, creating request...');
+        const metadata = payload.metadata as UserActionRequest['permissionMetadata'];
         const req: UserActionRequest = {
           id: payload.requestId,
           instanceId: payload.instanceId,
           requestType: 'input_required',
           title: 'Permission Required',
           message: payload.prompt,
-          createdAt: payload.timestamp
+          createdAt: payload.timestamp,
+          permissionMetadata: metadata // Store permission details for retry message
         };
-        this.pendingRequests.update((requests) => [...requests, req]);
+        console.log('[UserActionRequestComponent] Created request:', JSON.stringify(req, null, 2));
+        this.pendingRequests.update((requests) => {
+          console.log('[UserActionRequestComponent] Current pending requests:', requests.length);
+          const updated = [...requests, req];
+          console.log('[UserActionRequestComponent] Updated pending requests:', updated.length);
+          return updated;
+        });
+        console.log('[UserActionRequestComponent] Request added to pending list');
+      } else {
+        console.log('[UserActionRequestComponent] Instance ID mismatch, ignoring');
       }
+      console.log('=== [UserActionRequestComponent] INPUT_REQUIRED HANDLING COMPLETE ===');
     });
+    console.log('[UserActionRequestComponent] onInputRequired subscription set up');
   }
 
   ngOnDestroy(): void {
@@ -400,13 +428,33 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
     this.isResponding.set(true);
 
     try {
-      // Handle input_required differently - send raw response to CLI
+      // Handle input_required differently - send retry message or denial to CLI
       if (request.requestType === 'input_required') {
-        const response = approved ? 'y' : 'n';
+        let response: string;
+        const meta = request.permissionMetadata;
+        // Create permission key to clear pending permission tracking
+        const permissionKey = meta?.action && meta?.path ? `${meta.action}:${meta.path}` : undefined;
+
+        if (approved) {
+          // Construct a helpful retry message based on the permission metadata
+          if (meta?.action && meta?.path) {
+            // Tell Claude to retry the specific action
+            response = `Permission granted. Please proceed to ${meta.action} ${meta.path}.`;
+          } else {
+            // Generic approval message
+            response = `Permission granted. Please proceed with the operation.`;
+          }
+          console.log('[UserActionRequestComponent] Sending approval with retry message:', response);
+        } else {
+          response = 'Permission denied. Please do not perform that operation.';
+          console.log('[UserActionRequestComponent] Sending denial message:', response);
+        }
+
         const result = await this.ipc.respondToInputRequired(
           request.instanceId,
           request.id,
-          response
+          response,
+          permissionKey
         );
 
         if (result.success) {

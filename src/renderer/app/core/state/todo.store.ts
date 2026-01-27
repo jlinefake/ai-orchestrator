@@ -6,7 +6,7 @@
  */
 
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
-import { ElectronIpcService } from '../services/electron-ipc.service';
+import { ElectronIpcService } from '../services/ipc';
 import type { TodoItem, TodoList, TodoStats, TodoStatus, TodoPriority } from '../../../../shared/types/todo.types';
 
 @Injectable({ providedIn: 'root' })
