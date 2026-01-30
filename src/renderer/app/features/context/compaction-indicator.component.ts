@@ -10,8 +10,13 @@
 import { Component, signal, effect, computed, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
+interface ElectronAPI {
+  compactionGetStatus?: (params: { instanceId: string | undefined }) => Promise<{ success: boolean; data: CompactionStatus }>;
+  compactionTrigger?: (params: { instanceId: string | undefined }) => Promise<{ success: boolean }>;
+}
+
 // Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = () => (window as unknown as { electronAPI: ElectronAPI }).electronAPI;
 
 export interface CompactionStatus {
   /** Current token usage */
@@ -60,7 +65,16 @@ export interface CompactionStatus {
       (mouseleave)="showTooltip.set(false)"
     >
       <!-- Compact view -->
-      <div class="compact-view" (click)="toggleExpanded()">
+      <div
+        class="compact-view"
+        (click)="toggleExpanded()"
+        (keydown.enter)="toggleExpanded()"
+        (keydown.space)="toggleExpanded()"
+        tabindex="0"
+        role="button"
+        [attr.aria-expanded]="expanded()"
+        aria-label="Toggle compaction indicator details"
+      >
         <div class="progress-container">
           <div class="progress-bar">
             <div

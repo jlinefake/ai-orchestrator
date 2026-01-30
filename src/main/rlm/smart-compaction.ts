@@ -26,6 +26,8 @@ import { TransactionType } from '../session/checkpoint-manager';
  * Smart compaction configuration
  */
 export interface SmartCompactionConfig extends SessionCompactorConfig {
+  /** Early warning threshold - triggers proactive preparation (default: 75) */
+  earlyWarningThresholdPercent: number;
   /** Start compaction at this percentage of context (default: 80) */
   warningThresholdPercent: number;
   /** Block new inputs at this percentage (default: 95) */
@@ -58,6 +60,7 @@ export const DEFAULT_SMART_COMPACTION_CONFIG: SmartCompactionConfig = {
   autoCompact: true,
   minArchiveBatch: 5,
   // Smart compaction extensions
+  earlyWarningThresholdPercent: 75,
   warningThresholdPercent: 80,
   emergencyThresholdPercent: 95,
   preserveRecentFiles: 5,
@@ -142,16 +145,33 @@ export interface CompactionMetrics {
 }
 
 /**
+ * Cached compaction plan for early warning
+ */
+export interface CachedCompactionPlan {
+  /** Items to be compacted with their tier assignments */
+  items: Array<{ id: string; tier: SummarizationTier; tokens: number }>;
+  /** Pre-generated summaries for SECTION tier items */
+  preSummaries: Map<string, string>;
+  /** Timestamp when plan was created */
+  createdAt: number;
+  /** Whether summaries are ready */
+  summariesReady: boolean;
+}
+
+/**
  * Compaction event
  */
 export type SmartCompactionEvent =
+  | { type: 'threshold_early_warning'; percent: number; sessionId: string }
   | { type: 'threshold_warning'; percent: number; sessionId: string }
   | { type: 'threshold_emergency'; percent: number; sessionId: string }
   | { type: 'compaction_started'; sessionId: string; reason: string }
   | { type: 'compaction_completed'; sessionId: string; metrics: CompactionMetrics }
   | { type: 'compaction_failed'; sessionId: string; error: Error }
   | { type: 'tool_outputs_cleared'; sessionId: string; count: number; tokensSaved: number }
-  | { type: 'tiered_summarization'; sessionId: string; tier: SummarizationTier; items: number };
+  | { type: 'tiered_summarization'; sessionId: string; tier: SummarizationTier; items: number }
+  | { type: 'early_warning_plan_ready'; sessionId: string; itemCount: number }
+  | { type: 'early_warning_summaries_ready'; sessionId: string; summaryCount: number };
 
 /**
  * Smart Compaction Manager
@@ -169,6 +189,10 @@ export class SmartCompactionManager extends EventEmitter {
   private checkpointManager: CheckpointManager;
   private sessionMetrics: Map<string, CompactionMetrics[]> = new Map();
   private lastCompactionTime: Map<string, number> = new Map();
+  /** Cached compaction plans from early warning (Phase 1) */
+  private cachedCompactionPlans: Map<string, CachedCompactionPlan> = new Map();
+  /** Sessions currently in early warning state */
+  private earlyWarningSessions: Set<string> = new Set();
 
   private constructor() {
     super();
@@ -226,7 +250,7 @@ export class SmartCompactionManager extends EventEmitter {
     const currentTokens = session.totalRootTokens + session.totalSubQueryTokens;
     const usagePercent = (currentTokens / contextLimit) * 100;
 
-    // Check thresholds
+    // Check thresholds (highest to lowest)
     if (usagePercent >= this.config.emergencyThresholdPercent) {
       this.emitEvent({
         type: 'threshold_emergency',
@@ -234,7 +258,10 @@ export class SmartCompactionManager extends EventEmitter {
         sessionId: session.id,
       });
 
-      // Emergency compaction - aggressive
+      // Clear early warning state
+      this.earlyWarningSessions.delete(session.id);
+
+      // Emergency compaction - aggressive, use cached plan if available
       return this.performCompaction(session, store, 'emergency');
     }
 
@@ -245,14 +272,149 @@ export class SmartCompactionManager extends EventEmitter {
         sessionId: session.id,
       });
 
-      // Standard compaction
+      // Clear early warning state
+      this.earlyWarningSessions.delete(session.id);
+
+      // Standard compaction - use cached plan if available
       return this.performCompaction(session, store, 'threshold');
+    }
+
+    // Early warning threshold (Phase 1) - prepare but don't compact yet
+    if (usagePercent >= this.config.earlyWarningThresholdPercent) {
+      // Only trigger early warning once per session until we compact or drop below threshold
+      if (!this.earlyWarningSessions.has(session.id)) {
+        this.earlyWarningSessions.add(session.id);
+
+        this.emitEvent({
+          type: 'threshold_early_warning',
+          percent: usagePercent,
+          sessionId: session.id,
+        });
+
+        // Handle early warning asynchronously (don't block)
+        this.handleEarlyWarning(session).catch((error) => {
+          console.warn('[SmartCompaction] Early warning handling failed:', error);
+        });
+      }
+    } else {
+      // Below early warning threshold - clear state
+      this.earlyWarningSessions.delete(session.id);
+      this.cachedCompactionPlans.delete(session.id);
     }
 
     // Check for stale tool outputs
     await this.clearStaleToolOutputs(session);
 
     return null;
+  }
+
+  /**
+   * Handle early warning - pre-compute compaction plan and generate summaries
+   * Phase 1: At 75%, we don't compact yet but we:
+   * 1. Pre-compute what WOULD be compacted
+   * 2. Start generating summaries in background
+   * 3. Alert any monitoring systems
+   */
+  async handleEarlyWarning(session: RLMSession): Promise<void> {
+    // Check if we already have a fresh plan
+    const existingPlan = this.cachedCompactionPlans.get(session.id);
+    const planAge = existingPlan ? Date.now() - existingPlan.createdAt : Infinity;
+    const planStaleMs = 60_000; // 1 minute
+
+    if (existingPlan && planAge < planStaleMs && existingPlan.summariesReady) {
+      // Plan is still fresh, no need to regenerate
+      return;
+    }
+
+    // Pre-compute tier assignments (but don't apply yet)
+    const classifications = this.classifyContent(session);
+
+    const plan: CachedCompactionPlan = {
+      items: classifications.map((c) => ({
+        id: c.id,
+        tier: c.recommendedTier,
+        tokens: c.tokens,
+      })),
+      preSummaries: new Map(),
+      createdAt: Date.now(),
+      summariesReady: false,
+    };
+
+    this.cachedCompactionPlans.set(session.id, plan);
+
+    this.emitEvent({
+      type: 'early_warning_plan_ready',
+      sessionId: session.id,
+      itemCount: plan.items.length,
+    });
+
+    // Pre-generate summaries for SECTION tier items (in background)
+    const sectionItems = classifications.filter(
+      (c) => c.recommendedTier === SummarizationTier.SECTION && !c.shouldPreserve
+    );
+
+    if (sectionItems.length > 0 && this.llmService) {
+      await this.preGenerateSummaries(session, sectionItems, plan);
+    } else {
+      plan.summariesReady = true;
+    }
+  }
+
+  /**
+   * Pre-generate summaries for SECTION tier items
+   * These will be ready when actual compaction happens
+   */
+  private async preGenerateSummaries(
+    session: RLMSession,
+    items: ContentClassification[],
+    plan: CachedCompactionPlan
+  ): Promise<void> {
+    if (!this.llmService) {
+      plan.summariesReady = true;
+      return;
+    }
+
+    const summaryPromises = items.slice(0, 10).map(async (classification) => {
+      const queryIndex = parseInt(classification.id.split('-')[1]!);
+      const query = session.queries[queryIndex];
+      if (!query || query.tokensUsed <= this.config.summaryMaxTokens) return;
+
+      try {
+        const summary = await this.llmService!.summarize({
+          requestId: `early-summary-${classification.id}-${Date.now()}`,
+          content: query.result,
+          targetTokens: Math.min(this.config.summaryMaxTokens, query.tokensUsed / 2),
+          preserveKeyPoints: true,
+        });
+
+        plan.preSummaries.set(classification.id, summary);
+      } catch (error) {
+        console.warn(`[SmartCompaction] Failed to pre-generate summary for ${classification.id}:`, error);
+      }
+    });
+
+    await Promise.allSettled(summaryPromises);
+    plan.summariesReady = true;
+
+    this.emitEvent({
+      type: 'early_warning_summaries_ready',
+      sessionId: session.id,
+      summaryCount: plan.preSummaries.size,
+    });
+  }
+
+  /**
+   * Get cached compaction plan if available
+   */
+  getCachedPlan(sessionId: string): CachedCompactionPlan | undefined {
+    return this.cachedCompactionPlans.get(sessionId);
+  }
+
+  /**
+   * Check if session is in early warning state
+   */
+  isInEarlyWarning(sessionId: string): boolean {
+    return this.earlyWarningSessions.has(sessionId);
   }
 
   /**
@@ -457,10 +619,18 @@ export class SmartCompactionManager extends EventEmitter {
     const query = session.queries[queryIndex];
     if (!query) return;
 
+    // Check for pre-generated summary from early warning (Phase 1)
+    const cachedPlan = this.cachedCompactionPlans.get(session.id);
+    const preSummary = cachedPlan?.preSummaries.get(classification.id);
+
     switch (classification.recommendedTier) {
       case SummarizationTier.SECTION:
-        // Summarize to section level
-        if (this.llmService && query.tokensUsed > this.config.summaryMaxTokens) {
+        // Summarize to section level - use pre-generated if available
+        if (preSummary) {
+          // Use pre-generated summary from early warning
+          query.result = `[Section Summary]\n${preSummary}`;
+          query.tokensUsed = this.tokenCounter.countTokens(query.result);
+        } else if (this.llmService && query.tokensUsed > this.config.summaryMaxTokens) {
           const summary = await this.llmService.summarize({
             requestId: `tier-section-${Date.now()}`,
             content: query.result,
@@ -603,6 +773,8 @@ export class SmartCompactionManager extends EventEmitter {
   clearSession(sessionId: string): void {
     this.sessionMetrics.delete(sessionId);
     this.lastCompactionTime.delete(sessionId);
+    this.cachedCompactionPlans.delete(sessionId);
+    this.earlyWarningSessions.delete(sessionId);
     this.baseCompactor.clearSessionCache(sessionId);
   }
 
@@ -620,6 +792,8 @@ export class SmartCompactionManager extends EventEmitter {
   destroy(): void {
     this.sessionMetrics.clear();
     this.lastCompactionTime.clear();
+    this.cachedCompactionPlans.clear();
+    this.earlyWarningSessions.clear();
     this.removeAllListeners();
     SmartCompactionManager.instance = null;
   }

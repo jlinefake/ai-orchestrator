@@ -218,3 +218,126 @@ export function calculateBackoffDelay(state: BackoffState, config: BackoffConfig
 export function shouldResetBackoff(state: BackoffState, config: BackoffConfig): boolean {
   return state.lastSuccessAt !== undefined && Date.now() - state.lastSuccessAt > config.resetAfterMs;
 }
+
+// ============================================
+// Phase 2: Hierarchical Instance Types
+// ============================================
+
+/**
+ * Termination policy for parent-child relationships
+ */
+export type TerminationPolicy =
+  | 'terminate-children' // Default: when parent terminates, all children are terminated
+  | 'orphan-children' // Children continue running without parent
+  | 'reparent-to-root'; // Children are moved to root supervisor
+
+/**
+ * Context inheritance options for child instances
+ */
+export interface ContextInheritanceConfig {
+  /** Inherit working directory from parent (default: true) */
+  inheritWorkingDirectory: boolean;
+  /** Inherit environment variables from parent (default: true) */
+  inheritEnvironment: boolean;
+  /** Inherit YOLO mode setting from parent (default: false) */
+  inheritYoloMode: boolean;
+  /** Inherit agent/model settings from parent (default: false) */
+  inheritAgentSettings: boolean;
+  /** Custom environment variables to override */
+  environmentOverrides?: Record<string, string>;
+}
+
+/**
+ * Configuration for spawning a child instance
+ */
+export interface ChildSpawnConfig {
+  /** Display name for the child */
+  name?: string;
+  /** Task/prompt for the child */
+  task: string;
+  /** Working directory override */
+  workingDirectory?: string;
+  /** Context inheritance settings */
+  contextInheritance?: Partial<ContextInheritanceConfig>;
+  /** Termination policy when parent terminates */
+  terminationPolicy?: TerminationPolicy;
+  /** Agent ID override */
+  agentId?: string;
+  /** Model override */
+  model?: string;
+  /** Provider override */
+  provider?: string;
+  /** Enable YOLO mode */
+  yoloMode?: boolean;
+  /** Restart type for supervision */
+  restartType?: RestartType;
+}
+
+/**
+ * Hierarchical instance relationship tracking
+ */
+export interface InstanceHierarchy {
+  /** Instance ID */
+  instanceId: string;
+  /** Parent instance ID (null for root) */
+  parentId: string | null;
+  /** Child instance IDs */
+  childIds: string[];
+  /** Depth in the hierarchy (0 = root) */
+  depth: number;
+  /** Termination policy */
+  terminationPolicy: TerminationPolicy;
+  /** Context inheritance config used when spawning */
+  contextInheritance: ContextInheritanceConfig;
+  /** Supervisor node ID in the supervision tree */
+  supervisorNodeId: string;
+  /** Worker node ID (if registered as worker) */
+  workerNodeId?: string;
+}
+
+/**
+ * Tree view node for UI rendering
+ */
+export interface HierarchyTreeNode {
+  id: string;
+  name: string;
+  status: string;
+  depth: number;
+  parentId: string | null;
+  children: HierarchyTreeNode[];
+  contextUsage: {
+    used: number;
+    total: number;
+    percentage: number;
+  };
+  metadata: {
+    createdAt: number;
+    lastActivity: number;
+    agentId: string;
+    terminationPolicy: TerminationPolicy;
+  };
+}
+
+/**
+ * Default context inheritance configuration
+ */
+export function createDefaultContextInheritance(): ContextInheritanceConfig {
+  return {
+    inheritWorkingDirectory: true,
+    inheritEnvironment: true,
+    inheritYoloMode: false,
+    inheritAgentSettings: false,
+  };
+}
+
+/**
+ * Default child spawn configuration
+ */
+export function createDefaultChildSpawnConfig(task: string): ChildSpawnConfig {
+  return {
+    task,
+    terminationPolicy: 'terminate-children',
+    contextInheritance: createDefaultContextInheritance(),
+    restartType: 'transient',
+  };
+}

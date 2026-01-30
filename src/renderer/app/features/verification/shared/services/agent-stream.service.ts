@@ -9,7 +9,7 @@
 
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { Subject, BehaviorSubject, Observable } from 'rxjs';
-import { takeUntil, filter, map } from 'rxjs/operators';
+import { takeUntil, filter } from 'rxjs/operators';
 import { ElectronIpcService } from '../../../../core/services/ipc';
 
 // ============================================

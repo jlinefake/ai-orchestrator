@@ -1,6 +1,7 @@
 /**
  * Verification IPC Handlers
- * Handles Git Worktree, Multi-Agent Verification, and Cascade Supervision
+ * Handles Git Worktree and Multi-Agent Verification
+ * NOTE: Supervision handlers have been moved to supervision-handlers.ts
  */
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
@@ -20,21 +21,12 @@ import type {
   VerifyGetActivePayload,
   VerifyCancelPayload,
   VerifyConfigurePayload,
-  SupervisionCreateTreePayload,
-  SupervisionAddWorkerPayload,
-  SupervisionStartWorkerPayload,
-  SupervisionStopWorkerPayload,
-  SupervisionHandleFailurePayload,
-  SupervisionGetTreePayload,
-  SupervisionGetHealthPayload,
 } from '../../shared/types/ipc.types';
 import { getWorktreeManager } from '../workspace/git/worktree-manager';
 import { getMultiVerifyCoordinator } from '../orchestration/multi-verify-coordinator';
-import { getSupervisor } from '../orchestration/supervisor';
 import { getAllPersonalities, getPersonalityDescription } from '../orchestration/personalities';
 import type { MergeStrategy, WorktreeConfig } from '../../shared/types/worktree.types';
 import type { VerificationConfig, PersonalityType, SynthesisStrategy } from '../../shared/types/verification.types';
-import type { SupervisorConfig, ChildSpec } from '../../shared/types/supervision.types';
 
 export function registerVerificationHandlers(): void {
   // ============================================
@@ -505,243 +497,6 @@ export function registerVerificationHandlers(): void {
     }
   );
 
-  // ============================================
-  // Cascade Supervision Handlers
-  // ============================================
-
-  // Create a supervision tree
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_CREATE_TREE,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionCreateTreePayload
-    ): Promise<IpcResponse> => {
-      try {
-        const config: Partial<SupervisorConfig> = {};
-        if (payload.config) {
-          if (payload.config.strategy) {
-            config.strategy = payload.config.strategy;
-          }
-          if (payload.config.maxRestarts !== undefined) {
-            config.maxRestarts = payload.config.maxRestarts;
-          }
-          if (payload.config.maxTime !== undefined) {
-            config.maxTime = payload.config.maxTime;
-          }
-          if (payload.config.onExhausted) {
-            config.onExhausted = payload.config.onExhausted;
-          }
-          if (payload.config.backoff) {
-            config.backoff = {
-              minDelayMs: payload.config.backoff.minDelayMs ?? 100,
-              maxDelayMs: payload.config.backoff.maxDelayMs ?? 30000,
-              factor: payload.config.backoff.factor ?? 2,
-              jitter: payload.config.backoff.jitter ?? true,
-              resetAfterMs: 5000,
-            };
-          }
-          if (payload.config.healthCheck) {
-            config.healthCheck = {
-              intervalMs: payload.config.healthCheck.intervalMs ?? 30000,
-              timeoutMs: payload.config.healthCheck.timeoutMs ?? 5000,
-              unhealthyThreshold: payload.config.healthCheck.unhealthyThreshold ?? 3,
-            };
-          }
-        }
-
-        const tree = getSupervisor().createTree(payload.instanceId, config);
-        return { success: true, data: tree };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_CREATE_TREE_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Add a worker to the supervision tree
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_ADD_WORKER,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionAddWorkerPayload
-    ): Promise<IpcResponse> => {
-      try {
-        // Create a child spec from the payload
-        // Note: startFunc and stopFunc will be resolved from registered functions
-        const spec: ChildSpec = {
-          id: payload.spec.id,
-          name: payload.spec.name,
-          restartType: payload.spec.restartType,
-          dependencies: payload.spec.dependencies,
-          order: payload.spec.order ?? 0,
-          // These will be resolved from the function registry
-          startFunc: async () => {
-            // Placeholder - actual implementation would resolve from function registry
-            return `worker-${Date.now()}`;
-          },
-        };
-
-        const worker = getSupervisor().addWorker(
-          payload.instanceId,
-          spec,
-          payload.parentId
-        );
-        return { success: true, data: worker };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_ADD_WORKER_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Start a worker
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_START_WORKER,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionStartWorkerPayload
-    ): Promise<IpcResponse> => {
-      try {
-        await getSupervisor().startWorker(payload.instanceId, payload.workerId);
-        return { success: true, data: null };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_START_WORKER_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Stop a worker
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_STOP_WORKER,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionStopWorkerPayload
-    ): Promise<IpcResponse> => {
-      try {
-        await getSupervisor().stopWorker(payload.instanceId, payload.workerId);
-        return { success: true, data: null };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_STOP_WORKER_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Handle a worker failure
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_HANDLE_FAILURE,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionHandleFailurePayload
-    ): Promise<IpcResponse> => {
-      try {
-        await getSupervisor().handleFailure(
-          payload.instanceId,
-          payload.childInstanceId,
-          payload.error
-        );
-        return { success: true, data: null };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_HANDLE_FAILURE_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Get the supervision tree
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_GET_TREE,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionGetTreePayload
-    ): Promise<IpcResponse> => {
-      try {
-        const tree = getSupervisor().getTree(payload.instanceId);
-        if (!tree) {
-          return {
-            success: false,
-            error: {
-              code: 'SUPERVISION_TREE_NOT_FOUND',
-              message: `Supervision tree not found: ${payload.instanceId}`,
-              timestamp: Date.now(),
-            },
-          };
-        }
-        return { success: true, data: tree };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_GET_TREE_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
-
-  // Get health status
-  ipcMain.handle(
-    IPC_CHANNELS.SUPERVISION_GET_HEALTH,
-    async (
-      event: IpcMainInvokeEvent,
-      payload: SupervisionGetHealthPayload
-    ): Promise<IpcResponse> => {
-      try {
-        const tree = getSupervisor().getTree(payload.instanceId);
-        if (!tree) {
-          return {
-            success: false,
-            error: {
-              code: 'SUPERVISION_TREE_NOT_FOUND',
-              message: `Supervision tree not found: ${payload.instanceId}`,
-              timestamp: Date.now(),
-            },
-          };
-        }
-        return { success: true, data: tree.root.healthStatus };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            code: 'SUPERVISION_GET_HEALTH_FAILED',
-            message: (error as Error).message,
-            timestamp: Date.now(),
-          },
-        };
-      }
-    }
-  );
+  // NOTE: Supervision handlers have been moved to supervision-handlers.ts
+  // to avoid duplicate registration
 }

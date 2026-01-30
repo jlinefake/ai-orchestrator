@@ -770,13 +770,14 @@ export class InputPanelComponent implements OnDestroy {
           return;
 
         case 'Tab':
-        case 'Enter':
+        case 'Enter': {
           event.preventDefault();
           const selected = commands[this.selectedCommandIndex()];
           if (selected) {
             this.onSelectCommand(selected);
           }
           return;
+        }
 
         case 'Escape':
           event.preventDefault();
@@ -823,7 +824,6 @@ export class InputPanelComponent implements OnDestroy {
     if (text.startsWith('/')) {
       const parts = text.slice(1).split(/\s+/);
       const cmdName = parts[0];
-      const args = parts.slice(1);
 
       const command = this.commandStore.getCommandByName(cmdName);
       if (command) {

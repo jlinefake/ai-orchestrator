@@ -108,13 +108,17 @@ export class InstanceStateManager extends EventEmitter {
    * Store an adapter
    */
   setAdapter(instanceId: string, adapter: CliAdapter): void {
+    console.log(`[InstanceStateManager] setAdapter called for ${instanceId}`);
     this.adapters.set(instanceId, adapter);
+    console.log(`[InstanceStateManager] Adapter stored, map size: ${this.adapters.size}`);
   }
 
   /**
    * Remove an adapter
    */
   deleteAdapter(instanceId: string): boolean {
+    console.log(`[InstanceStateManager] deleteAdapter called for ${instanceId}`);
+    console.trace('[InstanceStateManager] deleteAdapter stack trace');
     return this.adapters.delete(instanceId);
   }
 

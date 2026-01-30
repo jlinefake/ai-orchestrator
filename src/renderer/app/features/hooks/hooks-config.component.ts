@@ -134,8 +134,8 @@ interface HookFormData {
 
       <!-- Edit/Create Form -->
       @if (isEditing()) {
-        <div class="form-overlay" (click)="cancelEdit()">
-          <div class="form-modal" (click)="$event.stopPropagation()">
+        <div class="form-overlay" (click)="cancelEdit()" (keydown.enter)="cancelEdit()" (keydown.space)="cancelEdit()" tabindex="0" role="button">
+          <div class="form-modal" (click)="$event.stopPropagation()" (keydown.enter)="$event.stopPropagation()" (keydown.space)="$event.stopPropagation()" tabindex="0" role="dialog">
             <div class="form-header">
               <span class="form-title">
                 {{ editingRule() ? 'Edit Hook' : 'Create Hook' }}
@@ -146,7 +146,7 @@ interface HookFormData {
             <div class="form-body">
               <!-- Name -->
               <div class="form-group">
-                <label class="form-label">Name</label>
+                <span class="form-label">Name</span>
                 <input
                   type="text"
                   class="form-input"
@@ -158,7 +158,7 @@ interface HookFormData {
 
               <!-- Message -->
               <div class="form-group">
-                <label class="form-label">Message (shown when triggered)</label>
+                <span class="form-label">Message (shown when triggered)</span>
                 <input
                   type="text"
                   class="form-input"
@@ -170,7 +170,7 @@ interface HookFormData {
 
               <!-- Event -->
               <div class="form-group">
-                <label class="form-label">Event</label>
+                <span class="form-label">Event</span>
                 <select
                   class="form-select"
                   [value]="formData().event"
@@ -184,7 +184,7 @@ interface HookFormData {
 
               <!-- Tool Matcher -->
               <div class="form-group">
-                <label class="form-label">Tool Matcher (optional, regex)</label>
+                <span class="form-label">Tool Matcher (optional, regex)</span>
                 <input
                   type="text"
                   class="form-input"
@@ -196,7 +196,7 @@ interface HookFormData {
 
               <!-- Action -->
               <div class="form-group">
-                <label class="form-label">Action</label>
+                <span class="form-label">Action</span>
                 <div class="action-buttons">
                   <button
                     class="action-option"
@@ -218,7 +218,7 @@ interface HookFormData {
               <!-- Conditions -->
               <div class="form-group">
                 <div class="conditions-header">
-                  <label class="form-label">Conditions (AND)</label>
+                  <span class="form-label">Conditions (AND)</span>
                   <button
                     class="add-condition-btn"
                     (click)="addCondition()"
@@ -277,7 +277,7 @@ interface HookFormData {
 
               <!-- Enabled -->
               <div class="form-group row">
-                <label class="form-label">Enabled</label>
+                <span class="form-label">Enabled</span>
                 <label class="toggle-switch">
                   <input
                     type="checkbox"

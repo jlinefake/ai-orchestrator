@@ -24,7 +24,7 @@ import type { AppSettings } from '../../../../shared/types/settings.types';
     <!-- Reset View Layout Section -->
     <div class="setting-row reset-layout-row">
       <div class="setting-info">
-        <label class="setting-label">Reset View Layout</label>
+        <h3 class="setting-label">Reset View Layout</h3>
         <p class="setting-description">
           Reset sidebar and file explorer panel widths to their default
           positions. This will not affect other settings.
@@ -109,7 +109,7 @@ export class DisplaySettingsTabComponent {
   private viewLayoutService = inject(ViewLayoutService);
 
   onSettingChange(event: { key: string; value: unknown }): void {
-    this.store.set(event.key as keyof AppSettings, event.value as any);
+    this.store.set(event.key as keyof AppSettings, event.value as AppSettings[keyof AppSettings]);
   }
 
   resetViewLayout(): void {

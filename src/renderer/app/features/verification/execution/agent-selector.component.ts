@@ -20,7 +20,6 @@ import {
   computed,
   ChangeDetectionStrategy,
   OnInit,
-  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CliDetectionService } from '../shared/services/cli-detection.service';
@@ -75,7 +74,8 @@ import type { CliStatus, CliStatusInfo } from '../../../../../shared/types/verif
 
       <!-- Dropdown Menu -->
       @if (isOpen()) {
-        <div class="dropdown-menu" (click)="$event.stopPropagation()">
+        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
+        <div class="dropdown-menu" role="menu" (click)="$event.stopPropagation()">
           <!-- Search/Filter -->
           <div class="dropdown-header">
             <input
@@ -101,10 +101,16 @@ import type { CliStatus, CliStatusInfo } from '../../../../../shared/types/verif
             @for (cli of filteredClis(); track cli.type) {
               <div
                 class="agent-item"
+                role="menuitemcheckbox"
+                [attr.aria-checked]="isSelected(cli.type)"
+                [attr.aria-disabled]="!canSelect(cli)"
+                [attr.tabindex]="canSelect(cli) ? 0 : -1"
                 [class.selected]="isSelected(cli.type)"
                 [class.unavailable]="cli.status !== 'available'"
                 [class.disabled]="!canSelect(cli)"
                 (click)="toggleAgent(cli)"
+                (keydown.enter)="toggleAgent(cli)"
+                (keydown.space)="toggleAgent(cli); $event.preventDefault()"
               >
                 <div class="agent-info">
                   <div class="agent-header">
@@ -206,6 +212,7 @@ import type { CliStatus, CliStatusInfo } from '../../../../../shared/types/verif
 
       <!-- Click-outside overlay -->
       @if (isOpen()) {
+        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -->
         <div class="backdrop" (click)="closeDropdown()"></div>
       }
     </div>
@@ -579,7 +586,7 @@ import type { CliStatus, CliStatusInfo } from '../../../../../shared/types/verif
     }
   `],
 })
-export class AgentSelectorComponent implements OnInit, OnDestroy {
+export class AgentSelectorComponent implements OnInit {
   readonly cliService = inject(CliDetectionService);
   private readonly store = inject(VerificationStore);
 
@@ -653,10 +660,6 @@ export class AgentSelectorComponent implements OnInit, OnDestroy {
         this.cliService.cliList().every(cli => cli.status === 'not-found')) {
       this.cliService.scanAll();
     }
-  }
-
-  ngOnDestroy(): void {
-    // Cleanup if needed
   }
 
   // ============================================

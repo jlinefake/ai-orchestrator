@@ -18,7 +18,8 @@ export type MemoryType =
   | 'long_term'
   | 'episodic'
   | 'semantic'
-  | 'procedural';
+  | 'procedural'
+  | 'skills';
 
 export type TrainingStage = 1 | 2 | 3;
 
@@ -141,12 +142,75 @@ export interface LearnedPattern {
 
 // ============ Workflow Memory ============
 
+/**
+ * Reasons why a workflow execution failed
+ * Phase 4.1: Failure Analysis
+ */
+export type FailureReason = 'user_correction' | 'error' | 'timeout' | 'cancelled';
+
+/**
+ * Tracks individual failure patterns for learning
+ * Phase 4.1: Failure Analysis
+ */
+export interface FailurePattern {
+  reason: FailureReason;
+  pattern?: string; // Error message pattern or correction type
+  feedback?: string; // User feedback if available
+  timestamp: number;
+}
+
+/**
+ * Extended outcome tracking for workflows with failure analysis
+ * Phase 4.1: Failure Analysis
+ */
+export interface WorkflowOutcome {
+  taskId: string;
+  success: boolean;
+  score: number;
+  timestamp: number;
+  // Phase 4.1 additions
+  failureReason?: FailureReason;
+  errorPattern?: string;
+  userFeedback?: string;
+}
+
+/**
+ * Version tracking for workflow evolution
+ * Phase 4.2: Workflow Versioning
+ */
+export interface WorkflowVersion {
+  version: number;
+  steps: string[];
+  createdAt: number;
+  reason: 'initial' | 'improvement' | 'error_fix' | 'user_update';
+  parentVersion?: number;
+}
+
+/**
+ * Avoidance rules learned from repeated failures
+ * Phase 4.1: Failure Analysis
+ */
+export interface AvoidanceRule {
+  id: string;
+  workflowId: string;
+  errorPattern: string;
+  avoidanceStrategy: string;
+  learnedAt: number;
+  occurrenceCount: number;
+}
+
 export interface WorkflowMemory {
   id: string;
   name: string;
   steps: string[];
   successRate: number;
   applicableContexts: string[];
+  // Phase 4.1: Failure tracking
+  failurePatterns?: FailurePattern[];
+  outcomes?: WorkflowOutcome[];
+  // Phase 4.2: Version tracking
+  versions?: WorkflowVersion[];
+  currentVersion?: number;
 }
 
 // ============ Strategy Memory ============
@@ -171,6 +235,7 @@ export interface UnifiedRetrievalResult {
   shortTerm: string[];
   longTerm: string[];
   procedural: string[];
+  skills: string[];
   totalTokens: number;
 }
 
@@ -209,4 +274,55 @@ export interface UnifiedMemorySnapshot {
     workflows: WorkflowMemory[];
     strategies: StrategyMemory[];
   };
+}
+
+// ============ Cross-Project Learning (Phase 4.3) ============
+
+/**
+ * Pattern types that can be shared across projects
+ * Named differently from PatternType in self-improvement.types.ts to avoid conflict
+ */
+export type CrossProjectPatternType =
+  | 'workflow'
+  | 'strategy'
+  | 'error_recovery'
+  | 'tool_sequence'
+  | 'prompt_structure';
+
+/**
+ * Configuration for cross-project learning
+ * Privacy-first: disabled by default
+ */
+export interface CrossProjectConfig {
+  enabled: boolean; // Must be explicitly enabled
+  isolationMode: 'full' | 'anonymized' | 'disabled';
+  allowedPatternTypes: CrossProjectPatternType[]; // Whitelist what can be shared
+}
+
+/**
+ * A pattern that has been promoted to global scope
+ * Source project info is deliberately NOT stored
+ */
+export interface GlobalPattern {
+  id: string;
+  type: CrossProjectPatternType;
+  description: string;
+  steps: string[];
+  metadata: Record<string, unknown>;
+  totalSuccessRate: number;
+  projectCount: number;
+  isGlobal: true;
+  lastUpdated: number;
+}
+
+/**
+ * Pattern after anonymization - ready for global storage
+ */
+export interface AnonymizedPattern {
+  id: string;
+  type: CrossProjectPatternType;
+  description: string; // Generalized description
+  steps: string[]; // Anonymized steps
+  metadata: Record<string, unknown>; // Stripped of project identifiers
+  successRate: number;
 }

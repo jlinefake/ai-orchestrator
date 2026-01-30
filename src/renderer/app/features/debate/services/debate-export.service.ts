@@ -9,7 +9,7 @@
  */
 
 import { Injectable } from '@angular/core';
-import type { DebateResult, DebateSessionRound, DebateContribution } from '../../../../../shared/types/debate.types';
+import type { DebateResult, DebateSessionRound } from '../../../../../shared/types/debate.types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { saveAs } from 'file-saver';
@@ -227,7 +227,7 @@ ${debate.rounds.map(round => this.renderRoundMarkdown(round)).join('\n\n---\n\n'
     });
 
     // Synthesis
-    const synthesisY = (doc as any).lastAutoTable?.finalY + 10 || queryEndY + 40;
+    const synthesisY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? queryEndY + 40;
     doc.setFontSize(12);
     doc.setTextColor(0, 0, 0);
     doc.text('Synthesis', 14, synthesisY);
@@ -265,7 +265,7 @@ ${debate.rounds.map(round => this.renderRoundMarkdown(round)).join('\n\n---\n\n'
 
     // Disagreements
     if (debate.unresolvedDisagreements.length > 0) {
-      const disagreementsY = (doc as any).lastAutoTable?.finalY + 10 || agreementsY + 30;
+      const disagreementsY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? agreementsY + 30;
 
       if (disagreementsY > 250) {
         doc.addPage();

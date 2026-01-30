@@ -8,11 +8,16 @@
  * - Color coding: cached (green), loaded (blue), pending (gray)
  */
 
-import { Component, inject, signal, effect, computed, input, output } from '@angular/core';
+import { Component, signal, effect, computed, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
+interface ElectronAPI {
+  contextGetActiveFiles?: (params: { instanceId: string | undefined }) => Promise<{ success: boolean; data?: ActiveFile[] }>;
+  contextRemoveFile?: (params: { instanceId: string | undefined; fileId: string }) => Promise<{ success: boolean }>;
+}
+
 // Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = () => (window as unknown as { electronAPI: ElectronAPI }).electronAPI;
 
 export interface ActiveFile {
   id: string;
@@ -44,7 +49,16 @@ export interface ContextStats {
   template: `
     <div class="active-files-container" [class.expanded]="expanded()">
       <!-- Header with toggle and summary -->
-      <div class="header" (click)="toggleExpanded()">
+      <div
+        class="header"
+        (click)="toggleExpanded()"
+        (keydown.enter)="toggleExpanded()"
+        (keydown.space)="toggleExpanded()"
+        tabindex="0"
+        role="button"
+        [attr.aria-expanded]="expanded()"
+        aria-label="Toggle active context section"
+      >
         <div class="header-left">
           <span class="toggle-icon" [class.expanded]="expanded()">&#9656;</span>
           <span class="title">Active Context</span>
@@ -121,6 +135,11 @@ export interface ContextStats {
                   [class.loaded]="file.source === 'disk' || file.source === 'network'"
                   [class.memory]="file.source === 'memory'"
                   (click)="selectFile(file)"
+                  (keydown.enter)="selectFile(file)"
+                  (keydown.space)="selectFile(file)"
+                  tabindex="0"
+                  role="button"
+                  [attr.aria-label]="'Select file ' + file.path"
                 >
                   <div class="file-icon">
                     @switch (file.type) {

@@ -6,8 +6,18 @@ import { Injectable, signal, computed, effect } from '@angular/core';
 import type { AppSettings, ThemeMode } from '../../../../shared/types/settings.types';
 import { DEFAULT_SETTINGS, SETTINGS_METADATA } from '../../../../shared/types/settings.types';
 
+// Type for the settings API methods
+interface SettingsApi {
+  getSettings: () => Promise<{ success: boolean; data?: AppSettings }>;
+  onSettingsChanged: (callback: (data: unknown) => void) => () => void;
+  setSetting: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
+  updateSettings: (settings: Partial<AppSettings>) => Promise<{ success: boolean; error?: string }>;
+  resetSettings: () => Promise<{ success: boolean; data?: AppSettings; error?: string }>;
+  resetSetting: (key: string) => Promise<{ success: boolean; value?: unknown; error?: string }>;
+}
+
 // Helper to access settings API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = () => (window as unknown as { electronAPI: SettingsApi }).electronAPI;
 
 @Injectable({ providedIn: 'root' })
 export class SettingsStore {

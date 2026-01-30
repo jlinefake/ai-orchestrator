@@ -18,8 +18,7 @@ import type {
   ContextStore,
   RLMSession,
   ContextQuery,
-  QueryType,
-  ContextSection
+  QueryType
 } from '../../../../shared/types/rlm.types';
 import { ElectronIpcService } from '../../core/services/ipc';
 import { RlmContextBrowserComponent } from './rlm-context-browser.component';
@@ -269,7 +268,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
         sessionId: session.id,
         query
       });
-      const result = this.unwrapResponse<any>(response);
+      const result = this.unwrapResponse<{ result?: string; tokensUsed?: number; sectionsAccessed?: string[]; duration?: number }>(response);
 
       const queryResult: QueryResult = {
         id: `qry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -304,7 +303,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  async handleSectionSelected(section: ContextSection): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async handleSectionSelected(_section?: unknown): Promise<void> {
     const store = this.store();
     if (!store) return;
 
@@ -316,7 +316,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  async handleQueryExecuted(_result: QueryResult): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async handleQueryExecuted(_result?: unknown): Promise<void> {
     const session = this.session();
     if (!session) return;
 
@@ -377,7 +378,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     if (
       response &&
       typeof response === 'object' &&
-      'success' in (response as any)
+      'success' in (response as Record<string, unknown>)
     ) {
       const typed = response as { success: boolean; data?: T };
       return typed.success ? (typed.data ?? null) : null;

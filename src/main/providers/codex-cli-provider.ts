@@ -82,14 +82,31 @@ export class CodexCliProvider extends BaseProvider {
     this.adapter = new CodexCliAdapter(codexConfig);
 
     // Forward adapter events to provider events
-    this.adapter.on('output', (content: string) => {
-      const message: OutputMessage = {
-        id: generateId(),
-        timestamp: Date.now(),
-        type: 'assistant',
-        content,
-      };
-      this.emit('output', message);
+    // Note: Adapter emits OutputMessage objects during streaming, not plain strings
+    this.adapter.on('output', (outputData: OutputMessage | string) => {
+      if (typeof outputData === 'string') {
+        // Plain string content
+        const message: OutputMessage = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'assistant',
+          content: outputData,
+        };
+        this.emit('output', message);
+      } else if (outputData && typeof outputData === 'object') {
+        // OutputMessage object from adapter
+        const content = outputData.content;
+        if (typeof content === 'string' && content) {
+          const message: OutputMessage = {
+            id: outputData.id || generateId(),
+            timestamp: outputData.timestamp || Date.now(),
+            type: outputData.type || 'assistant',
+            content,
+            metadata: outputData.metadata,
+          };
+          this.emit('output', message);
+        }
+      }
     });
 
     this.adapter.on('status', (status: string) => {

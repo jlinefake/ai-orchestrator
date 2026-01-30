@@ -9,10 +9,10 @@
  */
 
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
-import { Subject, BehaviorSubject, Observable, interval } from 'rxjs';
+import { Subject, BehaviorSubject, Observable } from 'rxjs';
 import { takeUntil, filter, map } from 'rxjs/operators';
 import { ElectronIpcService } from '../../../core/services/ipc';
-import type { DebateResult, DebateSessionRound, DebateContribution } from '../../../../../shared/types/debate.types';
+import type { DebateResult } from '../../../../../shared/types/debate.types';
 
 export type DebateStreamingStatus = 'idle' | 'connecting' | 'streaming' | 'paused' | 'completed' | 'error';
 

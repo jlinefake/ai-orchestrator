@@ -262,12 +262,20 @@ export class CliVerificationCoordinator extends EventEmitter {
     }
 
     // Ensure minimum agent count by duplicating with different personalities
+    // Note: When not enough unique CLIs are available, we duplicate agents with different
+    // personalities to get diverse perspectives. This is intentional for Byzantine fault tolerance.
     while (agents.length < (config.agentCount || 3) && agents.length > 0) {
-      const baseAgent = agents[0];
+      // Cycle through available agents to distribute load
+      const baseAgentIndex = agents.length % Math.min(agents.length, config.agentCount || 3);
+      const baseAgent = agents[baseAgentIndex];
+      const newPersonality = personalities[agents.length % personalities.length];
+      const personalityLabel = this.getPersonalityShortLabel(newPersonality);
       agents.push({
         ...baseAgent,
-        name: `${baseAgent.name}-${agents.length}`,
-        personality: personalities[agents.length % personalities.length],
+        // Create a provider clone (new instance, not shared reference)
+        provider: this.registry.createCliProvider(baseAgent.command?.split(' ')[0] as CliType),
+        name: `${baseAgent.name} (${personalityLabel})`,
+        personality: newPersonality,
       });
     }
 
@@ -516,6 +524,23 @@ export class CliVerificationCoordinator extends EventEmitter {
         timedOut: (error as Error).message.includes('timeout'),
       };
     }
+  }
+
+  /**
+   * Get short label for personality (for display names)
+   */
+  private getPersonalityShortLabel(personality?: PersonalityType): string {
+    const labels: Record<PersonalityType, string> = {
+      'methodical-analyst': 'Analyst',
+      'creative-solver': 'Creative',
+      'pragmatic-engineer': 'Pragmatic',
+      'security-focused': 'Security',
+      'user-advocate': 'User Advocate',
+      'devils-advocate': "Devil's Advocate",
+      'domain-expert': 'Expert',
+      'generalist': 'Generalist',
+    };
+    return personality ? labels[personality] || personality : 'Alt';
   }
 
   /**

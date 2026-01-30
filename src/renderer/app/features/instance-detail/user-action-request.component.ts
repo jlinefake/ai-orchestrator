@@ -317,6 +317,20 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
         this.loadPendingRequests();
       }
     });
+
+    // Clear permission dialogs when YOLO mode is toggled ON
+    effect(() => {
+      const id = this.instanceId();
+      if (id) {
+        const instance = this.instanceStore.getInstance(id);
+        if (instance?.yoloMode) {
+          // YOLO mode enabled - clear any pending permission requests
+          this.pendingRequests.update((requests) =>
+            requests.filter((r) => r.requestType !== 'input_required')
+          );
+        }
+      }
+    });
   }
 
   ngOnInit(): void {
@@ -343,6 +357,15 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
       const currentInstanceId = this.instanceId();
       console.log('[UserActionRequestComponent] Current instance ID:', currentInstanceId);
       console.log('[UserActionRequestComponent] Payload instance ID:', payload.instanceId);
+
+      // Check if YOLO mode is enabled - skip showing dialog if so
+      if (currentInstanceId) {
+        const instance = this.instanceStore.getInstance(currentInstanceId);
+        if (instance?.yoloMode) {
+          console.log('[UserActionRequestComponent] YOLO mode enabled, skipping permission dialog');
+          return;
+        }
+      }
 
       // Only show for this instance
       if (!currentInstanceId || payload.instanceId === currentInstanceId) {

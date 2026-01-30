@@ -250,6 +250,10 @@ export interface TrainingStats {
                   [class]="'insight-' + insight.type"
                   [class.selected]="selectedInsight()?.id === insight.id"
                   (click)="selectInsight(insight)"
+                  (keydown.enter)="selectInsight(insight)"
+                  (keydown.space)="selectInsight(insight)"
+                  tabindex="0"
+                  role="button"
                 >
                   <div class="insight-header">
                     <span class="insight-type-badge" [class]="'type-' + insight.type">
@@ -288,6 +292,10 @@ export interface TrainingStats {
                   class="filter-btn"
                   [class.active]="outcomeFilter() === ''"
                   (click)="setOutcomeFilter('')"
+                  (keydown.enter)="setOutcomeFilter('')"
+                  (keydown.space)="setOutcomeFilter('')"
+                  tabindex="0"
+                  role="button"
                 >
                   All
                 </button>
@@ -295,6 +303,10 @@ export interface TrainingStats {
                   class="filter-btn success"
                   [class.active]="outcomeFilter() === 'success'"
                   (click)="setOutcomeFilter('success')"
+                  (keydown.enter)="setOutcomeFilter('success')"
+                  (keydown.space)="setOutcomeFilter('success')"
+                  tabindex="0"
+                  role="button"
                 >
                   Success
                 </button>
@@ -302,6 +314,10 @@ export interface TrainingStats {
                   class="filter-btn failure"
                   [class.active]="outcomeFilter() === 'failure'"
                   (click)="setOutcomeFilter('failure')"
+                  (keydown.enter)="setOutcomeFilter('failure')"
+                  (keydown.space)="setOutcomeFilter('failure')"
+                  tabindex="0"
+                  role="button"
                 >
                   Failed
                 </button>
@@ -315,6 +331,10 @@ export interface TrainingStats {
                   [class.failure]="!outcome.success"
                   [class.selected]="selectedOutcome()?.id === outcome.id"
                   (click)="selectOutcome(outcome)"
+                  (keydown.enter)="selectOutcome(outcome)"
+                  (keydown.space)="selectOutcome(outcome)"
+                  tabindex="0"
+                  role="button"
                 >
                   <div class="outcome-header">
                     <span class="outcome-status">

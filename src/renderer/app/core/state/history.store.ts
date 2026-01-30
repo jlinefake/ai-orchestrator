@@ -102,7 +102,7 @@ export class HistoryStore {
           error: response.error?.message || 'Failed to load history',
         }));
       }
-    } catch (error) {
+    } catch {
       this.state.update(s => ({
         ...s,
         loading: false,
@@ -139,7 +139,7 @@ export class HistoryStore {
         }));
         return null;
       }
-    } catch (error) {
+    } catch {
       this.state.update(s => ({
         ...s,
         loading: false,
@@ -174,7 +174,7 @@ export class HistoryStore {
         }));
         return false;
       }
-    } catch (error) {
+    } catch {
       this.state.update(s => ({
         ...s,
         error: 'Failed to delete entry',
@@ -215,7 +215,7 @@ export class HistoryStore {
           error: response.error?.message || 'Failed to restore conversation',
         };
       }
-    } catch (error) {
+    } catch {
       this.state.update(s => ({ ...s, loading: false }));
       return {
         success: false,
@@ -249,7 +249,7 @@ export class HistoryStore {
         }));
         return false;
       }
-    } catch (error) {
+    } catch {
       this.state.update(s => ({
         ...s,
         error: 'Failed to clear history',

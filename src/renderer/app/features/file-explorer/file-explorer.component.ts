@@ -40,7 +40,7 @@ interface TreeNode extends FileEntry {
 
       <div class="file-explorer" [style.width.px]="isCollapsed() ? 36 : explorerWidth()">
         <!-- Header with toggle -->
-        <div class="explorer-header" (click)="toggleCollapse()">
+        <div class="explorer-header" (click)="toggleCollapse()" (keydown.enter)="toggleCollapse()" (keydown.space)="toggleCollapse()" tabindex="0" role="button">
         <span class="collapse-icon">{{ isCollapsed() ? '📁' : '📂' }}</span>
         <span class="header-title" [class.hidden]="isCollapsed()">Files</span>
         @if (!isCollapsed()) {
@@ -92,6 +92,10 @@ interface TreeNode extends FileEntry {
                 draggable="true"
                 (dragstart)="onDragStart($event, node)"
                 (click)="onNodeClick(node)"
+                (keydown.enter)="onNodeClick(node)"
+                (keydown.space)="onNodeClick(node)"
+                tabindex="0"
+                role="button"
               >
                 @if (node.isDirectory) {
                   <span class="expand-icon">

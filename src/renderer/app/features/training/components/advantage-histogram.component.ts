@@ -203,8 +203,9 @@ export class AdvantageHistogramComponent implements OnDestroy {
           color: '#fff',
           fontSize: 11,
         },
-        formatter: (params: any) => {
-          const item = params[0];
+        formatter: (params: unknown) => {
+          const paramsArray = params as { dataIndex: number }[];
+          const item = paramsArray[0];
           const bin = bins[item.dataIndex];
           return `
             <div style="font-size: 11px;">

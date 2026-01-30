@@ -146,7 +146,12 @@ export class InstanceManager extends EventEmitter {
 
     // Communication events
     this.communication.on('output', (payload) => this.emit('instance:output', payload));
-    this.communication.on('input-required', (payload) => this.emit('instance:input-required', payload));
+    this.communication.on('input-required', (payload) => {
+      console.log('=== [InstanceManager] INPUT-REQUIRED EVENT RECEIVED ===');
+      console.log('[InstanceManager] Payload:', JSON.stringify(payload, null, 2));
+      this.emit('instance:input-required', payload);
+      console.log('[InstanceManager] instance:input-required event emitted');
+    });
 
     // Lifecycle events
     this.lifecycle.on('created', (payload) => this.emit('instance:created', payload));

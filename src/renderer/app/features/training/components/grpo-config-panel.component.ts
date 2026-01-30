@@ -42,7 +42,7 @@ const DEFAULT_CONFIG: GRPOConfig = {
   imports: [FormsModule],
   template: `
     <div class="config-panel" [class.expanded]="isExpanded()">
-      <div class="panel-header" (click)="toggleExpanded()">
+      <div class="panel-header" (click)="toggleExpanded()" (keydown.enter)="toggleExpanded()" (keydown.space)="toggleExpanded()" tabindex="0" role="button">
         <div class="header-left">
           <span class="panel-icon">⚙️</span>
           <span class="panel-title">GRPO Configuration</span>
@@ -55,10 +55,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
           <div class="config-grid">
             <!-- Group Size -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Group Size
                 <span class="config-hint">Outcomes per advantage group</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"
@@ -75,10 +75,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
 
             <!-- Learning Rate -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Learning Rate
                 <span class="config-hint">Policy update rate</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"
@@ -95,10 +95,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
 
             <!-- Clip Epsilon -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Clip Epsilon
                 <span class="config-hint">PPO-style clipping</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"
@@ -115,10 +115,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
 
             <!-- Entropy Coefficient -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Entropy Coefficient
                 <span class="config-hint">Exploration bonus</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"
@@ -135,10 +135,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
 
             <!-- Value Coefficient -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Value Coefficient
                 <span class="config-hint">Value loss weight</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"
@@ -155,10 +155,10 @@ const DEFAULT_CONFIG: GRPOConfig = {
 
             <!-- Min Samples -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Min Samples for Training
                 <span class="config-hint">Minimum outcomes before training</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="number"

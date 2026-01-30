@@ -10,7 +10,6 @@ import {
   ChangeDetectionStrategy,
   signal,
   computed,
-  inject,
 } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -269,8 +268,8 @@ interface NewVariant {
 
       <!-- Create/Edit Dialog -->
       @if (showCreateDialog) {
-        <div class="dialog-overlay" (click)="closeDialog()">
-          <div class="dialog" (click)="$event.stopPropagation()">
+        <div class="dialog-overlay" (click)="closeDialog()" (keydown.enter)="closeDialog()" (keydown.space)="closeDialog()" tabindex="0" role="button">
+          <div class="dialog" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" role="dialog">
             <div class="dialog-header">
               <h2>{{ editingExperiment ? 'Edit' : 'Create' }} Experiment</h2>
               <button class="close-btn" (click)="closeDialog()">
@@ -358,11 +357,11 @@ interface NewVariant {
                       </button>
                     </div>
                     <div class="form-group">
-                      <label>Name</label>
+                      <span class="label">Name</span>
                       <input type="text" [(ngModel)]="variant.name" placeholder="Variant name" />
                     </div>
                     <div class="form-group">
-                      <label>Template/Prompt</label>
+                      <span class="label">Template/Prompt</span>
                       <textarea
                         [(ngModel)]="variant.template"
                         placeholder="Enter the prompt template for this variant..."
@@ -370,7 +369,7 @@ interface NewVariant {
                       ></textarea>
                     </div>
                     <div class="form-group">
-                      <label>Weight (0-1)</label>
+                      <span class="label">Weight (0-1)</span>
                       <input
                         type="number"
                         [(ngModel)]="variant.weight"
@@ -400,8 +399,8 @@ interface NewVariant {
 
       <!-- Results Dialog -->
       @if (showResultsDialog && selectedExperiment()) {
-        <div class="dialog-overlay" (click)="closeResultsDialog()">
-          <div class="dialog dialog-large" (click)="$event.stopPropagation()">
+        <div class="dialog-overlay" (click)="closeResultsDialog()" (keydown.enter)="closeResultsDialog()" (keydown.space)="closeResultsDialog()" tabindex="0" role="button">
+          <div class="dialog dialog-large" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" role="dialog">
             <div class="dialog-header">
               <h2>Results: {{ selectedExperiment()!.name }}</h2>
               <button class="close-btn" (click)="closeResultsDialog()">
@@ -928,7 +927,8 @@ interface NewVariant {
       margin-bottom: 16px;
     }
 
-    .form-group label {
+    .form-group label,
+    .form-group .label {
       display: block;
       margin-bottom: 6px;
       font-size: 14px;

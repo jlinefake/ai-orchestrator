@@ -4,6 +4,12 @@
 
 import { Component, inject, computed } from '@angular/core';
 import { KeybindingService } from '../../core/services/keybinding.service';
+import type { KeyBinding } from '../../../../shared/types/keybinding.types';
+
+interface KeybindingCategory {
+  name: string;
+  bindings: KeyBinding[];
+}
 
 @Component({
   selector: 'app-keyboard-settings-tab',
@@ -123,7 +129,7 @@ export class KeyboardSettingsTabComponent {
 
   keybindingCategories = computed(() => {
     const byCategory = this.keybindingService.bindingsByCategory();
-    const categories: { name: string; bindings: any[] }[] = [];
+    const categories: KeybindingCategory[] = [];
     byCategory.forEach((bindings, name) => {
       categories.push({ name, bindings });
     });

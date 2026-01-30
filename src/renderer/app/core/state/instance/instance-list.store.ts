@@ -13,7 +13,6 @@ import type {
   InstanceStatus,
   OutputMessage,
   CreateInstanceConfig,
-  FILE_LIMITS,
 } from './instance.types';
 
 @Injectable({ providedIn: 'root' })
@@ -68,7 +67,8 @@ export class InstanceListStore {
         }
         this.stateService.setInstances(instances);
       }
-    } catch (error) {
+    } catch (err) {
+      console.error('Failed to load instances:', err);
       this.stateService.setLoading(false);
       this.stateService.setError('Failed to load instances');
     }
@@ -407,7 +407,7 @@ export class InstanceListStore {
   /**
    * Compress an image to WebP format at the specified quality
    */
-  private async compressImage(file: File, quality: number = 0.85): Promise<Blob | null> {
+  private async compressImage(file: File, quality = 0.85): Promise<Blob | null> {
     return new Promise((resolve) => {
       const img = new Image();
       const reader = new FileReader();

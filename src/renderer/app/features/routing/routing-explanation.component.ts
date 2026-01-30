@@ -58,7 +58,7 @@ export interface RoutingDecision {
     @if (decision()) {
       <div class="routing-explanation" [class.expanded]="expanded()">
         <!-- Compact view - always visible -->
-        <div class="compact-view" (click)="toggleExpanded()">
+        <div class="compact-view" (click)="toggleExpanded()" (keydown.enter)="toggleExpanded()" (keydown.space)="toggleExpanded()" tabindex="0" role="button">
           <div class="model-info">
             <span class="model-icon">
               @switch (decision()!.tier) {

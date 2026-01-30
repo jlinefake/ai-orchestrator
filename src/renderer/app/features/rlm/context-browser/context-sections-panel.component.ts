@@ -48,6 +48,10 @@ import type { ContextSection } from '../../../../../shared/types/rlm.types';
             [class.selected]="selectedSectionId() === section.id"
             [class.summary]="section.depth > 0"
             (click)="selectSection.emit(section)"
+            (keydown.enter)="selectSection.emit(section)"
+            (keydown.space)="selectSection.emit(section)"
+            tabindex="0"
+            role="button"
           >
             <div class="section-header">
               <span class="section-type" [class]="'type-' + section.type">

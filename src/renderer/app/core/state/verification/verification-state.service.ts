@@ -30,7 +30,7 @@ export class VerificationStateService {
     currentSession: null,
     sessions: [],
     defaultConfig: DEFAULT_VERIFICATION_CONFIG,
-    selectedAgents: ['claude', 'gemini', 'ollama'],
+    selectedAgents: ['claude', 'codex', 'gemini'],
     configPanelOpen: false,
     selectedTab: 'dashboard',
   });

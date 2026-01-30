@@ -21,7 +21,7 @@ import type { ContextSection, QueryType } from '../../../../../shared/types/rlm.
         <span class="detail-type" [class]="'type-' + section().type">
           {{ getSectionTypeIcon(section().type) }} {{ section().type }}
         </span>
-        <button class="close-btn" (click)="close.emit()">✕</button>
+        <button class="close-btn" (click)="closePanel.emit()">✕</button>
       </div>
 
       <div class="detail-body">
@@ -282,7 +282,7 @@ export class ContextSectionDetailComponent {
   selectedQueryType = input<QueryType>('grep');
   sectionInQuery = input(false);
 
-  close = output<void>();
+  closePanel = output<void>();
   navigateToSection = output<string>();
   addToQuery = output<string>();
   getSectionContent = output<string>();

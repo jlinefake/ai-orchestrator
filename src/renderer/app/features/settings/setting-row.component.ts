@@ -6,8 +6,12 @@ import { Component, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { SettingMetadata } from '../../../../shared/types/settings.types';
 
+interface SettingRowApi {
+  selectFolder?: () => Promise<{ success: boolean; data?: string }>;
+}
+
 // Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = () => (window as unknown as { electronAPI?: SettingRowApi }).electronAPI;
 
 @Component({
   selector: 'app-setting-row',
@@ -261,7 +265,7 @@ export class SettingRowComponent {
 
   async browseFolder(): Promise<void> {
     const api = getApi();
-    if (!api) return;
+    if (!api?.selectFolder) return;
 
     const response = await api.selectFolder();
     if (response.success && response.data) {

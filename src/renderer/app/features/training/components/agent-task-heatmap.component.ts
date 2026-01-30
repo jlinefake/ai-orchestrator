@@ -234,17 +234,20 @@ export class AgentTaskHeatmapComponent implements OnDestroy {
         if (metric) {
           metricsLookup.set(`${taskIdx}-${agentIdx}`, metric);
           switch (metricType) {
-            case 'successRate':
+            case 'successRate': {
               value = metric.successRate;
               break;
-            case 'avgReward':
+            }
+            case 'avgReward': {
               value = metric.avgReward;
               break;
-            case 'avgDuration':
+            }
+            case 'avgDuration': {
               // Normalize duration (invert so lower is better shown as green)
               const maxDuration = Math.max(...data.map(d => d.avgDuration), 1);
               value = 1 - (metric.avgDuration / maxDuration);
               break;
+            }
           }
         }
 
@@ -265,8 +268,9 @@ export class AgentTaskHeatmapComponent implements OnDestroy {
           color: '#fff',
           fontSize: 11,
         },
-        formatter: (params: any) => {
-          const [taskIdx, agentIdx] = params.data as [number, number, number];
+        formatter: (params: unknown) => {
+          const paramData = params as { data: [number, number, number] };
+          const [taskIdx, agentIdx] = paramData.data;
           const agent = agents[agentIdx];
           const task = tasks[taskIdx];
           const metric = metricsLookup.get(`${taskIdx}-${agentIdx}`);
@@ -354,8 +358,9 @@ export class AgentTaskHeatmapComponent implements OnDestroy {
           show: true,
           color: '#fff',
           fontSize: 9,
-          formatter: (params: any) => {
-            const value = params.data[2];
+          formatter: (params: unknown) => {
+            const paramData = params as { data: [number, number, number] };
+            const value = paramData.data[2];
             if (value === 0) return '';
             return metricType === 'avgDuration'
               ? '' // Don't show label for inverted values

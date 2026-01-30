@@ -66,10 +66,10 @@ const DEFAULT_CONFIG: DebateConfig = {
           <div class="config-grid">
             <!-- Agent Count -->
             <div class="config-item">
-              <label class="config-label" for="agent-count-input">
-                Number of Agents
+              <span class="config-label">
+                <label for="agent-count-input">Number of Agents</label>
                 <span class="config-hint">Debating participants</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   id="agent-count-input"
@@ -87,10 +87,10 @@ const DEFAULT_CONFIG: DebateConfig = {
 
             <!-- Convergence Threshold -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Convergence Threshold
                 <span class="config-hint">Consensus required to end early</span>
-              </label>
+              </span>
               <div class="config-control">
                 <input
                   type="range"
@@ -107,10 +107,10 @@ const DEFAULT_CONFIG: DebateConfig = {
 
             <!-- Max Rounds -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Max Rounds
                 <span class="config-hint">Maximum debate iterations</span>
-              </label>
+              </span>
               <div class="config-control">
                 <select
                   class="select-input"
@@ -126,10 +126,10 @@ const DEFAULT_CONFIG: DebateConfig = {
 
             <!-- Timeout -->
             <div class="config-item">
-              <label class="config-label">
+              <span class="config-label">
                 Timeout
                 <span class="config-hint">Max duration before cancellation</span>
-              </label>
+              </span>
               <div class="config-control">
                 <select
                   class="select-input"
@@ -145,10 +145,10 @@ const DEFAULT_CONFIG: DebateConfig = {
 
             <!-- Temperature Range -->
             <div class="config-item full-width">
-              <label class="config-label">
+              <span class="config-label">
                 Temperature Range
                 <span class="config-hint">Response diversity ({{ localConfig().temperatureMin.toFixed(1) }} - {{ localConfig().temperatureMax.toFixed(1) }})</span>
-              </label>
+              </span>
               <div class="config-control dual-slider">
                 <span class="range-label">Min</span>
                 <input

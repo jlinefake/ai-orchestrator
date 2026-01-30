@@ -12,14 +12,13 @@ import {
   input,
   output,
   inject,
-  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CliDetectionService } from '../shared/services/cli-detection.service';
 import { CliStatusIndicatorComponent } from '../shared/components/cli-status-indicator.component';
 import { AgentCapabilityBadgesComponent } from '../shared/components/agent-capability-badges.component';
-import type { CliStatusInfo, CliStatus } from '../../../../../shared/types/verification-ui.types';
+import type { CliStatusInfo } from '../../../../../shared/types/verification-ui.types';
 import type { CliType } from '../../../../../shared/types/unified-cli-response';
 
 @Component({
@@ -70,6 +69,10 @@ import type { CliType } from '../../../../../shared/types/unified-cli-response';
             [class.available]="cli.status === 'available'"
             [class.selected]="isSelected(cli.type)"
             (click)="handleCliClick(cli)"
+            (keydown.enter)="handleCliClick(cli)"
+            (keydown.space)="handleCliClick(cli); $event.preventDefault()"
+            tabindex="0"
+            role="button"
           >
             <div class="card-header">
               <app-cli-status-indicator

@@ -87,7 +87,7 @@ export interface HierarchicalInstance {
               [parentChain]="item.parentChain"
               [isSelected]="selectedId() === item.instance.id"
               [isDraggable]="item.depth === 0"
-              (select)="onSelectInstance($event)"
+              (instanceSelect)="onSelectInstance($event)"
               (terminate)="onTerminateInstance($event)"
               (restart)="onRestartInstance($event)"
               (toggleExpand)="onToggleExpand($event)"

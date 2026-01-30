@@ -4,6 +4,11 @@
 
 import type { AgentMode } from './agent.types';
 import type { CliType } from './settings.types';
+import type {
+  TerminationPolicy,
+  ContextInheritanceConfig,
+  createDefaultContextInheritance,
+} from './supervision.types';
 
 /**
  * CLI provider type for instances
@@ -125,6 +130,12 @@ export interface Instance {
   parentId: string | null;
   childrenIds: string[];
   supervisorNodeId: string;
+  workerNodeId?: string; // Worker node ID in supervision tree
+  depth: number; // Depth in hierarchy (0 = root)
+
+  // Phase 2: Termination & Inheritance
+  terminationPolicy: TerminationPolicy;
+  contextInheritance: ContextInheritanceConfig;
 
   // Agent mode
   agentId: string; // References AgentProfile.id ('build', 'plan', 'review', or custom)
@@ -175,6 +186,10 @@ export interface InstanceCreateConfig {
   agentId?: string; // Agent profile ID (defaults to 'build')
   modelOverride?: string; // Optional model override for the instance
   provider?: InstanceProvider; // CLI provider to use (defaults to settings.defaultCli)
+
+  // Phase 2: Hierarchical instance options
+  terminationPolicy?: TerminationPolicy; // What happens to children when this instance terminates
+  contextInheritance?: Partial<ContextInheritanceConfig>; // Context inheritance settings
 }
 
 export interface InstanceSummary {
@@ -195,10 +210,18 @@ export function createInstance(config: InstanceCreateConfig): Instance {
   const now = Date.now();
   // Import agent profile to get mode
   const { getAgentById, getDefaultAgent } = require('./agent.types');
+  const { createDefaultContextInheritance } = require('./supervision.types');
   const agent = config.agentId
     ? getAgentById(config.agentId)
     : getDefaultAgent();
   const resolvedAgent = agent || getDefaultAgent();
+
+  // Merge context inheritance with defaults
+  const defaultInheritance = createDefaultContextInheritance();
+  const contextInheritance: ContextInheritanceConfig = {
+    ...defaultInheritance,
+    ...config.contextInheritance,
+  };
 
   return {
     id: crypto.randomUUID(),
@@ -208,6 +231,12 @@ export function createInstance(config: InstanceCreateConfig): Instance {
     parentId: config.parentId || null,
     childrenIds: [],
     supervisorNodeId: '',
+    workerNodeId: undefined,
+    depth: 0, // Will be set by lifecycle manager based on parent
+
+    // Phase 2: Termination & Inheritance
+    terminationPolicy: config.terminationPolicy || 'terminate-children',
+    contextInheritance,
 
     agentId: resolvedAgent.id,
     agentMode: resolvedAgent.mode,

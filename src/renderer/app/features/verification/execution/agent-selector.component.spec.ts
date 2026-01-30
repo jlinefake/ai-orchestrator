@@ -387,7 +387,7 @@ describe('AgentSelectorComponent', () => {
     });
 
     it('should fallback to type if metadata not found', () => {
-      mockCliDetectionService.getCliMetadata.mockReturnValue(undefined as any);
+      mockCliDetectionService.getCliMetadata.mockReturnValue(undefined as unknown);
       expect(component.getDisplayName('claude')).toBe('claude');
     });
 

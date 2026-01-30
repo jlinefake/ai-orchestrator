@@ -38,7 +38,8 @@ import {
   registerCommandHandlers,
   registerAppHandlers,
   registerFileHandlers,
-  registerCodebaseHandlers
+  registerCodebaseHandlers,
+  registerSupervisionHandlers
 } from './handlers';
 
 export class IpcMainHandler {
@@ -244,6 +245,9 @@ export class IpcMainHandler {
 
     // LLM handlers (streaming and token counting)
     registerLLMHandlers();
+
+    // Supervision handlers (Phase 2: Hierarchical Instances)
+    registerSupervisionHandlers();
 
     // Set up memory event forwarding to renderer
     this.setupMemoryEventForwarding();

@@ -17,7 +17,7 @@ import {
   computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import type { SkillBundle, SkillState } from '../../../../shared/types/skill.types';
+import type { SkillBundle } from '../../../../shared/types/skill.types';
 
 interface SkillWithStatus {
   bundle: SkillBundle;
@@ -191,8 +191,8 @@ interface SkillWithStatus {
 
       <!-- Details Modal -->
       @if (selectedSkill(); as skill) {
-        <div class="modal-overlay" (click)="closeDetails()">
-          <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="modal-overlay" (click)="closeDetails()" (keydown.enter)="closeDetails()" (keydown.space)="closeDetails()" tabindex="0" role="button">
+          <div class="modal-content" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" tabindex="0" role="dialog">
             <div class="modal-header">
               <span class="skill-icon large">{{ skill.bundle.metadata.icon || '📦' }}</span>
               <div class="modal-title">

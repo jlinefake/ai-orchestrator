@@ -41,7 +41,7 @@ export interface ThinkingSession {
   standalone: true,
   template: `
     <div class="thinking-panel" [class.streaming]="session()?.isStreaming">
-      <div class="panel-header" (click)="toggleCollapsed()">
+      <div class="panel-header" (click)="toggleCollapsed()" (keydown.enter)="toggleCollapsed()" (keydown.space)="toggleCollapsed()" tabindex="0" role="button">
         <div class="header-left">
           <span class="thinking-icon" [class.active]="session()?.isStreaming">🧠</span>
           <span class="panel-title">Extended Thinking</span>
@@ -96,7 +96,7 @@ export interface ThinkingSession {
                 [class.expanded]="expandedBlocks().has(block.id)"
                 [style.--depth]="block.depth"
               >
-                <div class="block-header" (click)="toggleBlock(block.id)">
+                <div class="block-header" (click)="toggleBlock(block.id)" (keydown.enter)="toggleBlock(block.id)" (keydown.space)="toggleBlock(block.id)" tabindex="0" role="button">
                   <div class="block-info">
                     <span class="block-number">#{{ i + 1 }}</span>
                     <span class="block-depth">Depth {{ block.depth }}</span>

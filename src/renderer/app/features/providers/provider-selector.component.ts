@@ -67,7 +67,7 @@ export interface ProviderOption {
       </button>
 
       @if (isOpen()) {
-        <div class="dropdown-menu" (click)="$event.stopPropagation()">
+        <div class="dropdown-menu" (click)="$event.stopPropagation()" (keydown.enter)="$event.stopPropagation()" (keydown.space)="$event.stopPropagation()" tabindex="0" role="button">
           @for (provider of availableProviders(); track provider.id) {
             <button
               class="provider-option"
@@ -120,7 +120,7 @@ export interface ProviderOption {
     </div>
 
     @if (isOpen()) {
-      <div class="backdrop" (click)="closeDropdown()"></div>
+      <div class="backdrop" (click)="closeDropdown()" (keydown.enter)="closeDropdown()" (keydown.space)="closeDropdown()" tabindex="0" role="button"></div>
     }
   `,
   styles: [

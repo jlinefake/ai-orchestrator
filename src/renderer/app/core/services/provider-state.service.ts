@@ -6,7 +6,6 @@
 
 import { Injectable, signal, computed, inject, effect } from '@angular/core';
 import { ElectronIpcService } from './ipc';
-import type { CliType } from '../../../../shared/types/settings.types';
 
 export type ProviderType = 'claude' | 'openai' | 'gemini' | 'copilot' | 'auto';
 

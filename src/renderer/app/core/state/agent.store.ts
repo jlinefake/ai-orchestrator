@@ -213,8 +213,9 @@ export class AgentStore {
         };
       }
       // If no default exists, remove the preference
-      const { [command]: _, ...rest } = current;
-      return rest;
+      const newPrefs = { ...current };
+      delete newPrefs[command];
+      return newPrefs;
     });
     this.saveStoredState();
   }

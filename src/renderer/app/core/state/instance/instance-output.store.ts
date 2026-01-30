@@ -61,7 +61,7 @@ export class InstanceOutputStore {
 
       if (instance) {
         // Start with existing messages
-        let outputBuffer = [...instance.outputBuffer];
+        const outputBuffer: OutputMessage[] = [...instance.outputBuffer];
 
         // Process each pending message
         for (const msg of pending) {

@@ -74,7 +74,7 @@ export class InstanceStateService {
   /**
    * Add an instance to the store
    */
-  addInstance(instance: Instance, autoSelect: boolean = false): void {
+  addInstance(instance: Instance, autoSelect?: boolean): void {
     this.state.update((current) => {
       const newMap = new Map(current.instances);
       newMap.set(instance.id, instance);

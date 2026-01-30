@@ -11,7 +11,6 @@
 import {
   Component,
   Input,
-  input,
   output,
   signal,
   computed,
@@ -68,11 +67,18 @@ interface VerificationResultInput {
   imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="modal-backdrop" (click)="onClose.emit()">
-      <div class="export-modal" (click)="$event.stopPropagation()">
+    <div
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-modal-title"
+      (click)="closePanel.emit()"
+      (keydown.escape)="closePanel.emit()"
+    >
+      <div class="export-modal" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" tabindex="-1">
         <header class="modal-header">
-          <h2>Export Verification Results</h2>
-          <button class="close-btn" (click)="onClose.emit()">✕</button>
+          <h2 id="export-modal-title">Export Verification Results</h2>
+          <button class="close-btn" (click)="closePanel.emit()" aria-label="Close export panel">✕</button>
         </header>
 
         <div class="modal-body">
@@ -167,7 +173,7 @@ interface VerificationResultInput {
             </button>
           </div>
           <div class="footer-right">
-            <button class="btn-secondary" (click)="onClose.emit()">Cancel</button>
+            <button class="btn-secondary" (click)="closePanel.emit()">Cancel</button>
             <button
               class="btn-primary"
               (click)="exportFile()"
@@ -454,8 +460,8 @@ export class ExportPanelComponent {
   // Internal signal accessor for computed properties
   resultSignal = this._result.asReadonly();
 
-  onClose = output<void>();
-  onExport = output<{ format: ExportFormat; content: string }>();
+  closePanel = output<void>();
+  exportComplete = output<{ format: ExportFormat; content: string }>();
 
   // Formats
   formats = [
@@ -723,7 +729,10 @@ export class ExportPanelComponent {
 
       if (format === 'pdf') {
         // PDF requires server-side conversion
-        await (window as any).electronAPI?.invoke('export:pdf', {
+        interface ElectronAPI {
+          invoke: (channel: string, data: { content: string; filename: string }) => Promise<void>;
+        }
+        await ((window as unknown as { electronAPI?: ElectronAPI }).electronAPI)?.invoke('export:pdf', {
           content,
           filename: `verification-${this._result().id}.pdf`,
         });
@@ -745,8 +754,8 @@ export class ExportPanelComponent {
         URL.revokeObjectURL(url);
       }
 
-      this.onExport.emit({ format, content });
-      this.onClose.emit();
+      this.exportComplete.emit({ format, content });
+      this.closePanel.emit();
     } catch (error) {
       console.error('Export failed:', error);
     } finally {

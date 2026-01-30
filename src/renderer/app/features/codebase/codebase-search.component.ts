@@ -13,7 +13,6 @@ import {
   input,
   output,
   signal,
-  effect,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -27,9 +26,10 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
     <div class="search-container">
       <!-- Search Input -->
       <div class="search-input-wrapper">
-        <span class="search-icon">🔍</span>
+        <label for="codebase-search-input" class="search-icon">🔍</label>
         <input
           type="text"
+          id="codebase-search-input"
           class="search-input"
           placeholder="Search codebase..."
           [ngModel]="searchQuery()"
@@ -46,9 +46,10 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
       <!-- Search Options -->
       <div class="search-options">
         <!-- HyDE Toggle -->
-        <label class="option-toggle" title="Hypothetical Document Embedding - generates better semantic queries">
+        <label class="option-toggle" for="hyde-toggle" title="Hypothetical Document Embedding - generates better semantic queries">
           <input
             type="checkbox"
+            id="hyde-toggle"
             [ngModel]="useHyDE()"
             (ngModelChange)="useHyDE.set($event); triggerSearch()"
             [disabled]="disabled()"
@@ -57,9 +58,10 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
         </label>
 
         <!-- Rerank Toggle -->
-        <label class="option-toggle" title="Re-rank results using cross-encoder for better accuracy">
+        <label class="option-toggle" for="rerank-toggle" title="Re-rank results using cross-encoder for better accuracy">
           <input
             type="checkbox"
+            id="rerank-toggle"
             [ngModel]="useRerank()"
             (ngModelChange)="useRerank.set($event); triggerSearch()"
             [disabled]="disabled()"
@@ -69,8 +71,10 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
 
         <!-- File Pattern Filter -->
         <div class="file-pattern">
+          <label for="file-pattern-input" class="visually-hidden">File pattern filter</label>
           <input
             type="text"
+            id="file-pattern-input"
             class="pattern-input"
             placeholder="*.ts, src/**"
             [ngModel]="filePattern()"
@@ -82,8 +86,9 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
 
         <!-- Result Count -->
         <div class="result-count">
-          <label class="count-label">Results:</label>
+          <label class="count-label" for="result-count-select">Results:</label>
           <select
+            id="result-count-select"
             class="count-select"
             [ngModel]="topK()"
             (ngModelChange)="topK.set($event); triggerSearch()"
@@ -274,6 +279,18 @@ import type { HybridSearchOptions } from '../../../../shared/types/codebase.type
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+    }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -288,7 +305,7 @@ export class CodebaseSearchComponent {
   isSearching = input<boolean>(false);
 
   /** Emits search options when user triggers search */
-  search = output<HybridSearchOptions>();
+  searchTriggered = output<HybridSearchOptions>();
 
   // Local state
   searchQuery = signal('');
@@ -340,7 +357,7 @@ export class CodebaseSearchComponent {
       options.filePatterns = patterns;
     }
 
-    this.search.emit(options);
+    this.searchTriggered.emit(options);
   }
 
   private debouncedSearch(): void {

@@ -10,7 +10,6 @@
 import {
   Component,
   input,
-  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 

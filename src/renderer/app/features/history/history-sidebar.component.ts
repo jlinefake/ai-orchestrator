@@ -14,17 +14,25 @@ import { HistoryStore } from '../../core/state/history.store';
 import { InstanceStore } from '../../core/state/instance.store';
 import { HistoryListComponent } from './history-list.component';
 import type { ConversationHistoryEntry } from '../../../../shared/types/history.types';
+import type { OutputMessage } from '../../core/state/instance/instance.types';
 
 @Component({
   selector: 'app-history-sidebar',
   standalone: true,
   imports: [FormsModule, HistoryListComponent],
   template: `
-    <div class="history-backdrop" (click)="close.emit()"></div>
+    <div
+      class="history-backdrop"
+      (click)="closeHistory.emit()"
+      (keydown.escape)="closeHistory.emit()"
+      tabindex="0"
+      role="button"
+      aria-label="Close history sidebar"
+    >
     <aside class="history-sidebar" [class.open]="true">
       <div class="sidebar-header">
         <h2>Conversation History</h2>
-        <button class="btn-close" (click)="close.emit()" title="Close">
+        <button class="btn-close" (click)="closeHistory.emit()" title="Close">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -61,8 +69,8 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
           [entries]="store.filteredEntries()"
           [loading]="store.loading()"
           [searchQuery]="store.searchQuery()"
-          (select)="onSelect($event)"
-          (delete)="onDelete($event)"
+          (selectEntry)="onSelect($event)"
+          (deleteEntry)="onDelete($event)"
           (clearSearch)="store.clearSearch()"
         />
       </div>
@@ -79,8 +87,20 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
 
     <!-- Confirmation Dialog -->
     @if (showConfirmDialog()) {
-      <div class="confirm-overlay" (click)="cancelConfirm()">
-        <div class="confirm-dialog" (click)="$event.stopPropagation()">
+      <div
+        class="confirm-overlay"
+        (click)="cancelConfirm()"
+        (keydown.escape)="cancelConfirm()"
+        tabindex="0"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div
+          class="confirm-dialog"
+          (click)="$event.stopPropagation()"
+          (keydown)="$event.stopPropagation()"
+          tabindex="-1"
+        >
           <h3>{{ confirmTitle() }}</h3>
           <p>{{ confirmMessage() }}</p>
           <div class="confirm-actions">
@@ -337,7 +357,7 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
 export class HistorySidebarComponent implements OnInit {
   store = inject(HistoryStore);
   instanceStore = inject(InstanceStore);
-  close = output<void>();
+  closeHistory = output<void>();
 
   // Confirmation dialog state
   showConfirmDialog = signal(false);
@@ -368,11 +388,11 @@ export class HistorySidebarComponent implements OnInit {
           if (result.restoredMessages && result.restoredMessages.length > 0) {
             this.instanceStore.setInstanceMessages(
               result.instanceId,
-              result.restoredMessages as any[]
+              result.restoredMessages as OutputMessage[]
             );
           }
           this.instanceStore.setSelectedInstance(result.instanceId);
-          this.close.emit();
+          this.closeHistory.emit();
         }
       }
     );

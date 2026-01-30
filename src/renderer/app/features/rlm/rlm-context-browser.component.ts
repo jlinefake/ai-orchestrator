@@ -13,7 +13,6 @@ import {
   input,
   output,
   signal,
-  computed,
   ChangeDetectionStrategy,
   HostListener,
   OnInit,
@@ -92,6 +91,10 @@ interface ToastNotification {
               class="toast"
               [class]="'toast-' + toast.type"
               (click)="dismissToast(toast.id)"
+              (keydown.enter)="dismissToast(toast.id)"
+              (keydown.space)="dismissToast(toast.id)"
+              tabindex="0"
+              role="button"
             >
               <span class="toast-icon">
                 @switch (toast.type) {
@@ -167,7 +170,7 @@ interface ToastNotification {
             [section]="section"
             [selectedQueryType]="currentQueryType()"
             [sectionInQuery]="isSectionInQuery(section.id)"
-            (close)="clearSelection()"
+            (closePanel)="clearSelection()"
             (navigateToSection)="navigateToSection($event)"
             (addToQuery)="addSectionToQuery($event)"
             (getSectionContent)="getSectionContent($event)"
@@ -623,7 +626,7 @@ export class RlmContextBrowserComponent implements OnInit, OnDestroy {
     const newTemplate: SavedQueryTemplate = {
       id: `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: template.name,
-      type: template.type as any,
+      type: template.type as QueryType,
       params: template.params,
       createdAt: Date.now()
     };

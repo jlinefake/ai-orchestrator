@@ -13,15 +13,17 @@ import {
   inject,
   signal,
   computed,
-  effect,
-  OnInit,
-  OnDestroy,
   ChangeDetectionStrategy,
+  OnDestroy,
+  ElementRef,
+  viewChild,
+  AfterViewInit,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { VerificationStore } from '../../../core/state/verification.store';
 import { CliStore } from '../../../core/state/cli.store';
+import { ElectronIpcService } from '../../../core/services/ipc';
 import { DraftService, VERIFICATION_DRAFT_KEY } from '../../../core/services/draft.service';
 import { AgentCardComponent } from '../shared/components/agent-card.component';
 import { AgentConfigPanelComponent } from '../config/agent-config-panel.component';
@@ -48,7 +50,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
       <!-- Header -->
       <div class="verification-header">
         <div class="header-left">
-          <button class="back-btn" (click)="navigateBack()" title="Back to Dashboard">
+          <button class="back-btn" type="button" (click)="navigateBack()" aria-label="Back to Dashboard">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M19 12H5"></path>
               <polyline points="12 19 5 12 12 5"></polyline>
@@ -58,10 +60,10 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
           <h1 class="verification-title">Multi-Agent Verification</h1>
         </div>
         <div class="header-actions">
-          <button class="action-btn secondary" (click)="openSettings()">
+          <button class="action-btn secondary" type="button" (click)="openSettings()">
             Settings
           </button>
-          <button class="action-btn secondary" (click)="showHelp()">
+          <button class="action-btn secondary" type="button" (click)="showHelp()" aria-label="Help">
             ?
           </button>
         </div>
@@ -71,6 +73,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
       <div class="tab-navigation">
         <button
           class="tab-btn"
+          type="button"
           [class.active]="store.selectedTab() === 'dashboard'"
           (click)="store.setSelectedTab('dashboard')"
         >
@@ -78,6 +81,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
         </button>
         <button
           class="tab-btn"
+          type="button"
           [class.active]="store.selectedTab() === 'monitor'"
           [disabled]="!store.isRunning()"
           (click)="store.setSelectedTab('monitor')"
@@ -89,6 +93,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
         </button>
         <button
           class="tab-btn"
+          type="button"
           [class.active]="store.selectedTab() === 'results'"
           [disabled]="!store.result()"
           (click)="store.setSelectedTab('results')"
@@ -125,48 +130,95 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                             <span class="file-name">{{ preview.file.name }}</span>
                             <span class="file-size">{{ preview.size }}</span>
                           </div>
-                          <button class="file-remove" (click)="removeFile(preview.file)" title="Remove file">×</button>
+                          <button class="file-remove" type="button" (click)="removeFile(preview.file)" [attr.aria-label]="'Remove ' + preview.file.name">×</button>
                         </div>
                       } @else {
                         <div class="file-chip">
                           <span class="file-icon">{{ preview.icon }}</span>
                           <span class="file-name">{{ preview.file.name }}</span>
-                          <button class="file-remove" (click)="removeFile(preview.file)">×</button>
+                          <button class="file-remove" type="button" (click)="removeFile(preview.file)" [attr.aria-label]="'Remove ' + preview.file.name">×</button>
                         </div>
                       }
                     }
                   </div>
                 }
 
+                <!-- Working Directory Selector -->
                 <div class="form-group">
-                  <label class="form-label">Prompt</label>
+                  <label class="form-label">Working Directory</label>
+                  <div class="directory-selector">
+                    <button
+                      class="directory-btn"
+                      type="button"
+                      (click)="selectWorkingDirectory()"
+                      [title]="workingDirectory() || 'Select a folder for agents to scan'"
+                    >
+                      <span class="directory-icon">📁</span>
+                      <span class="directory-path">
+                        {{ workingDirectory() || 'Select folder to scan...' }}
+                      </span>
+                    </button>
+                    @if (workingDirectory()) {
+                      <button
+                        class="directory-clear"
+                        type="button"
+                        (click)="clearWorkingDirectory()"
+                        aria-label="Clear working directory"
+                      >
+                        ×
+                      </button>
+                    }
+                  </div>
+                  <span class="form-hint">Agents will analyze code in this directory</span>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="prompt-input">Prompt</label>
                   <textarea
-                    class="form-textarea"
+                    #promptTextarea
+                    id="prompt-input"
+                    class="form-textarea auto-expand"
                     [ngModel]="promptInput"
                     (ngModelChange)="onPromptChange($event)"
+                    (input)="autoExpandTextarea()"
                     (keydown.enter)="onEnterKey($event)"
-                    placeholder="Enter your verification prompt... (paste images or drop files here)"
-                    rows="3"
+                    placeholder="Enter your verification prompt... (paste images or drop files here)
+
+You can write detailed, multi-line prompts here. The textarea will expand as needed."
+                    rows="4"
                   ></textarea>
+                  <div class="prompt-actions">
+                    <span class="char-count">{{ promptInput.length }} characters</span>
+                    <button
+                      class="expand-btn"
+                      type="button"
+                      (click)="toggleExpandedPrompt()"
+                      [title]="isPromptExpanded() ? 'Collapse prompt area' : 'Expand prompt area'"
+                    >
+                      {{ isPromptExpanded() ? '↑ Collapse' : '↓ Expand' }}
+                    </button>
+                  </div>
                 </div>
 
                 <div class="form-row">
                   <div class="form-group">
-                    <label class="form-label">Selected Agents</label>
+                    <span class="form-label">Selected Agents</span>
                     <div class="agent-chips">
                       @for (agent of validSelectedAgents(); track agent) {
                         <span class="agent-chip">
                           {{ getAgentDisplayName(agent) }}
                           <button
                             class="chip-remove"
+                            type="button"
                             (click)="store.removeSelectedAgent(agent)"
+                            [attr.aria-label]="'Remove ' + getAgentDisplayName(agent)"
                           >
                             ×
                           </button>
                         </span>
                       }
                       @if (canAddMoreAgents()) {
-                        <button class="add-agent-btn" (click)="showAgentPicker()">
+                        <button class="add-agent-btn" type="button" (click)="showAgentPicker()">
                           + Add Agent
                         </button>
                       }
@@ -174,7 +226,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                   </div>
 
                   <div class="form-group">
-                    <label class="form-label">Strategy</label>
+                    <span class="form-label">Strategy</span>
                     <div class="strategy-cards">
                       @for (strategy of strategies; track strategy.value) {
                         <label
@@ -200,12 +252,14 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                 <div class="form-actions">
                   <button
                     class="action-btn text"
+                    type="button"
                     (click)="store.toggleConfigPanel()"
                   >
                     Advanced Options
                   </button>
                   <button
                     class="action-btn primary"
+                    type="button"
                     [disabled]="!canStartVerification()"
                     (click)="startVerification()"
                   >
@@ -217,9 +271,9 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
 
             <!-- Available Agents Section -->
             <section class="section" [class.collapsed]="agentsCollapsed()">
-              <div class="section-header clickable" (click)="toggleAgentsCollapsed()">
+              <div class="section-header clickable" (click)="toggleAgentsCollapsed()" (keydown.enter)="toggleAgentsCollapsed()" (keydown.space)="toggleAgentsCollapsed()" tabindex="0" role="button" [attr.aria-expanded]="!agentsCollapsed()">
                 <div class="section-header-left">
-                  <button class="collapse-btn" [class.collapsed]="agentsCollapsed()">
+                  <button class="collapse-btn" [class.collapsed]="agentsCollapsed()" type="button" [attr.aria-label]="agentsCollapsed() ? 'Expand available agents' : 'Collapse available agents'">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
@@ -229,6 +283,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                 </div>
                 <button
                   class="action-btn text"
+                  type="button"
                   [disabled]="isScanning()"
                   (click)="rescanClis(); $event.stopPropagation()"
                 >
@@ -246,7 +301,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                     <app-agent-card
                       [cli]="cli"
                       [selected]="isAgentSelected(cli.name)"
-                      (select)="toggleAgentSelection(cli.name)"
+                      (agentSelect)="toggleAgentSelection(cli.name)"
                       (configure)="openAgentConfig(cli.name)"
                     />
                   }
@@ -280,6 +335,10 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                     <div
                       class="session-item"
                       (click)="viewSession(session.id)"
+                      (keydown.enter)="viewSession(session.id)"
+                      (keydown.space)="viewSession(session.id)"
+                      tabindex="0"
+                      role="button"
                     >
                       <div class="session-info">
                         <span class="session-icon">📋</span>
@@ -298,12 +357,13 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
                       </div>
                       <button
                         class="session-delete"
-                        title="Delete session"
+                        type="button"
+                        aria-label="Delete session"
                         (click)="deleteSession(session.id, $event)"
                       >
                         ×
                       </button>
-                      <button class="session-arrow">→</button>
+                      <button class="session-arrow" type="button" aria-hidden="true" tabindex="-1">→</button>
                     </div>
                   }
                 </div>
@@ -328,7 +388,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
 
       <!-- Config Panel Overlay -->
       @if (store.configPanelOpen()) {
-        <app-agent-config-panel (close)="store.closeConfigPanel()" />
+        <app-agent-config-panel (closePanel)="store.closeConfigPanel()" />
       }
     </div>
   `,
@@ -748,11 +808,126 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
       font-size: 14px;
       resize: vertical;
       font-family: inherit;
+      min-height: 100px;
+      max-height: 500px;
+      transition: min-height 0.2s ease;
+    }
+
+    .form-textarea.auto-expand {
+      overflow-y: hidden;
+      resize: none;
+    }
+
+    .form-textarea.auto-expand.expanded {
+      min-height: 300px;
     }
 
     .form-textarea:focus {
       outline: none;
       border-color: var(--accent-color, #3b82f6);
+    }
+
+    .form-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .prompt-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 4px;
+    }
+
+    .char-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .expand-btn {
+      background: transparent;
+      border: none;
+      color: var(--accent-color, #3b82f6);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .expand-btn:hover {
+      background: var(--bg-hover);
+    }
+
+    .directory-selector {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+    }
+
+    .directory-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 14px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s;
+      min-height: 44px;
+    }
+
+    .directory-btn:hover {
+      border-color: var(--accent-color, #3b82f6);
+      background: var(--bg-hover);
+    }
+
+    .directory-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .directory-path {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-secondary);
+    }
+
+    .directory-btn:has(+ .directory-clear) {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+      border-right: none;
+    }
+
+    .directory-btn:has(+ .directory-clear) .directory-path {
+      color: var(--text-primary);
+    }
+
+    .directory-clear {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-left: none;
+      border-radius: 0 6px 6px 0;
+      color: var(--text-secondary);
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .directory-clear:hover {
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
     }
 
     .agent-chips {
@@ -955,20 +1130,26 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
     }
   `],
 })
-export class VerificationDashboardComponent implements OnInit, OnDestroy {
+export class VerificationDashboardComponent implements OnDestroy, AfterViewInit {
   private router = inject(Router);
   private draftService = inject(DraftService);
+  private ipc = inject(ElectronIpcService);
   store = inject(VerificationStore);
   cliStore = inject(CliStore);
+
+  // ViewChild for auto-expanding textarea
+  private promptTextarea = viewChild<ElementRef<HTMLTextAreaElement>>('promptTextarea');
 
   // Form state
   promptInput = '';
   selectedStrategy: SynthesisStrategy = 'debate';
+  workingDirectory = signal<string | null>(null);
   pendingFiles = signal<File[]>([]);
   private filePreviewUrls = new Map<File, string>();
 
   // UI state
   agentsCollapsed = signal(true);
+  isPromptExpanded = signal(false);
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
@@ -1025,9 +1206,7 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
   constructor() {
     // Load draft on init
     this.promptInput = this.draftService.getDraft(VERIFICATION_DRAFT_KEY);
-  }
 
-  ngOnInit(): void {
     // Initialize CLI detection if not already done
     if (!this.cliStore.initialized()) {
       this.cliStore.initialize();
@@ -1038,6 +1217,11 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
     if (config.synthesisStrategy) {
       this.selectedStrategy = config.synthesisStrategy;
     }
+  }
+
+  ngAfterViewInit(): void {
+    // Auto-expand textarea on initial load if there's content
+    setTimeout(() => this.autoExpandTextarea(), 0);
   }
 
   ngOnDestroy(): void {
@@ -1102,12 +1286,59 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
 
   openAgentConfig(name: string): void {
     // Open config panel with specific agent selected
+    // TODO: Use 'name' to pre-select specific agent in config panel
+    void name;
     this.store.toggleConfigPanel();
   }
 
   openInstallGuide(name: string): void {
     // Open installation guide for the CLI
     console.log('Open install guide for:', name);
+  }
+
+  // ============================================
+  // Working Directory
+  // ============================================
+
+  async selectWorkingDirectory(): Promise<void> {
+    const folder = await this.ipc.selectFolder();
+    if (folder) {
+      this.workingDirectory.set(folder);
+    }
+  }
+
+  clearWorkingDirectory(): void {
+    this.workingDirectory.set(null);
+  }
+
+  // ============================================
+  // Prompt Textarea
+  // ============================================
+
+  autoExpandTextarea(): void {
+    const textarea = this.promptTextarea()?.nativeElement;
+    if (!textarea) return;
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = 'auto';
+
+    // Calculate new height (with min and max constraints handled by CSS)
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, 100), 500);
+    textarea.style.height = `${newHeight}px`;
+  }
+
+  toggleExpandedPrompt(): void {
+    this.isPromptExpanded.update(v => !v);
+    const textarea = this.promptTextarea()?.nativeElement;
+    if (textarea) {
+      if (this.isPromptExpanded()) {
+        textarea.classList.add('expanded');
+        textarea.style.height = '300px';
+      } else {
+        textarea.classList.remove('expanded');
+        this.autoExpandTextarea();
+      }
+    }
   }
 
   // ============================================
@@ -1135,16 +1366,31 @@ export class VerificationDashboardComponent implements OnInit, OnDestroy {
       synthesisStrategy: this.selectedStrategy,
     });
 
-    // Get pending files before clearing
+    // Get pending files and working directory before clearing
     const files = this.pendingFiles();
+    const workingDir = this.workingDirectory();
 
-    // Start verification with files
-    await this.store.startVerification(this.promptInput.trim(), undefined, files.length > 0 ? files : undefined);
+    // Start verification with files and working directory
+    await this.store.startVerification(
+      this.promptInput.trim(),
+      undefined,
+      files.length > 0 ? files : undefined,
+      workingDir || undefined
+    );
 
     // Clear input and draft
     this.promptInput = '';
     this.draftService.clearDraft(VERIFICATION_DRAFT_KEY);
     this.pendingFiles.set([]);
+    this.workingDirectory.set(null);
+    this.isPromptExpanded.set(false);
+
+    // Reset textarea height
+    const textarea = this.promptTextarea()?.nativeElement;
+    if (textarea) {
+      textarea.classList.remove('expanded');
+      textarea.style.height = 'auto';
+    }
   }
 
   // ============================================

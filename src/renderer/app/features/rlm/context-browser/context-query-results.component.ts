@@ -41,6 +41,10 @@ export interface QueryResult {
             [class.active]="activeResultId() === result.id"
             [class.error]="result.error"
             (click)="selectResult.emit(result)"
+            (keydown.enter)="selectResult.emit(result)"
+            (keydown.space)="selectResult.emit(result)"
+            tabindex="0"
+            role="button"
           >
             <div class="result-header">
               <span class="result-type"

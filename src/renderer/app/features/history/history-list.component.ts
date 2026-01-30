@@ -33,8 +33,8 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
         @for (entry of entries(); track entry.id) {
           <app-history-item
             [entry]="entry"
-            (select)="select.emit($event)"
-            (delete)="delete.emit($event)"
+            (selectEntry)="selectEntry.emit($event)"
+            (deleteEntry)="deleteEntry.emit($event)"
           />
         }
       </div>
@@ -118,7 +118,7 @@ export class HistoryListComponent {
   loading = input(false);
   searchQuery = input('');
 
-  select = output<ConversationHistoryEntry>();
-  delete = output<ConversationHistoryEntry>();
+  selectEntry = output<ConversationHistoryEntry>();
+  deleteEntry = output<ConversationHistoryEntry>();
   clearSearch = output<void>();
 }

@@ -11,7 +11,6 @@
 import {
   Component,
   signal,
-  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -74,7 +73,7 @@ interface ProviderInfo {
           <h3>Add New API Key</h3>
 
           <div class="form-row">
-            <label>Provider:</label>
+            <span class="form-label">Provider:</span>
             <select [(ngModel)]="newKeyProvider" (ngModelChange)="onProviderChange($event)">
               <option value="">Select provider...</option>
               @for (provider of providers; track provider.id) {
@@ -84,7 +83,7 @@ interface ProviderInfo {
           </div>
 
           <div class="form-row">
-            <label>Display Name:</label>
+            <span class="form-label">Display Name:</span>
             <input
               type="text"
               [(ngModel)]="newKeyName"
@@ -93,7 +92,7 @@ interface ProviderInfo {
           </div>
 
           <div class="form-row">
-            <label>API Key:</label>
+            <span class="form-label">API Key:</span>
             <div class="key-input-wrapper">
               <input
                 [type]="showNewKey() ? 'text' : 'password'"
@@ -314,7 +313,7 @@ interface ProviderInfo {
       margin-bottom: 12px;
     }
 
-    .form-row > label {
+    .form-row > .form-label {
       width: 120px;
       font-size: 13px;
       color: var(--text-secondary);
@@ -695,7 +694,8 @@ export class ApiKeyManagerComponent {
     return this.providers.find(p => p.id === this.newKeyProvider);
   }
 
-  onProviderChange(providerId: string): void {
+  onProviderChange(providerId: unknown): void {
+    if (typeof providerId !== 'string') return;
     const provider = this.providers.find(p => p.id === providerId);
     if (provider && !this.newKeyName) {
       this.newKeyName = `${provider.name} API Key`;
@@ -725,10 +725,10 @@ export class ApiKeyManagerComponent {
 
     try {
       // Call IPC to validate key
-      const result = await (window as any).electronAPI?.invoke('api-key:validate', {
+      const result = await (window as unknown as { electronAPI?: { invoke: (channel: string, arg: unknown) => Promise<unknown> } }).electronAPI?.invoke('api-key:validate', {
         provider: this.newKeyProvider,
         key: this.newKeyValue,
-      });
+      }) as { valid?: boolean; error?: string } | undefined;
 
       this.validationResult.set({
         success: result?.valid ?? false,
@@ -764,7 +764,7 @@ export class ApiKeyManagerComponent {
 
     // Save to secure storage via IPC
     try {
-      await (window as any).electronAPI?.invoke('api-key:save', {
+      await (window as unknown as { electronAPI?: { invoke: (channel: string, arg: unknown) => Promise<unknown> } }).electronAPI?.invoke('api-key:save', {
         id: newKey.id,
         provider: newKey.provider,
         name: newKey.name,
@@ -811,10 +811,10 @@ export class ApiKeyManagerComponent {
     );
 
     try {
-      const result = await (window as any).electronAPI?.invoke('api-key:validate', {
+      const result = await (window as unknown as { electronAPI?: { invoke: (channel: string, arg: unknown) => Promise<unknown> } }).electronAPI?.invoke('api-key:validate', {
         provider: key.provider,
         key: key.keyFull,
-      });
+      }) as { valid?: boolean } | undefined;
 
       this.apiKeys.update(keys =>
         keys.map(k =>
@@ -856,7 +856,7 @@ export class ApiKeyManagerComponent {
     if (!confirm('Are you sure you want to delete this API key?')) return;
 
     try {
-      await (window as any).electronAPI?.invoke('api-key:delete', { id: keyId });
+      await (window as unknown as { electronAPI?: { invoke: (channel: string, arg: unknown) => Promise<unknown> } }).electronAPI?.invoke('api-key:delete', { id: keyId });
     } catch (error) {
       console.error('Failed to delete API key:', error);
     }

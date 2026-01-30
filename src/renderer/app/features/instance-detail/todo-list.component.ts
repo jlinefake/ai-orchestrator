@@ -13,7 +13,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { TodoStore } from '../../core/state/todo.store';
-import type { TodoItem, TodoStatus } from '../../../../shared/types/todo.types';
+import type { TodoStatus } from '../../../../shared/types/todo.types';
 
 @Component({
   selector: 'app-todo-list',

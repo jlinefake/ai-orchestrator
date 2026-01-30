@@ -14,18 +14,14 @@ import {
   input,
   output,
   signal,
-  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import type {
   DebateResult,
   ActiveDebate,
   DebateSessionRound,
-  DebateContribution,
-  AgentCritique,
   DebateStatus,
   DebateRoundType,
-  ConsensusAnalysis,
   DebateStats,
 } from '../../../../shared/types/debate.types';
 

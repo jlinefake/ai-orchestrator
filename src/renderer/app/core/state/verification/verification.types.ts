@@ -45,6 +45,7 @@ export interface VerificationSession {
   id: string;
   prompt: string;
   context?: string;
+  workingDirectory?: string;
   config: VerificationUIConfig;
   status: VerificationStatus;
   startedAt: number;
@@ -95,7 +96,7 @@ export interface VerificationStoreState {
 
 export const DEFAULT_VERIFICATION_CONFIG: VerificationUIConfig = {
   agentCount: 3,
-  cliAgents: ['claude', 'gemini', 'ollama'],
+  cliAgents: ['claude', 'codex', 'gemini'],
   synthesisStrategy: 'debate',
   personalities: ['methodical-analyst', 'creative-solver', 'devils-advocate'],
   confidenceThreshold: 0.7,

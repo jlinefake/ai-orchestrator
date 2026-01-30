@@ -27,6 +27,11 @@ import type { CliInfo } from '../../../../../../shared/types/unified-cli-respons
       [class.selected]="selected()"
       [class.unavailable]="unavailable()"
       (click)="handleClick()"
+      (keydown.enter)="handleClick()"
+      (keydown.space)="handleClick()"
+      [attr.role]="cli().installed && !unavailable() ? 'button' : null"
+      [attr.tabindex]="cli().installed && !unavailable() ? '0' : null"
+      [attr.aria-label]="'Select ' + (cli().displayName || cli().name) + ' agent'"
     >
       <!-- Status Header -->
       <div class="card-header">
@@ -227,7 +232,7 @@ export class AgentCardComponent {
   unavailable = input<boolean>(false);
 
   // Outputs
-  select = output<void>();
+  agentSelect = output<void>();
   configure = output<void>();
   install = output<void>();
 
@@ -246,7 +251,7 @@ export class AgentCardComponent {
 
   handleClick(): void {
     if (!this.unavailable() && this.cli().installed) {
-      this.select.emit();
+      this.agentSelect.emit();
     }
   }
 

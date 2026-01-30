@@ -204,8 +204,9 @@ export class DebateConsensusHeatmapComponent implements OnDestroy {
           color: '#fff',
           fontSize: 11,
         },
-        formatter: (params: any) => {
-          const [topicIdx, agentIdx, stance] = params.data;
+        formatter: ((params: unknown) => {
+          const p = params as { data: [number, number, number] };
+          const [topicIdx, agentIdx, stance] = p.data;
           const topic = topics[topicIdx];
           const agent = agents[agentIdx];
           const item = itemLookup.get(`${topicIdx}-${agentIdx}`);
@@ -232,7 +233,7 @@ export class DebateConsensusHeatmapComponent implements OnDestroy {
               <div>Confidence: ${(item.confidence * 100).toFixed(0)}%</div>
             </div>
           `;
-        },
+        }) as (params: unknown) => string,
       },
       grid: {
         height: '60%',
@@ -296,14 +297,15 @@ export class DebateConsensusHeatmapComponent implements OnDestroy {
           show: true,
           color: '#fff',
           fontSize: 9,
-          formatter: (params: any) => {
-            const value = params.data[2];
+          formatter: ((params: unknown) => {
+            const p = params as { data: [number, number, number] };
+            const value = p.data[2];
             if (value === 0) return '';
             if (value > 0.5) return '++';
             if (value > 0) return '+';
             if (value > -0.5) return '-';
             return '--';
-          },
+          }) as (params: unknown) => string,
         },
         emphasis: {
           itemStyle: {

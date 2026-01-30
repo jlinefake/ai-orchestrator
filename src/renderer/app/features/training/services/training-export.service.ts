@@ -263,7 +263,7 @@ export class TrainingExportService {
       }
 
       // Patterns Table
-      const patternsY = (doc as any).lastAutoTable?.finalY + 15 || 130;
+      const patternsY = ((doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 115) + 15;
       doc.setFontSize(14);
       doc.setTextColor(0, 0, 0);
       doc.text('Patterns', 14, patternsY);
@@ -295,7 +295,7 @@ export class TrainingExportService {
       }
 
       // Insights Table
-      const insightsY = (doc as any).lastAutoTable?.finalY + 15 || 200;
+      const insightsY = ((doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 185) + 15;
       if (insightsY > 250) {
         doc.addPage();
       }
@@ -368,7 +368,7 @@ export class TrainingExportService {
       }
 
       // Recent Insights
-      const insightsY = (doc as any).lastAutoTable?.finalY + 15 || 130;
+      const insightsY = ((doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 115) + 15;
 
       doc.setFontSize(14);
       doc.setTextColor(0, 0, 0);
@@ -402,7 +402,7 @@ export class TrainingExportService {
       }
 
       // Outcomes Summary
-      const outcomesY = (doc as any).lastAutoTable?.finalY + 15 || 200;
+      const outcomesY = ((doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 185) + 15;
 
       if (outcomesY > 250) {
         doc.addPage();
@@ -463,7 +463,7 @@ export class TrainingExportService {
   /**
    * Export chart as image
    */
-  exportChartAsImage(chartInstance: any, filename: string): void {
+  exportChartAsImage(chartInstance: { getDataURL?: (options: { type: string; pixelRatio: number; backgroundColor: string }) => string }, filename: string): void {
     if (!chartInstance?.getDataURL) return;
 
     const url = chartInstance.getDataURL({

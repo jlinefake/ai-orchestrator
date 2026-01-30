@@ -26,7 +26,6 @@ import { CodebaseSearchComponent } from './codebase-search.component';
 import { SearchResultsComponent } from './search-results.component';
 import { CodebaseStatsComponent } from './codebase-stats.component';
 import type {
-  IndexingProgress,
   IndexStats,
   HybridSearchOptions,
   HybridSearchResult,
@@ -82,7 +81,11 @@ interface ToastNotification {
             <div
               class="toast"
               [class]="'toast-' + toast.type"
+              role="button"
+              tabindex="0"
               (click)="dismissToast(toast.id)"
+              (keyup.enter)="dismissToast(toast.id)"
+              (keyup.space)="dismissToast(toast.id)"
             >
               <span class="toast-message">{{ toast.message }}</span>
               <button class="toast-close" (click)="dismissToast(toast.id); $event.stopPropagation()">
@@ -95,10 +98,11 @@ interface ToastNotification {
 
       <!-- Directory Selection -->
       <div class="directory-section">
-        <label class="directory-label">Root Directory</label>
+        <label class="directory-label" for="root-path-input">Root Directory</label>
         <div class="directory-input-wrapper">
           <input
             type="text"
+            id="root-path-input"
             class="directory-input"
             [ngModel]="rootPath()"
             (ngModelChange)="rootPath.set($event)"
@@ -114,7 +118,7 @@ interface ToastNotification {
       @if (indexingProgress()) {
         <app-indexing-progress
           [progress]="indexingProgress()"
-          (cancel)="cancelIndexing()"
+          (cancelIndexing)="cancelIndexing()"
         />
       }
 
@@ -133,7 +137,7 @@ interface ToastNotification {
             [storeId]="storeId()"
             [disabled]="isIndexing()"
             [isSearching]="isSearching()"
-            (search)="onSearch($event)"
+            (searchTriggered)="onSearch($event)"
           />
 
           @if (searchResults().length > 0 || hasSearched()) {
@@ -456,7 +460,10 @@ export class CodebasePanelComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    // Cleanup handled by Angular
+    // Clear any pending toasts
+    if (this.toasts().length > 0) {
+      this.toasts.set([]);
+    }
   }
 
   async startIndexing(): Promise<void> {

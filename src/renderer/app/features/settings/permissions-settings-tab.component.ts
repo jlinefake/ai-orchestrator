@@ -10,8 +10,18 @@
 import { Component, inject, signal, effect } from '@angular/core';
 import { SettingsStore } from '../../core/state/settings.store';
 
+interface PermissionsApi {
+  permissionGetPendingBatch?: () => Promise<{ success: boolean; data?: { requests?: unknown[] } }>;
+  permissionGetLearnedPatterns?: () => Promise<{ success: boolean; data?: LearnedPattern[] }>;
+  permissionGetStats?: () => Promise<{ success: boolean; data?: Partial<PermissionStats> }>;
+  permissionRecordBatchDecision?: (params: { action: string; scope: string }) => Promise<{ success: boolean }>;
+  permissionRecordDecision?: (params: { requestId: string; action: string; scope: string }) => Promise<{ success: boolean }>;
+  permissionApprovePattern?: (params: { patternId: string }) => Promise<{ success: boolean }>;
+  permissionRejectPattern?: (params: { patternId: string }) => Promise<{ success: boolean }>;
+}
+
 // Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = () => (window as unknown as { electronAPI?: PermissionsApi }).electronAPI;
 
 interface PendingPermission {
   id: string;
@@ -76,14 +86,14 @@ interface PermissionStats {
         <div class="batch-actions">
           <button
             class="btn-allow"
-            (click)="handleBatchDecision('allow_all', 'session')"
+            (click)="handleBatchDecision('allow_all')"
             [disabled]="loading()"
           >
             Allow All ({{ pendingPermissions().length }})
           </button>
           <button
             class="btn-deny"
-            (click)="handleBatchDecision('deny_all', 'session')"
+            (click)="handleBatchDecision('deny_all')"
             [disabled]="loading()"
           >
             Deny All
@@ -697,13 +707,22 @@ export class PermissionsSettingsTabComponent {
       const response = await api.permissionGetPendingBatch();
       if (response.success && response.data?.requests) {
         this.pendingPermissions.set(
-          response.data.requests.map((r: any) => ({
-            id: r.id,
-            scope: r.scope,
-            resource: r.resource,
-            toolName: r.context?.toolName,
-            timestamp: r.timestamp,
-          }))
+          response.data.requests.map((r: unknown) => {
+            const request = r as {
+              id: string;
+              scope: string;
+              resource: string;
+              context?: { toolName?: string };
+              timestamp: number;
+            };
+            return {
+              id: request.id,
+              scope: request.scope,
+              resource: request.resource,
+              toolName: request.context?.toolName,
+              timestamp: request.timestamp,
+            };
+          })
         );
       }
     } catch (error) {
@@ -748,8 +767,7 @@ export class PermissionsSettingsTabComponent {
   }
 
   async handleBatchDecision(
-    action: 'allow_all' | 'deny_all',
-    scope: 'once' | 'session' | 'always'
+    action: 'allow_all' | 'deny_all'
   ): Promise<void> {
     const api = getApi();
     if (!api?.permissionRecordBatchDecision) return;

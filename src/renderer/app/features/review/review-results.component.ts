@@ -23,11 +23,6 @@ import type {
   ReviewSummary,
 } from '../../../../shared/types/review-agent.types';
 
-interface GroupedIssues {
-  file: string;
-  issues: ReviewIssue[];
-}
-
 @Component({
   selector: 'app-review-results',
   standalone: true,
@@ -58,9 +53,9 @@ interface GroupedIssues {
       <div class="filters-section">
         <!-- Confidence Slider -->
         <div class="filter-group">
-          <label class="filter-label">
+          <span class="filter-label">
             Min Confidence: {{ confidenceThreshold() }}%
-          </label>
+          </span>
           <input
             type="range"
             min="0"
@@ -73,7 +68,7 @@ interface GroupedIssues {
 
         <!-- Severity Filter -->
         <div class="filter-group">
-          <label class="filter-label">Severity</label>
+          <span class="filter-label">Severity</span>
           <div class="severity-toggles">
             @for (severity of severities; track severity) {
               <button
@@ -91,7 +86,7 @@ interface GroupedIssues {
         <!-- Category Filter -->
         @if (availableCategories().length > 0) {
           <div class="filter-group">
-            <label class="filter-label">Category</label>
+            <span class="filter-label">Category</span>
             <select
               class="category-select"
               [value]="selectedCategory()"

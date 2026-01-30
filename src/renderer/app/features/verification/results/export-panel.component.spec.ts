@@ -81,10 +81,6 @@ describe('ExportPanelComponent', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockCreateElement: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockAppendChild: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockRemoveChild: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockClick: any;
 
   beforeEach(async () => {
@@ -109,8 +105,8 @@ describe('ExportPanelComponent', () => {
     }) as any);
 
     // Track appendChild/removeChild without preventing them
-    mockAppendChild = vi.spyOn(document.body, 'appendChild');
-    mockRemoveChild = vi.spyOn(document.body, 'removeChild');
+    vi.spyOn(document.body, 'appendChild');
+    vi.spyOn(document.body, 'removeChild');
 
     // Mock clipboard
     Object.assign(navigator, {
@@ -569,7 +565,7 @@ describe('ExportPanelComponent', () => {
     });
 
     it('should emit close event when backdrop clicked', () => {
-      const closeSpy = vi.spyOn(component.onClose, 'emit');
+      const closeSpy = vi.spyOn(component.closePanel, 'emit');
       const backdrop = fixture.nativeElement.querySelector('.modal-backdrop');
       backdrop?.click();
 
@@ -577,7 +573,7 @@ describe('ExportPanelComponent', () => {
     });
 
     it('should NOT close when modal content clicked', () => {
-      const closeSpy = vi.spyOn(component.onClose, 'emit');
+      const closeSpy = vi.spyOn(component.closePanel, 'emit');
       const modal = fixture.nativeElement.querySelector('.export-modal');
       modal?.click();
 
@@ -585,7 +581,7 @@ describe('ExportPanelComponent', () => {
     });
 
     it('should emit close when close button clicked', () => {
-      const closeSpy = vi.spyOn(component.onClose, 'emit');
+      const closeSpy = vi.spyOn(component.closePanel, 'emit');
       const closeBtn = fixture.nativeElement.querySelector('.close-btn');
       closeBtn?.click();
 
@@ -593,7 +589,7 @@ describe('ExportPanelComponent', () => {
     });
 
     it('should emit close when cancel button clicked', () => {
-      const closeSpy = vi.spyOn(component.onClose, 'emit');
+      const closeSpy = vi.spyOn(component.closePanel, 'emit');
       const cancelBtn = fixture.nativeElement.querySelector(
         '.footer-right .btn-secondary'
       );
@@ -612,8 +608,8 @@ describe('ExportPanelComponent', () => {
       fixture.detectChanges();
     });
 
-    it('should emit onExport with format and content', async () => {
-      const exportSpy = vi.spyOn(component.onExport, 'emit');
+    it('should emit exportComplete with format and content', async () => {
+      const exportSpy = vi.spyOn(component.exportComplete, 'emit');
       await component.exportFile();
 
       expect(exportSpy).toHaveBeenCalledWith({
@@ -623,7 +619,7 @@ describe('ExportPanelComponent', () => {
     });
 
     it('should emit correct format when JSON selected', async () => {
-      const exportSpy = vi.spyOn(component.onExport, 'emit');
+      const exportSpy = vi.spyOn(component.exportComplete, 'emit');
       component.selectedFormat.set('json');
       await component.exportFile();
 

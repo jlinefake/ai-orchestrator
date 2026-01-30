@@ -66,7 +66,7 @@ type SmoothingType = 'none' | 'ema' | 'sma';
           </div>
           @if (smoothing() !== 'none') {
             <div class="window-control">
-              <label>Window:</label>
+              <span class="label">Window:</span>
               <input
                 type="range"
                 min="2"
@@ -154,7 +154,7 @@ type SmoothingType = 'none' | 'ema' | 'sma';
       font-size: 10px;
       color: var(--text-secondary);
 
-      label {
+      .label {
         color: var(--text-muted);
       }
 
@@ -252,7 +252,7 @@ export class RewardTrendChartComponent implements OnDestroy {
     effect(() => {
       const data = this.data();
       const smoothed = this.smoothedData();
-      const _ = this.smoothing(); // Track smoothing changes
+      this.smoothing(); // Track smoothing changes
       this.updateChart(data, smoothed);
     });
   }
@@ -308,8 +308,9 @@ export class RewardTrendChartComponent implements OnDestroy {
           color: '#fff',
           fontSize: 11,
         },
-        formatter: (params: any) => {
-          const dataPoint = params[0];
+        formatter: (params: unknown) => {
+          const paramsArray = params as { dataIndex: number; value?: number }[];
+          const dataPoint = paramsArray[0];
           const raw = data[dataPoint.dataIndex];
           return `
             <div style="font-size: 11px;">

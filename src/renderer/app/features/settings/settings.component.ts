@@ -2,7 +2,7 @@
  * Settings Component - Application settings modal (container)
  */
 
-import { Component, inject, output, signal } from '@angular/core';
+import { Component, inject, output } from '@angular/core';
 import { SettingsStore } from '../../core/state/settings.store';
 import { GeneralSettingsTabComponent } from './general-settings-tab.component';
 import { OrchestrationSettingsTabComponent } from './orchestration-settings-tab.component';
@@ -34,11 +34,19 @@ type SettingsTab =
     PermissionsSettingsTabComponent
   ],
   template: `
-    <div class="settings-overlay" (click)="onOverlayClick($event)">
+    <div
+      class="settings-overlay"
+      (click)="onOverlayClick($event)"
+      (keydown)="onOverlayKeydown($event)"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      tabindex="0"
+    >
       <div class="settings-modal">
         <div class="settings-header">
-          <h2>Settings</h2>
-          <button class="btn-close" (click)="close.emit()" title="Close">
+          <h2 id="settings-title">Settings</h2>
+          <button class="btn-close" (click)="closeDialog.emit()" title="Close">
             <span class="close-icon">&times;</span>
           </button>
         </div>
@@ -48,50 +56,50 @@ type SettingsTab =
           <div class="settings-tabs">
             <button
               class="tab"
-              [class.active]="activeTab() === 'general'"
-              (click)="activeTab.set('general')"
+              [class.active]="activeTab === 'general'"
+              (click)="activeTab =('general')"
             >
               General
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'orchestration'"
-              (click)="activeTab.set('orchestration')"
+              [class.active]="activeTab === 'orchestration'"
+              (click)="activeTab =('orchestration')"
             >
               Orchestration
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'memory'"
-              (click)="activeTab.set('memory')"
+              [class.active]="activeTab === 'memory'"
+              (click)="activeTab =('memory')"
             >
               Memory
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'display'"
-              (click)="activeTab.set('display')"
+              [class.active]="activeTab === 'display'"
+              (click)="activeTab =('display')"
             >
               Display
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'permissions'"
-              (click)="activeTab.set('permissions')"
+              [class.active]="activeTab === 'permissions'"
+              (click)="activeTab =('permissions')"
             >
               Permissions
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'advanced'"
-              (click)="activeTab.set('advanced')"
+              [class.active]="activeTab === 'advanced'"
+              (click)="activeTab =('advanced')"
             >
               Advanced
             </button>
             <button
               class="tab"
-              [class.active]="activeTab() === 'keyboard'"
-              (click)="activeTab.set('keyboard')"
+              [class.active]="activeTab === 'keyboard'"
+              (click)="activeTab =('keyboard')"
             >
               Keyboard
             </button>
@@ -99,7 +107,7 @@ type SettingsTab =
 
           <!-- Tab Content -->
           <div class="settings-form">
-            @switch (activeTab()) {
+            @switch (activeTab) {
               @case ('general') {
                 <app-general-settings-tab />
               }
@@ -129,7 +137,7 @@ type SettingsTab =
           <button class="btn-reset" (click)="resetAll()">
             Reset All to Defaults
           </button>
-          <button class="btn-done" (click)="close.emit()">Done</button>
+          <button class="btn-done" (click)="closeDialog.emit()">Done</button>
         </div>
       </div>
     </div>
@@ -280,13 +288,19 @@ type SettingsTab =
 })
 export class SettingsComponent {
   private store = inject(SettingsStore);
-  close = output<void>();
+  closeDialog = output<void>();
 
-  activeTab = signal<SettingsTab>('general');
+  activeTab = 'general' as SettingsTab;
 
   onOverlayClick(event: MouseEvent): void {
     if ((event.target as HTMLElement).classList.contains('settings-overlay')) {
-      this.close.emit();
+      this.closeDialog.emit();
+    }
+  }
+
+  onOverlayKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      this.closeDialog.emit();
     }
   }
 

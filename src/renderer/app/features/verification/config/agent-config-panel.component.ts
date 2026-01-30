@@ -33,12 +33,12 @@ interface AgentConfig {
   imports: [FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="panel-overlay" (click)="handleOverlayClick($event)">
+    <div class="panel-overlay" (click)="handleOverlayClick($event)" (keydown.enter)="handleOverlayClick($event)" (keydown.space)="handleOverlayClick($event)" tabindex="0" role="button">
       <div class="panel-container">
         <!-- Header -->
         <div class="panel-header">
           <h2 class="panel-title">Configure Verification Agents</h2>
-          <button class="close-btn" (click)="close.emit()">×</button>
+          <button class="close-btn" (click)="closePanel.emit()">×</button>
         </div>
 
         <!-- Content -->
@@ -63,7 +63,7 @@ interface AgentConfig {
                 <div class="config-fields">
                   <div class="field-row">
                     <div class="field">
-                      <label class="field-label">Personality</label>
+                      <span class="field-label">Personality</span>
                       <select
                         class="field-select"
                         [(ngModel)]="agent.personality"
@@ -77,7 +77,7 @@ interface AgentConfig {
                     </div>
 
                     <div class="field">
-                      <label class="field-label">Timeout (seconds)</label>
+                      <span class="field-label">Timeout (seconds)</span>
                       <input
                         type="number"
                         class="field-input"
@@ -133,7 +133,7 @@ interface AgentConfig {
             <div class="config-fields">
               <div class="field-row">
                 <div class="field">
-                  <label class="field-label">Strategy</label>
+                  <span class="field-label">Strategy</span>
                   <select
                     class="field-select"
                     [(ngModel)]="synthesisStrategy"
@@ -147,7 +147,7 @@ interface AgentConfig {
 
                 @if (synthesisStrategy === 'debate') {
                   <div class="field">
-                    <label class="field-label">Debate Rounds</label>
+                    <span class="field-label">Debate Rounds</span>
                     <input
                       type="number"
                       class="field-input"
@@ -163,7 +163,7 @@ interface AgentConfig {
 
               <div class="field-row">
                 <div class="field">
-                  <label class="field-label">Convergence Threshold</label>
+                  <span class="field-label">Convergence Threshold</span>
                   <input
                     type="range"
                     class="field-range"
@@ -177,7 +177,7 @@ interface AgentConfig {
                 </div>
 
                 <div class="field">
-                  <label class="field-label">Min Agreement</label>
+                  <span class="field-label">Min Agreement</span>
                   <input
                     type="range"
                     class="field-range"
@@ -196,7 +196,7 @@ interface AgentConfig {
 
         <!-- Footer -->
         <div class="panel-footer">
-          <button class="action-btn secondary" (click)="close.emit()">
+          <button class="action-btn secondary" (click)="closePanel.emit()">
             Cancel
           </button>
           <button class="action-btn primary" (click)="saveAndClose()">
@@ -475,7 +475,7 @@ interface AgentConfig {
 export class AgentConfigPanelComponent implements OnInit {
   store = inject(VerificationStore);
 
-  close = output<void>();
+  closePanel = output<void>();
 
   // UI state
   showAgentPicker = false;
@@ -563,7 +563,8 @@ export class AgentConfigPanelComponent implements OnInit {
     return this.personalityDescriptions[personality] || '';
   }
 
-  updateAgentConfig(_agent: AgentConfig): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  updateAgentConfig(_agent?: unknown): void {
     // Update personality in store config
     const personalities = this.agentConfigs().map(a => a.personality);
     this.store.setDefaultConfig({ personalities });
@@ -616,12 +617,12 @@ export class AgentConfigPanelComponent implements OnInit {
 
   handleOverlayClick(event: Event): void {
     if ((event.target as HTMLElement).classList.contains('panel-overlay')) {
-      this.close.emit();
+      this.closePanel.emit();
     }
   }
 
   saveAndClose(): void {
     this.updateSynthesisConfig();
-    this.close.emit();
+    this.closePanel.emit();
   }
 }

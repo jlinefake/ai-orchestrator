@@ -31,6 +31,7 @@ import {
   getMemoryManager
 } from './r1-memory-manager';
 import { RLMContextManager } from '../rlm/context-manager';
+import { SkillsLoader, getSkillsLoader } from './skills-loader';
 
 export class UnifiedMemoryController extends EventEmitter {
   private static instance: UnifiedMemoryController;
@@ -38,6 +39,7 @@ export class UnifiedMemoryController extends EventEmitter {
   private state!: UnifiedMemoryState; // Initialized in initializeState()
   private memoryR1: MemoryManagerAgent;
   private rlmContext: RLMContextManager;
+  private skillsLoader: SkillsLoader;
   private semanticCache: Map<
     string,
     { result: UnifiedRetrievalResult; expiresAt: number }
@@ -75,6 +77,7 @@ export class UnifiedMemoryController extends EventEmitter {
     this.config = { ...this.defaultConfig };
     this.memoryR1 = getMemoryManager();
     this.rlmContext = RLMContextManager.getInstance();
+    this.skillsLoader = getSkillsLoader();
     this.applyQualityCostProfile(this.config.qualityCostProfile);
     this.initializeState();
   }
@@ -219,6 +222,7 @@ export class UnifiedMemoryController extends EventEmitter {
       shortTerm: [],
       longTerm: [],
       procedural: [],
+      skills: [],
       totalTokens: 0
     };
 
@@ -260,6 +264,11 @@ export class UnifiedMemoryController extends EventEmitter {
       results.procedural = this.fetchProcedural(query, budgets.procedural);
     }
 
+    // Skills fetching (embedding-based skill detection)
+    if (types.includes('skills')) {
+      results.skills = await this.fetchSkills(query);
+    }
+
     // RLM integration (tiered by section type/depth)
     const rlmResults = this.fetchRlmContext(query, budgets, options);
     if (types.includes('short_term') && rlmResults.shortTerm.length > 0) {
@@ -288,11 +297,13 @@ export class UnifiedMemoryController extends EventEmitter {
     results.shortTerm = this.applyPositionBiasMitigation(results.shortTerm);
     results.longTerm = this.applyPositionBiasMitigation(results.longTerm);
     results.procedural = this.applyPositionBiasMitigation(results.procedural);
+    results.skills = this.applyPositionBiasMitigation(results.skills);
 
     results.totalTokens =
       this.estimateTokens(results.shortTerm.join(' ')) +
       this.estimateTokens(results.longTerm.join(' ')) +
-      this.estimateTokens(results.procedural.join(' '));
+      this.estimateTokens(results.procedural.join(' ')) +
+      this.estimateTokens(results.skills.join(' '));
 
     this.emit('fetch:completed', { query, taskId, results });
     this.setCachedResult(cacheKey, results);
@@ -510,6 +521,45 @@ export class UnifiedMemoryController extends EventEmitter {
     return this.selectDiverseCandidates(candidates, maxTokens).map(
       (candidate) => candidate.content
     );
+  }
+
+  // ============ Skills Memory ============
+
+  /**
+   * Fetch relevant skills using embedding-based detection.
+   * Returns skill content as strings for context injection.
+   */
+  private async fetchSkills(query: string): Promise<string[]> {
+    try {
+      const detectedSkills = await this.skillsLoader.detectRelevantSkills(query);
+
+      if (detectedSkills.length === 0) {
+        return [];
+      }
+
+      // Load skill content with a reasonable budget (5000 tokens per skill max)
+      const maxTokensPerSkill = 5000;
+      const totalBudget = maxTokensPerSkill * detectedSkills.length;
+
+      const { content } = await this.skillsLoader.loadSkillsWithBudget(
+        detectedSkills,
+        totalBudget
+      );
+
+      return content;
+    } catch (error) {
+      this.emit('skills:fetchError', { query, error });
+      return [];
+    }
+  }
+
+  /**
+   * Initialize the skills loader with the project root.
+   * Call this during startup to enable skill detection.
+   */
+  async initializeSkills(projectRoot: string): Promise<void> {
+    await this.skillsLoader.initialize(projectRoot);
+    this.emit('skills:initialized', { projectRoot });
   }
 
   async recordWorkflow(

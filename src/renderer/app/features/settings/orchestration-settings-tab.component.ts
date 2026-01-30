@@ -34,6 +34,6 @@ export class OrchestrationSettingsTabComponent {
   store = inject(SettingsStore);
 
   onSettingChange(event: { key: string; value: unknown }): void {
-    this.store.set(event.key as keyof AppSettings, event.value as any);
+    this.store.set(event.key as keyof AppSettings, event.value as string | number | boolean);
   }
 }

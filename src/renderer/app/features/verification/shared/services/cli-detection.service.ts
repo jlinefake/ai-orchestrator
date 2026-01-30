@@ -212,7 +212,7 @@ export class CliDetectionService implements OnDestroy {
         throw new Error(result.error?.message || 'Failed to detect CLIs');
       }
 
-      const { detected, available, unavailable } = result.data;
+      const { detected, available } = result.data;
 
       // Update CLI status map
       const clis = new Map<CliType, CliStatusInfo>();

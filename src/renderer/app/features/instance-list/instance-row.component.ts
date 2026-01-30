@@ -10,7 +10,7 @@ import {
   signal,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { Instance, InstanceStatus } from '../../core/state/instance.store';
+import { Instance } from '../../core/state/instance.store';
 import { StatusIndicatorComponent } from './status-indicator.component';
 import { ContextBarComponent } from '../instance-detail/context-bar.component';
 import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.types';
@@ -28,7 +28,12 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       [class.is-child]="depth() > 0"
       [class.draggable]="isDraggable()"
       [style.padding-left.px]="12 + depth() * 20"
-      (click)="select.emit(instance().id)"
+      (click)="instanceSelect.emit(instance().id)"
+      (keydown.enter)="instanceSelect.emit(instance().id)"
+      (keydown.space)="instanceSelect.emit(instance().id)"
+      tabindex="0"
+      role="button"
+      [attr.aria-label]="'Select instance ' + instance().displayName"
     >
       <!-- Drag handle for root instances -->
       @if (isDraggable()) {
@@ -437,7 +442,7 @@ export class InstanceRowComponent {
   isDraggable = input<boolean>(false);
 
   // Outputs
-  select = output<string>();
+  instanceSelect = output<string>();
   terminate = output<string>();
   restart = output<string>();
   toggleExpand = output<string>();

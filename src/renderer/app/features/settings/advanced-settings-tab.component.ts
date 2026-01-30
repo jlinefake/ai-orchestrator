@@ -8,7 +8,12 @@ import { SettingRowComponent } from './setting-row.component';
 import type { AppSettings } from '../../../../shared/types/settings.types';
 
 // Helper to access API from preload
-const getApi = () => (window as any).electronAPI;
+const getApi = (): {
+  hooksApprovalsList?: (params: { pendingOnly: boolean }) => Promise<{ success: boolean; data?: unknown; error?: { message: string } }>;
+  hooksApprovalsUpdate?: (params: { hookId: string; approved: boolean }) => Promise<{ success: boolean; error?: { message: string } }>;
+  hooksApprovalsClear?: () => Promise<{ success: boolean; error?: { message: string } }>;
+  openDocsFile?: (filename: string) => Promise<{ success: boolean; error?: { message: string } }>;
+} => (window as unknown as Record<string, unknown>)['electronAPI'] as ReturnType<typeof getApi>;
 
 interface HookApprovalSummary {
   id: string;
@@ -37,7 +42,7 @@ interface HookApprovalSummary {
     <!-- Hook Approvals Section -->
     <div class="setting-row hook-approvals-header">
       <div class="setting-info">
-        <label class="setting-label">Hook Approvals</label>
+        <h3 class="setting-label">Hook Approvals</h3>
         <p class="setting-description">
           Review hooks that require approval before they run and manage
           remembered approvals.
@@ -437,7 +442,7 @@ export class AdvancedSettingsTabComponent {
   }
 
   onSettingChange(event: { key: string; value: unknown }): void {
-    this.store.set(event.key as keyof AppSettings, event.value as any);
+    this.store.set(event.key as keyof AppSettings, event.value as AppSettings[keyof AppSettings]);
   }
 
   async loadHookApprovals(): Promise<void> {

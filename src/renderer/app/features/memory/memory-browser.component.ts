@@ -71,7 +71,7 @@ interface MemoryEntryWithType extends MemoryEntry {
 
         <div class="filter-spacer"></div>
 
-        <label class="sort-label">Sort:</label>
+        <span class="sort-label">Sort:</span>
         <select
           class="sort-select"
           [value]="sortBy()"
@@ -112,6 +112,10 @@ interface MemoryEntryWithType extends MemoryEntry {
             class="entry-card"
             [class.selected]="selectedEntry()?.id === entry.id"
             (click)="selectEntry(entry)"
+            (keydown.enter)="selectEntry(entry)"
+            (keydown.space)="selectEntry(entry)"
+            tabindex="0"
+            role="button"
           >
             <!-- Entry Header -->
             <div class="entry-header">

@@ -47,7 +47,7 @@ export interface SavedQueryTemplate {
         @switch (selectedQueryType()) {
           @case ('grep') {
             <div class="query-form">
-              <label class="form-label">Pattern (regex)</label>
+              <span class="form-label">Pattern (regex)</span>
               <input
                 type="text"
                 class="query-input"
@@ -56,7 +56,7 @@ export interface SavedQueryTemplate {
                 (input)="updateQueryParam('pattern', $event)"
                 [disabled]="!hasSession()"
               />
-              <label class="form-label">Max Results</label>
+              <span class="form-label">Max Results</span>
               <input
                 type="number"
                 class="query-input small"
@@ -68,7 +68,7 @@ export interface SavedQueryTemplate {
           }
           @case ('slice') {
             <div class="query-form">
-              <label class="form-label">Start Offset</label>
+              <span class="form-label">Start Offset</span>
               <input
                 type="number"
                 class="query-input"
@@ -76,7 +76,7 @@ export interface SavedQueryTemplate {
                 (input)="updateQueryParam('start', $event)"
                 [disabled]="!hasSession()"
               />
-              <label class="form-label">End Offset</label>
+              <span class="form-label">End Offset</span>
               <input
                 type="number"
                 class="query-input"
@@ -88,7 +88,7 @@ export interface SavedQueryTemplate {
           }
           @case ('sub_query') {
             <div class="query-form">
-              <label class="form-label">Prompt</label>
+              <span class="form-label">Prompt</span>
               <textarea
                 class="query-textarea"
                 placeholder="Enter your sub-query prompt..."
@@ -96,7 +96,7 @@ export interface SavedQueryTemplate {
                 (input)="updateQueryParam('prompt', $event)"
                 [disabled]="!hasSession()"
               ></textarea>
-              <label class="form-label">Context Hints (comma-separated)</label>
+              <span class="form-label">Context Hints (comma-separated)</span>
               <input
                 type="text"
                 class="query-input"
@@ -109,7 +109,7 @@ export interface SavedQueryTemplate {
           }
           @case ('summarize') {
             <div class="query-form">
-              <label class="form-label">Section IDs (select below)</label>
+              <span class="form-label">Section IDs (select below)</span>
               <div class="selected-sections">
                 @for (id of sectionIds(); track id) {
                   <span class="selected-section">
@@ -127,7 +127,7 @@ export interface SavedQueryTemplate {
           }
           @case ('get_section') {
             <div class="query-form">
-              <label class="form-label">Section ID</label>
+              <span class="form-label">Section ID</span>
               <input
                 type="text"
                 class="query-input"
@@ -140,7 +140,7 @@ export interface SavedQueryTemplate {
           }
           @case ('semantic_search') {
             <div class="query-form">
-              <label class="form-label">Search Query</label>
+              <span class="form-label">Search Query</span>
               <input
                 type="text"
                 class="query-input"
@@ -149,7 +149,7 @@ export interface SavedQueryTemplate {
                 (input)="updateQueryParam('query', $event)"
                 [disabled]="!hasSession()"
               />
-              <label class="form-label">Top K Results</label>
+              <span class="form-label">Top K Results</span>
               <input
                 type="number"
                 class="query-input small"
@@ -201,7 +201,7 @@ export interface SavedQueryTemplate {
             <div class="templates-list">
               @for (template of savedTemplates(); track template.id) {
                 <div class="template-item">
-                  <div class="template-info" (click)="loadTemplate(template)">
+                  <div class="template-info" (click)="loadTemplate(template)" (keydown.enter)="loadTemplate(template)" (keydown.space)="loadTemplate(template)" tabindex="0" role="button">
                     <span class="template-type">{{
                       getQueryTypeIcon(template.type)
                     }}</span>
@@ -231,7 +231,7 @@ export interface SavedQueryTemplate {
             </button>
           </div>
           <div class="dialog-body">
-            <label class="form-label">Template Name</label>
+            <span class="form-label">Template Name</span>
             <input
               type="text"
               class="query-input"

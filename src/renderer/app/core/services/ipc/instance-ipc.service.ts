@@ -240,9 +240,17 @@ export class InstanceIpcService {
     timestamp: number;
     metadata?: Record<string, unknown>;
   }) => void): () => void {
-    if (!this.api) return () => { /* noop */ };
+    console.log('[InstanceIpcService] onInputRequired: Setting up subscription');
+    if (!this.api) {
+      console.warn('[InstanceIpcService] onInputRequired: No API available!');
+      return () => { /* noop */ };
+    }
     return this.api.onInputRequired((payload) => {
+      console.log('=== [InstanceIpcService] INPUT_REQUIRED RECEIVED FROM PRELOAD ===');
+      console.log('[InstanceIpcService] Payload:', JSON.stringify(payload, null, 2));
+      console.log('[InstanceIpcService] Running callback in NgZone...');
       this.ngZone.run(() => callback(payload));
+      console.log('[InstanceIpcService] Callback executed');
     });
   }
 

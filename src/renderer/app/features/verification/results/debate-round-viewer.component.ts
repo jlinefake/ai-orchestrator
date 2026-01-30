@@ -17,8 +17,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ConfidenceMeterComponent } from '../../../shared/components/confidence-meter/confidence-meter.component';
-import type { DebateRound } from '../../../../../shared/types/verification.types';
-import type { DebateRoundSummary, DebateExchange } from '../../../../../shared/types/verification-ui.types';
+import type { DebateRoundSummary } from '../../../../../shared/types/verification-ui.types';
 
 const ROUND_TYPE_LABELS: Record<string, string> = {
   opening: 'Opening Statements',
@@ -40,7 +39,7 @@ const ROUND_TYPE_ICONS: Record<string, string> = {
   template: `
     <div class="round-viewer" [class.expanded]="isExpanded()">
       <!-- Round Header -->
-      <div class="round-header" (click)="toggleExpand()">
+      <button class="round-header" (click)="toggleExpand()" aria-label="Toggle round details">
         <div class="header-left">
           <span class="round-icon">{{ getRoundIcon() }}</span>
           <span class="round-number">Round {{ round().roundNumber }}</span>
@@ -62,7 +61,7 @@ const ROUND_TYPE_ICONS: Record<string, string> = {
 
           <span class="expand-icon">{{ isExpanded() ? '▼' : '▶' }}</span>
         </div>
-      </div>
+      </button>
 
       <!-- Expanded Content -->
       @if (isExpanded()) {
@@ -189,6 +188,10 @@ const ROUND_TYPE_ICONS: Record<string, string> = {
       justify-content: space-between;
       align-items: center;
       padding: 14px 16px;
+      width: 100%;
+      background: transparent;
+      border: none;
+      text-align: left;
       cursor: pointer;
       transition: background 0.2s;
     }

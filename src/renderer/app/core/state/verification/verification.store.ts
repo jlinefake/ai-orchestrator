@@ -216,9 +216,10 @@ export class VerificationStore implements OnDestroy {
   async startVerification(
     prompt: string,
     context?: string,
-    files?: File[]
+    files?: File[],
+    workingDirectory?: string
   ): Promise<string> {
-    return this.sessionStore.startVerification(prompt, context, files);
+    return this.sessionStore.startVerification(prompt, context, files, workingDirectory);
   }
 
   /** Cancel current verification */

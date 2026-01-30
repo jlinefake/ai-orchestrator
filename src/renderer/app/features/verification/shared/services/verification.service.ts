@@ -10,7 +10,7 @@
 
 import { Injectable, inject, signal } from '@angular/core';
 import { ElectronIpcService } from '../../../../core/services/ipc';
-import { VerificationStore, type VerificationSession, type AgentProgress } from '../../../../core/state/verification.store';
+import { VerificationStore, type VerificationSession } from '../../../../core/state/verification.store';
 import type {
   CostBreakdown,
   SessionCostSummary,

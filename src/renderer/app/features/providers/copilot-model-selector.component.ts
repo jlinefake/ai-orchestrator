@@ -76,13 +76,13 @@ function convertToModel(info: CopilotModelInfo): CopilotModel {
   standalone: true,
   template: `
     <div class="model-selector">
-      <label class="selector-label">
+      <span class="selector-label">
         Copilot Model
         @if (isLoading()) {
           <span class="loading-indicator">Loading...</span>
         }
-      </label>
-      <div class="selector-dropdown" (click)="toggleDropdown()">
+      </span>
+      <div class="selector-dropdown" (click)="toggleDropdown()" (keydown.enter)="toggleDropdown()" (keydown.space)="toggleDropdown()" tabindex="0" role="button">
         <span class="selected-model">{{ selectedModel().name }}</span>
         <span class="tier-badge" [class]="selectedModel().tier">{{ getTierLabel(selectedModel().tier) }}</span>
         <span class="dropdown-arrow">{{ isOpen() ? '▲' : '▼' }}</span>
@@ -157,7 +157,7 @@ function convertToModel(info: CopilotModelInfo): CopilotModel {
     </div>
 
     @if (isOpen()) {
-      <div class="backdrop" (click)="closeDropdown()"></div>
+      <div class="backdrop" (click)="closeDropdown()" (keydown.enter)="closeDropdown()" (keydown.space)="closeDropdown()" tabindex="0" role="button"></div>
     }
   `,
   styles: [`

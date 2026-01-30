@@ -48,7 +48,14 @@ const STATUS_LABELS: Record<StreamStatus, string> = {
       [class.expanded]="expanded()"
     >
       <!-- Header -->
-      <div class="response-header" (click)="toggleExpanded()">
+      <div
+        class="response-header"
+        (click)="toggleExpanded()"
+        (keydown.enter)="toggleExpanded()"
+        (keydown.space)="toggleExpanded()"
+        tabindex="0"
+        role="button"
+      >
         <div class="header-left">
           <app-cli-status-indicator
             [status]="statusForIndicator()"

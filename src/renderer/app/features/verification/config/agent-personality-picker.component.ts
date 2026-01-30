@@ -11,7 +11,6 @@ import {
   Component,
   input,
   output,
-  computed,
   signal,
   ChangeDetectionStrategy,
 } from '@angular/core';
@@ -93,7 +92,7 @@ const PERSONALITIES: PersonalityInfo[] = [
   template: `
     <div class="personality-picker">
       <!-- Header -->
-      <div class="picker-header" (click)="toggleOpen()">
+      <div class="picker-header" (click)="toggleOpen()" (keydown.enter)="toggleOpen()" (keydown.space)="toggleOpen()" tabindex="0" role="button">
         <span class="header-label">Personalities</span>
         <span class="selected-count">{{ selected().length }} selected</span>
         <span class="header-arrow" [class.open]="isOpen()">▼</span>
@@ -110,6 +109,10 @@ const PERSONALITIES: PersonalityInfo[] = [
                   class="selected-chip"
                   [style.border-color]="getPersonality(type)?.color"
                   (click)="togglePersonality(type); $event.stopPropagation()"
+                  (keydown.enter)="togglePersonality(type); $event.stopPropagation()"
+                  (keydown.space)="togglePersonality(type); $event.stopPropagation(); $event.preventDefault()"
+                  tabindex="0"
+                  role="button"
                 >
                   <span class="chip-icon">{{ getPersonality(type)?.icon }}</span>
                   <span class="chip-name">{{ getPersonality(type)?.name }}</span>
@@ -128,6 +131,10 @@ const PERSONALITIES: PersonalityInfo[] = [
                 [class.disabled]="!canSelect(personality.type)"
                 [style.border-color]="isSelected(personality.type) ? personality.color : 'transparent'"
                 (click)="togglePersonality(personality.type)"
+                (keydown.enter)="togglePersonality(personality.type)"
+                (keydown.space)="togglePersonality(personality.type); $event.preventDefault()"
+                tabindex="0"
+                role="button"
               >
                 <div class="card-header">
                   <span class="personality-icon" [style.background]="personality.color + '20'">

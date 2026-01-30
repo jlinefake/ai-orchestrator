@@ -6,3 +6,4 @@
 
 export * from './mcp-manager';
 export * from './mcp-tool-search';
+export * from './permission-ipc-server';

@@ -102,7 +102,7 @@ type UnifiedNode = SupervisorNode | WorkerNode;
         [style.--depth]="depth"
       >
         <!-- Node Header -->
-        <div class="node-header" (click)="toggleNode(node.id)">
+        <div class="node-header" (click)="toggleNode(node.id)" (keydown.enter)="toggleNode(node.id)" (keydown.space)="toggleNode(node.id)" tabindex="0" role="button">
           <!-- Expand/Collapse -->
           @if (hasChildren(node)) {
             <span class="expand-icon">
@@ -131,7 +131,7 @@ type UnifiedNode = SupervisorNode | WorkerNode;
           }
 
           <!-- Node Actions -->
-          <div class="node-actions" (click)="$event.stopPropagation()">
+          <div class="node-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()" tabindex="0" role="group">
             @if (node.status === 'failed' || node.status === 'stopped') {
               <button
                 class="action-btn"

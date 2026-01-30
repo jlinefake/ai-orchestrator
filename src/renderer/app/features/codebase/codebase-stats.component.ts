@@ -11,7 +11,6 @@
 import {
   Component,
   input,
-  computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import type { IndexStats, WatcherStatus } from '../../../../shared/types/codebase.types';

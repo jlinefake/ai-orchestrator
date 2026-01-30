@@ -21,7 +21,7 @@ import { CommonModule } from '@angular/common';
 import { StreamingTextComponent } from '../../../shared/components/streaming-text/streaming-text.component';
 import { ConfidenceMeterComponent } from '../../../shared/components/confidence-meter/confidence-meter.component';
 import { CostEstimatorComponent } from '../../../shared/components/cost-estimator/cost-estimator.component';
-import type { VerificationResult, AgreementPoint, DisagreementPoint, UniqueInsight } from '../../../../../shared/types/verification.types';
+import type { VerificationResult } from '../../../../../shared/types/verification.types';
 import type { SessionCostSummary, SynthesisDisplayOptions, VerificationExportFormat } from '../../../../../shared/types/verification-ui.types';
 
 @Component({
@@ -46,14 +46,14 @@ import type { SessionCostSummary, SynthesisDisplayOptions, VerificationExportFor
         <div class="header-right">
           @if (options().showExport) {
             <div class="export-dropdown">
-              <button class="export-btn" (click)="toggleExportMenu()">
+              <button class="export-btn" (click)="toggleExportMenu()" aria-label="Export options">
                 📤 Export
               </button>
               @if (showExportMenu()) {
                 <div class="export-menu">
-                  <button (click)="handleExport('markdown')">Markdown</button>
-                  <button (click)="handleExport('json')">JSON</button>
-                  <button (click)="handleExport('html')">HTML</button>
+                  <button (click)="handleExport('markdown')" aria-label="Export as Markdown">Markdown</button>
+                  <button (click)="handleExport('json')" aria-label="Export as JSON">JSON</button>
+                  <button (click)="handleExport('html')" aria-label="Export as HTML">HTML</button>
                 </div>
               }
             </div>

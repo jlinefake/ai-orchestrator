@@ -14,7 +14,6 @@
 import {
   Component,
   signal,
-  computed,
   inject,
   OnInit,
   ChangeDetectionStrategy,
@@ -55,13 +54,14 @@ interface CliSettingsEntry {
 
       <!-- Tabs -->
       <nav class="settings-tabs">
-        <button
-          *ngFor="let tab of tabs"
-          [class.active]="activeTab() === tab.id"
-          (click)="activeTab.set(tab.id)"
-        >
-          {{ tab.label }}
-        </button>
+        @for (tab of tabs; track tab.id) {
+          <button
+            [class.active]="activeTab() === tab.id"
+            (click)="activeTab.set(tab.id)"
+          >
+            {{ tab.label }}
+          </button>
+        }
       </nav>
 
       <div class="settings-content">
@@ -102,12 +102,12 @@ interface CliSettingsEntry {
                   @if (cli.installed) {
                     <div class="cli-details">
                       <div class="detail-row">
-                        <label>Version:</label>
+                        <span class="detail-label">Version:</span>
                         <span>{{ cli.version || 'Unknown' }}</span>
                       </div>
 
                       <div class="detail-row">
-                        <label>Path:</label>
+                        <span class="detail-label">Path:</span>
                         <div class="path-input">
                           <input
                             type="text"
@@ -122,7 +122,7 @@ interface CliSettingsEntry {
                       </div>
 
                       <div class="detail-row">
-                        <label>Default Model:</label>
+                        <span class="detail-label">Default Model:</span>
                         <select
                           [value]="cli.defaultModel || ''"
                           (change)="updateDefaultModel(cli.command, $event)"
@@ -135,7 +135,7 @@ interface CliSettingsEntry {
                       </div>
 
                       <div class="detail-row">
-                        <label>Default Timeout:</label>
+                        <span class="detail-label">Default Timeout:</span>
                         <div class="timeout-input">
                           <input
                             type="number"
@@ -149,7 +149,7 @@ interface CliSettingsEntry {
                       </div>
 
                       <div class="detail-row">
-                        <label>Auto-approve:</label>
+                        <span class="detail-label">Auto-approve:</span>
                         <label class="checkbox-label">
                           <input
                             type="checkbox"
@@ -212,15 +212,15 @@ interface CliSettingsEntry {
               <div class="custom-cli-form">
                 <h4>Add Custom CLI</h4>
                 <div class="form-row">
-                  <label>Name:</label>
+                  <span class="form-label">Name:</span>
                   <input type="text" [(ngModel)]="customCliName" placeholder="My Custom CLI" />
                 </div>
                 <div class="form-row">
-                  <label>Command:</label>
+                  <span class="form-label">Command:</span>
                   <input type="text" [(ngModel)]="customCliCommand" placeholder="mycli" />
                 </div>
                 <div class="form-row">
-                  <label>Path (optional):</label>
+                  <span class="form-label">Path (optional):</span>
                   <input type="text" [(ngModel)]="customCliPath" placeholder="/usr/local/bin/mycli" />
                 </div>
                 <div class="form-actions">
@@ -257,7 +257,7 @@ interface CliSettingsEntry {
                 <p class="setting-hint">Run multiple agents simultaneously for faster results</p>
               </div>
               <div class="setting-row">
-                <label>Max concurrent agents:</label>
+                <span class="setting-label">Max concurrent agents:</span>
                 <input type="number" [(ngModel)]="maxConcurrent" min="1" max="10" />
               </div>
             </div>
@@ -272,7 +272,7 @@ interface CliSettingsEntry {
                 <p class="setting-hint">Speeds up startup by caching detected CLIs</p>
               </div>
               <div class="setting-row">
-                <label>Cache duration:</label>
+                <span class="setting-label">Cache duration:</span>
                 <select [(ngModel)]="cacheDuration">
                   <option value="300">5 minutes</option>
                   <option value="3600">1 hour</option>
@@ -491,7 +491,7 @@ interface CliSettingsEntry {
       gap: 12px;
     }
 
-    .detail-row > label {
+    .detail-row > .detail-label {
       width: 120px;
       font-size: 13px;
       color: var(--text-secondary);
@@ -631,7 +631,7 @@ interface CliSettingsEntry {
       margin-bottom: 12px;
     }
 
-    .form-row label {
+    .form-row .form-label {
       width: 100px;
       font-size: 13px;
     }
@@ -672,7 +672,8 @@ interface CliSettingsEntry {
       margin-bottom: 12px;
     }
 
-    .setting-row label {
+    .setting-row label,
+    .setting-row .setting-label {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -845,20 +846,20 @@ export class CliSettingsPanelComponent implements OnInit {
     }
   }
 
-  async testConnection(command: string): Promise<void> {
-    this.updateCliSetting(command, { testStatus: 'testing' });
+  async testConnection(cliCommand: string): Promise<void> {
+    this.updateCliSetting(cliCommand, { testStatus: 'testing' });
 
     try {
       // Call IPC to test connection
-      const result = await (window as any).electronAPI?.invoke('cli:test-connection', { command });
+      const result = await (window as unknown as { electronAPI?: { invoke: (channel: string, arg?: unknown) => Promise<unknown> } }).electronAPI?.invoke('cli:test-connection', { command: cliCommand }) as { success?: boolean; error?: string } | undefined;
 
-      this.updateCliSetting(command, {
+      this.updateCliSetting(cliCommand, {
         testStatus: result?.success ? 'success' : 'failed',
         lastTested: new Date(),
         error: result?.error,
       });
     } catch (error) {
-      this.updateCliSetting(command, {
+      this.updateCliSetting(cliCommand, {
         testStatus: 'failed',
         lastTested: new Date(),
         error: (error as Error).message,
@@ -906,13 +907,16 @@ export class CliSettingsPanelComponent implements OnInit {
 
   browsePath(command: string): void {
     // Open file dialog via IPC
-    (window as any).electronAPI?.invoke('dialog:open-file', {
+    (window as unknown as { electronAPI?: { invoke: (channel: string, arg?: unknown) => Promise<unknown> } }).electronAPI?.invoke('dialog:open-file', {
       title: `Select ${command} CLI executable`,
       filters: [{ name: 'Executables', extensions: ['*'] }],
-    }).then((result: { filePath?: string }) => {
-      if (result?.filePath) {
-        this.updateCliSetting(command, { path: result.filePath });
+    }).then((result: unknown) => {
+      const res = result as { filePath?: string } | undefined;
+      if (res?.filePath) {
+        this.updateCliSetting(command, { path: res.filePath });
       }
+    }).catch(() => {
+      // Handle error silently
     });
   }
 
@@ -925,11 +929,14 @@ export class CliSettingsPanelComponent implements OnInit {
     };
     const url = guides[command];
     if (url) {
-      (window as any).electronAPI?.invoke('shell:open-external', url);
+      (window as unknown as { electronAPI?: { invoke: (channel: string, arg?: unknown) => Promise<unknown> } }).electronAPI?.invoke('shell:open-external', url).catch(() => {
+        // Handle error silently
+      });
     }
   }
 
-  useApiFallback(command: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  useApiFallback(_command?: string): void {
     // Switch to API tab and show API key setup
     this.activeTab.set('api-keys');
   }

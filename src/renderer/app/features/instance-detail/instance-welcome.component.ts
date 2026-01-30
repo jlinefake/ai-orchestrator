@@ -6,7 +6,6 @@ import {
   Component,
   input,
   output,
-  signal,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { DropZoneComponent } from '../file-drop/drop-zone.component';

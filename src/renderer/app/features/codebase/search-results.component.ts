@@ -41,7 +41,11 @@ import type { HybridSearchResult } from '../../../../shared/types/codebase.types
             <div
               class="result-item"
               [class.selected]="selectedId() === result.sectionId"
+              role="button"
+              tabindex="0"
               (click)="selectResult(result)"
+              (keyup.enter)="selectResult(result)"
+              (keyup.space)="selectResult(result)"
             >
               <!-- Result Header -->
               <div class="result-header">

@@ -667,10 +667,11 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
         backgroundColor: 'rgba(30, 30, 30, 0.95)',
         borderColor: 'var(--border-color)',
         textStyle: { color: '#fff', fontSize: 11 },
-        formatter: (params: any) => {
-          const date = params[0].axisValue;
-          const direct = params[0]?.value || 0;
-          const actual = params[1]?.value || 0;
+        formatter: (params: unknown) => {
+          const paramsArray = params as { axisValue: string; value?: number }[];
+          const date = paramsArray[0].axisValue;
+          const direct = paramsArray[0]?.value || 0;
+          const actual = paramsArray[1]?.value || 0;
           const saved = direct - actual;
           const percent = direct > 0 ? ((saved / direct) * 100).toFixed(1) : '0';
           return `
@@ -760,10 +761,11 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
         backgroundColor: 'rgba(30, 30, 30, 0.95)',
         borderColor: 'var(--border-color)',
         textStyle: { color: '#fff', fontSize: 11 },
-        formatter: (params: any) => {
-          const date = params[0].axisValue;
-          const percent = params[0]?.value || 0;
-          const cumulative = params[1]?.value || 0;
+        formatter: (params: unknown) => {
+          const paramsArray = params as { axisValue: string; value?: number }[];
+          const date = paramsArray[0].axisValue;
+          const percent = paramsArray[0]?.value || 0;
+          const cumulative = paramsArray[1]?.value || 0;
           return `
             <div style="font-size: 11px;">
               <div style="font-weight: 600; margin-bottom: 6px;">${date}</div>
@@ -884,12 +886,13 @@ export class RlmAnalyticsComponent implements OnInit, OnDestroy {
         backgroundColor: 'rgba(30, 30, 30, 0.95)',
         borderColor: 'var(--border-color)',
         textStyle: { color: '#fff', fontSize: 11 },
-        formatter: (params: any) => {
-          const item = storage.byType.find(t => this.formatSectionType(t.type) === params.name);
+        formatter: (params: unknown) => {
+          const paramObj = params as { name: string; value: number; percent: number };
+          const item = storage.byType.find(t => this.formatSectionType(t.type) === paramObj.name);
           return `
             <div style="font-size: 11px;">
-              <div style="font-weight: 600; margin-bottom: 4px;">${params.name}</div>
-              <div>${this.formatNumber(params.value)} tokens (${params.percent}%)</div>
+              <div style="font-weight: 600; margin-bottom: 4px;">${paramObj.name}</div>
+              <div>${this.formatNumber(paramObj.value)} tokens (${paramObj.percent}%)</div>
               <div style="color: #888;">${item?.count || 0} sections</div>
             </div>
           `;

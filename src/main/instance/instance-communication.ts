@@ -54,10 +54,14 @@ export class InstanceCommunicationManager extends EventEmitter {
     attachments?: any[],
     contextBlock?: string | null
   ): Promise<void> {
+    console.log(`[InstanceCommunicationManager] sendInput called for ${instanceId}`);
     const instance = this.deps.getInstance(instanceId);
     const adapter = this.deps.getAdapter(instanceId);
 
+    console.log(`[InstanceCommunicationManager] Instance exists: ${!!instance}, Adapter exists: ${!!adapter}`);
+
     if (!adapter) {
+      console.error(`[InstanceCommunicationManager] No adapter found for ${instanceId}`);
       throw new Error(`Instance ${instanceId} not found`);
     }
 
@@ -177,7 +181,22 @@ export class InstanceCommunicationManager extends EventEmitter {
       );
 
       const instance = this.deps.getInstance(instanceId);
-      if (!instance) return;
+      if (!instance) {
+        console.log(`Adapter exit event for ${instanceId} but instance not found - ignoring`);
+        return;
+      }
+
+      // Check if this adapter is still the current adapter for this instance
+      // If not, a new adapter has been set (e.g., during YOLO toggle) and we should
+      // not delete it or modify instance state
+      const currentAdapter = this.deps.getAdapter(instanceId);
+      console.log(`Adapter exit check: currentAdapter=${currentAdapter ? 'exists' : 'undefined'}, adapter=${adapter ? 'exists' : 'undefined'}, same=${currentAdapter === adapter}`);
+      if (currentAdapter !== adapter) {
+        console.log(
+          `Adapter exit event for ${instanceId} but adapter has been replaced - ignoring`
+        );
+        return;
+      }
 
       // Check if this was an interrupted instance that needs respawning
       if (this.interruptedInstances.has(instanceId)) {

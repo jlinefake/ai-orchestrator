@@ -6,7 +6,6 @@ import {
   Component,
   input,
   output,
-  signal,
   computed,
   ChangeDetectionStrategy
 } from '@angular/core';

@@ -394,9 +394,33 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       });
       args.push('--dangerously-skip-permissions');
     } else {
-      // Explicitly set permission mode to default to ensure prompts appear
-      console.log('[ClaudeCliAdapter] NON-YOLO mode: adding --permission-mode default');
-      args.push('--permission-mode', 'default');
+      // Use acceptEdits mode to auto-approve file operations (Read, Write, Edit, etc.)
+      // while still requiring approval for potentially dangerous operations like Bash
+      console.log('[ClaudeCliAdapter] NON-YOLO mode: using --permission-mode acceptEdits');
+      args.push('--permission-mode', 'acceptEdits');
+
+      // Add commonly-used safe tools to allowedTools to reduce permission prompts
+      // User-specified allowedTools will be added below
+      const defaultAllowedTools = [
+        'Read',
+        'Glob',
+        'Grep',
+        'Task',
+        'TaskOutput',
+        'TodoWrite',
+        'WebSearch',
+        'WebFetch'
+      ];
+
+      // Merge default allowed tools with user-specified ones
+      const allAllowedTools = new Set([
+        ...defaultAllowedTools,
+        ...(this.spawnOptions.allowedTools || [])
+      ]);
+
+      if (allAllowedTools.size > 0) {
+        args.push('--allowedTools', Array.from(allAllowedTools).join(','));
+      }
     }
 
     if (this.spawnOptions.resume && this.sessionId) {
@@ -417,11 +441,13 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       args.push('--max-tokens', this.spawnOptions.maxTokens.toString());
     }
 
+    // Only add user-specified allowedTools if in YOLO mode (already handled above for non-YOLO)
     if (
+      this.spawnOptions.yoloMode &&
       this.spawnOptions.allowedTools &&
       this.spawnOptions.allowedTools.length > 0
     ) {
-      args.push('--allowed-tools', this.spawnOptions.allowedTools.join(','));
+      args.push('--allowedTools', this.spawnOptions.allowedTools.join(','));
     }
 
     if (
@@ -429,7 +455,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       this.spawnOptions.disallowedTools.length > 0
     ) {
       args.push(
-        '--disallowed-tools',
+        '--disallowedTools',
         this.spawnOptions.disallowedTools.join(',')
       );
     }
@@ -530,6 +556,12 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
   /**
    * Send raw text input (for permission prompts, etc.)
    * When using stream-json input format, all responses need to be JSON formatted as user messages
+   *
+   * NOTE: Permission approvals from UI dialogs don't actually send to CLI stdin because
+   * Claude CLI's permission system doesn't support programmatic approval in print mode.
+   * The CLI already returned a permission denial error and continued - it's not waiting for input.
+   * To approve tool use, users must enable YOLO mode which restarts the session with
+   * --dangerously-skip-permissions.
    */
   async sendRaw(text: string, permissionKey?: string): Promise<void> {
     if (!this.formatter || !this.formatter.isWritable()) {
@@ -547,19 +579,28 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                                   text.toLowerCase().includes('allow') ||
                                   text.toLowerCase().startsWith('y');
 
-    if (isPermissionApproval && permissionKey) {
-      // Track that user approved this permission (prevents re-prompting on retry failure)
-      this.approvedPermissions.add(permissionKey);
-      console.log('ClaudeCliAdapter.sendRaw: Added to approved permissions:', permissionKey);
+    // Check if this is a permission denial response
+    const isPermissionDenial = text.toLowerCase().includes('permission denied') ||
+                               text.toLowerCase().includes('do not perform') ||
+                               text.toLowerCase().startsWith('n');
 
-      // For permission approvals, first try sending 'y' directly to stdin
-      // Claude Code CLI may be waiting for a simple y/n response
-      console.log('ClaudeCliAdapter.sendRaw: Detected permission approval, sending y to stdin');
-      await this.formatter.sendRaw('y');
+    if (permissionKey && (isPermissionApproval || isPermissionDenial)) {
+      // Track permission response for future reference
+      if (isPermissionApproval) {
+        this.approvedPermissions.add(permissionKey);
+        console.log('ClaudeCliAdapter.sendRaw: Marked permission as approved:', permissionKey);
+        console.log('ClaudeCliAdapter.sendRaw: Note - CLI is not waiting for input. User should enable YOLO mode to allow this tool.');
+      } else {
+        console.log('ClaudeCliAdapter.sendRaw: Permission denied by user:', permissionKey);
+      }
+
+      // Don't send permission responses to stdin - the CLI isn't waiting for them
+      // Just update status back to idle/busy
+      this.emit('status', 'idle' as InstanceStatus);
+      return;
     }
 
-    // When using stream-json input format, all input needs to be in JSON format
-    // Send all text as user messages so Claude can understand the response
+    // For regular user input (not permission responses), send as JSON user message
     const userMessage = {
       type: 'user',
       message: {
@@ -752,7 +793,6 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
               // Skip if user already approved this permission (retry still failed but don't re-prompt)
               if (this.approvedPermissions.has(permissionKey)) {
                 console.log('[ClaudeCliAdapter] User already approved this permission, not re-prompting:', permissionKey);
-                console.log('[ClaudeCliAdapter] Permission still failing - Claude Code CLI requires YOLO mode for programmatic approval');
                 // Emit a system message to inform user - only once per permission
                 const hintKey = `hint:${permissionKey}`;
                 if (!this.approvedPermissions.has(hintKey)) {
@@ -761,7 +801,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                     id: generateId(),
                     timestamp: Date.now(),
                     type: 'system',
-                    content: `Permission for "${action} ${path}" requires YOLO mode. Click the ⚡ YOLO button in the header to enable auto-approval for this session.`,
+                    content: `Permission for "${action} ${path}" was denied by the CLI. To allow this action, enable YOLO mode (⚡ button) which auto-approves all tool use for this session.`,
                     metadata: { permissionHint: true, suggestYolo: true }
                   });
                 }
@@ -773,7 +813,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
               console.log('[ClaudeCliAdapter] Added to pending permissions:', permissionKey);
 
               const inputRequestId = generateId();
-              const prompt = `Permission required: Claude wants to ${action} ${path}. Allow?`;
+              const prompt = `Permission required: Claude wants to ${action} ${path}. Enable YOLO mode to allow all tool use, or reject to continue with this action denied.`;
               const timestamp = message.timestamp || Date.now();
 
               console.log('[ClaudeCliAdapter] Emitting input_required for permission denial');

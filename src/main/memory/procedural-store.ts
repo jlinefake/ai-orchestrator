@@ -9,6 +9,11 @@ import type {
   WorkflowMemory,
   StrategyMemory,
   StrategyOutcome,
+  WorkflowOutcome,
+  FailurePattern,
+  AvoidanceRule,
+  WorkflowVersion,
+  FailureReason,
 } from '../../shared/types/unified-memory.types';
 
 export interface ProceduralStoreConfig {
@@ -17,6 +22,11 @@ export interface ProceduralStoreConfig {
   minSuccessRateForPromotion: number;
   minUsageForPromotion: number;
   strategyDecayDays: number;
+  // Phase 4.1: Failure Analysis
+  failureThresholdForAvoidance: number; // Number of same failures before creating avoidance rule
+  maxAvoidanceRules: number;
+  // Phase 4.2: Workflow Versioning
+  maxVersionsPerWorkflow: number;
 }
 
 export interface WorkflowQuery {
@@ -40,6 +50,10 @@ export interface ProceduralStats {
   avgStrategySuccessRate: number;
   topWorkflows: WorkflowMemory[];
   topStrategies: StrategyMemory[];
+  // Phase 4.1: Failure Analysis
+  totalAvoidanceRules: number;
+  // Phase 4.2: Versioning stats
+  workflowsWithVersions: number;
 }
 
 export interface WorkflowRecommendation {
@@ -60,6 +74,8 @@ export class ProceduralStore extends EventEmitter {
   private config: ProceduralStoreConfig;
   private workflows: WorkflowMemory[] = [];
   private strategies: StrategyMemory[] = [];
+  // Phase 4.1: Avoidance rules learned from repeated failures
+  private avoidanceRules: AvoidanceRule[] = [];
 
   private defaultConfig: ProceduralStoreConfig = {
     maxWorkflows: 200,
@@ -67,6 +83,11 @@ export class ProceduralStore extends EventEmitter {
     minSuccessRateForPromotion: 0.7,
     minUsageForPromotion: 3,
     strategyDecayDays: 30,
+    // Phase 4.1: Failure Analysis
+    failureThresholdForAvoidance: 3,
+    maxAvoidanceRules: 100,
+    // Phase 4.2: Workflow Versioning
+    maxVersionsPerWorkflow: 10,
   };
 
   static getInstance(): ProceduralStore {
@@ -74,6 +95,13 @@ export class ProceduralStore extends EventEmitter {
       this.instance = new ProceduralStore();
     }
     return this.instance;
+  }
+
+  /**
+   * Reset singleton instance (for testing only)
+   */
+  static resetInstance(): void {
+    this.instance = undefined as unknown as ProceduralStore;
   }
 
   private constructor() {
@@ -85,20 +113,37 @@ export class ProceduralStore extends EventEmitter {
     this.config = { ...this.config, ...config };
   }
 
+  /**
+   * Get current configuration
+   */
+  getConfig(): ProceduralStoreConfig {
+    return { ...this.config };
+  }
+
   // ============ Workflow Management ============
 
   addWorkflow(workflow: WorkflowMemory): void {
     // Check for duplicate
     const existing = this.workflows.find(w => w.name === workflow.name);
     if (existing) {
-      // Update existing workflow
-      existing.steps = workflow.steps;
+      // Use updateWorkflow for existing workflows to preserve versioning
+      this.updateWorkflow(existing.id, workflow.steps, 'improvement');
       existing.applicableContexts = [
         ...new Set([...existing.applicableContexts, ...workflow.applicableContexts]),
       ];
       this.emit('workflow:updated', existing);
       return;
     }
+
+    // Phase 4.2: Initialize versioning for new workflows
+    const initialVersion: WorkflowVersion = {
+      version: 1,
+      steps: [...workflow.steps],
+      createdAt: Date.now(),
+      reason: 'initial',
+    };
+    workflow.versions = [initialVersion];
+    workflow.currentVersion = 1;
 
     this.workflows.push(workflow);
 
@@ -109,6 +154,113 @@ export class ProceduralStore extends EventEmitter {
     }
 
     this.emit('workflow:added', workflow);
+  }
+
+  /**
+   * Update workflow with version tracking
+   * Phase 4.2: Workflow Versioning
+   */
+  updateWorkflow(
+    workflowId: string,
+    newSteps: string[],
+    reason: WorkflowVersion['reason']
+  ): WorkflowVersion | null {
+    const workflow = this.workflows.find(w => w.id === workflowId);
+    if (!workflow) return null;
+
+    // Initialize versions if not present (for backwards compatibility)
+    if (!workflow.versions) {
+      workflow.versions = [
+        {
+          version: 1,
+          steps: [...workflow.steps],
+          createdAt: Date.now() - 1000, // Slightly in the past
+          reason: 'initial',
+        },
+      ];
+      workflow.currentVersion = 1;
+    }
+
+    // Create new version
+    const newVersion: WorkflowVersion = {
+      version: workflow.versions.length + 1,
+      steps: [...newSteps],
+      createdAt: Date.now(),
+      reason,
+      parentVersion: workflow.currentVersion,
+    };
+
+    workflow.versions.push(newVersion);
+    workflow.currentVersion = newVersion.version;
+    workflow.steps = [...newSteps];
+
+    // Keep last N versions
+    if (workflow.versions.length > this.config.maxVersionsPerWorkflow) {
+      workflow.versions = workflow.versions.slice(-this.config.maxVersionsPerWorkflow);
+    }
+
+    this.emit('workflow:versionCreated', {
+      workflowId,
+      version: newVersion,
+      totalVersions: workflow.versions.length,
+    });
+
+    return newVersion;
+  }
+
+  /**
+   * Rollback workflow to a previous version
+   * Phase 4.2: Workflow Versioning
+   */
+  rollbackWorkflow(workflowId: string, targetVersion?: number): WorkflowVersion | null {
+    const workflow = this.workflows.find(w => w.id === workflowId);
+    if (!workflow || !workflow.versions || workflow.versions.length < 2) {
+      return null;
+    }
+
+    // Find target version
+    let target: WorkflowVersion | undefined;
+
+    if (targetVersion !== undefined) {
+      target = workflow.versions.find(v => v.version === targetVersion);
+    } else {
+      // Default: rollback to previous version
+      target = workflow.versions[workflow.versions.length - 2];
+    }
+
+    if (!target) return null;
+
+    // Update workflow to use target version's steps
+    workflow.steps = [...target.steps];
+    workflow.currentVersion = target.version;
+
+    this.emit('workflow:rolledBack', {
+      workflowId,
+      fromVersion: workflow.versions[workflow.versions.length - 1].version,
+      toVersion: target.version,
+    });
+
+    return target;
+  }
+
+  /**
+   * Get version history for a workflow
+   * Phase 4.2: Workflow Versioning
+   */
+  getWorkflowVersions(workflowId: string): WorkflowVersion[] {
+    const workflow = this.workflows.find(w => w.id === workflowId);
+    if (!workflow || !workflow.versions) return [];
+    return [...workflow.versions];
+  }
+
+  /**
+   * Get a specific version of a workflow
+   * Phase 4.2: Workflow Versioning
+   */
+  getWorkflowVersion(workflowId: string, version: number): WorkflowVersion | null {
+    const workflow = this.workflows.find(w => w.id === workflowId);
+    if (!workflow || !workflow.versions) return null;
+    return workflow.versions.find(v => v.version === version) || null;
   }
 
   getWorkflow(workflowId: string): WorkflowMemory | undefined {
@@ -179,15 +331,168 @@ export class ProceduralStore extends EventEmitter {
     return recommendations.slice(0, 5);
   }
 
-  recordWorkflowUsage(workflowId: string, success: boolean): void {
+  /**
+   * Record workflow usage with optional failure analysis
+   * Phase 4.1: Extended to track failure patterns
+   */
+  recordWorkflowUsage(workflowId: string, success: boolean): void;
+  recordWorkflowUsage(workflowId: string, outcome: WorkflowOutcome): void;
+  recordWorkflowUsage(workflowId: string, successOrOutcome: boolean | WorkflowOutcome): void {
     const workflow = this.workflows.find(w => w.id === workflowId);
     if (!workflow) return;
 
+    // Normalize input to WorkflowOutcome
+    const outcome: WorkflowOutcome =
+      typeof successOrOutcome === 'boolean'
+        ? { taskId: '', success: successOrOutcome, score: successOrOutcome ? 1 : 0, timestamp: Date.now() }
+        : successOrOutcome;
+
     // Update success rate using moving average
     const prevWeight = 0.9;
-    workflow.successRate = workflow.successRate * prevWeight + (success ? 1 : 0) * (1 - prevWeight);
+    workflow.successRate = workflow.successRate * prevWeight + (outcome.success ? 1 : 0) * (1 - prevWeight);
 
-    this.emit('workflow:used', { workflowId, success, newSuccessRate: workflow.successRate });
+    // Initialize outcomes array if needed
+    if (!workflow.outcomes) {
+      workflow.outcomes = [];
+    }
+    workflow.outcomes.push(outcome);
+
+    // Keep outcomes manageable
+    if (workflow.outcomes.length > 100) {
+      workflow.outcomes = workflow.outcomes.slice(-100);
+    }
+
+    // Phase 4.1: Track failure patterns
+    if (!outcome.success && outcome.failureReason) {
+      this.trackFailurePattern(workflow, outcome);
+    }
+
+    this.emit('workflow:used', {
+      workflowId,
+      success: outcome.success,
+      newSuccessRate: workflow.successRate,
+      outcome,
+    });
+  }
+
+  /**
+   * Track failure pattern for a workflow
+   * Phase 4.1: Failure Analysis
+   */
+  private trackFailurePattern(workflow: WorkflowMemory, outcome: WorkflowOutcome): void {
+    if (!workflow.failurePatterns) {
+      workflow.failurePatterns = [];
+    }
+
+    const pattern: FailurePattern = {
+      reason: outcome.failureReason!,
+      pattern: outcome.errorPattern,
+      feedback: outcome.userFeedback,
+      timestamp: outcome.timestamp,
+    };
+
+    workflow.failurePatterns.push(pattern);
+
+    // Keep failure patterns manageable
+    if (workflow.failurePatterns.length > 50) {
+      workflow.failurePatterns = workflow.failurePatterns.slice(-50);
+    }
+
+    this.emit('workflow:failureTracked', { workflowId: workflow.id, pattern });
+
+    // Learn from failure
+    this.learnFromFailure(workflow, outcome);
+  }
+
+  /**
+   * Learn from workflow failures - creates avoidance rules when patterns repeat
+   * Phase 4.1: Failure Analysis
+   */
+  private learnFromFailure(workflow: WorkflowMemory, outcome: WorkflowOutcome): void {
+    if (!outcome.errorPattern) return;
+
+    // Count recent occurrences of this error pattern
+    const recentFailures = (workflow.failurePatterns || [])
+      .filter(f => f.pattern === outcome.errorPattern)
+      .slice(-this.config.failureThresholdForAvoidance);
+
+    if (recentFailures.length >= this.config.failureThresholdForAvoidance) {
+      this.createAvoidanceRule(workflow.id, outcome.errorPattern, outcome.userFeedback);
+    }
+  }
+
+  /**
+   * Create an avoidance rule when an error pattern repeats too often
+   * Phase 4.1: Failure Analysis
+   */
+  createAvoidanceRule(
+    workflowId: string,
+    errorPattern: string,
+    feedback?: string
+  ): AvoidanceRule | null {
+    // Check if rule already exists
+    const existing = this.avoidanceRules.find(
+      r => r.workflowId === workflowId && r.errorPattern === errorPattern
+    );
+
+    if (existing) {
+      existing.occurrenceCount++;
+      existing.learnedAt = Date.now();
+      if (feedback) {
+        existing.avoidanceStrategy = feedback;
+      }
+      this.emit('avoidanceRule:updated', existing);
+      return existing;
+    }
+
+    const rule: AvoidanceRule = {
+      id: `avoid-${workflowId}-${Date.now()}`,
+      workflowId,
+      errorPattern,
+      avoidanceStrategy: feedback || `Avoid: ${errorPattern}`,
+      learnedAt: Date.now(),
+      occurrenceCount: this.config.failureThresholdForAvoidance,
+    };
+
+    this.avoidanceRules.push(rule);
+
+    // Enforce max limit
+    if (this.avoidanceRules.length > this.config.maxAvoidanceRules) {
+      // Remove oldest rules
+      this.avoidanceRules.sort((a, b) => b.learnedAt - a.learnedAt);
+      this.avoidanceRules = this.avoidanceRules.slice(0, this.config.maxAvoidanceRules);
+    }
+
+    this.emit('avoidanceRule:created', rule);
+    return rule;
+  }
+
+  /**
+   * Get avoidance rules for a workflow or all rules
+   * Phase 4.1: Failure Analysis
+   */
+  getAvoidanceRules(workflowId?: string): AvoidanceRule[] {
+    if (workflowId) {
+      return this.avoidanceRules.filter(r => r.workflowId === workflowId);
+    }
+    return [...this.avoidanceRules];
+  }
+
+  /**
+   * Check if an error pattern should be avoided for a workflow
+   * Phase 4.1: Failure Analysis
+   */
+  shouldAvoid(workflowId: string, context: string): AvoidanceRule | null {
+    const rules = this.getAvoidanceRules(workflowId);
+    const contextLower = context.toLowerCase();
+
+    for (const rule of rules) {
+      if (contextLower.includes(rule.errorPattern.toLowerCase())) {
+        return rule;
+      }
+    }
+
+    return null;
   }
 
   // ============ Strategy Management ============
@@ -427,6 +732,11 @@ export class ProceduralStore extends EventEmitter {
     const topWorkflows = this.queryWorkflows({ limit: 5, minSuccessRate: 0 });
     const topStrategies = this.queryStrategies({ limit: 5, minOutcomes: 0 });
 
+    // Phase 4.2: Count workflows with version history
+    const workflowsWithVersions = this.workflows.filter(
+      w => w.versions && w.versions.length > 1
+    ).length;
+
     return {
       totalWorkflows: this.workflows.length,
       totalStrategies: this.strategies.length,
@@ -434,6 +744,10 @@ export class ProceduralStore extends EventEmitter {
       avgStrategySuccessRate,
       topWorkflows,
       topStrategies,
+      // Phase 4.1
+      totalAvoidanceRules: this.avoidanceRules.length,
+      // Phase 4.2
+      workflowsWithVersions,
     };
   }
 
@@ -442,19 +756,28 @@ export class ProceduralStore extends EventEmitter {
   exportState(): {
     workflows: WorkflowMemory[];
     strategies: StrategyMemory[];
+    avoidanceRules: AvoidanceRule[];
   } {
     return {
       workflows: this.workflows,
       strategies: this.strategies,
+      avoidanceRules: this.avoidanceRules,
     };
   }
 
-  importState(state: { workflows?: WorkflowMemory[]; strategies?: StrategyMemory[] }): void {
+  importState(state: {
+    workflows?: WorkflowMemory[];
+    strategies?: StrategyMemory[];
+    avoidanceRules?: AvoidanceRule[];
+  }): void {
     if (state.workflows) {
       this.workflows = state.workflows;
     }
     if (state.strategies) {
       this.strategies = state.strategies;
+    }
+    if (state.avoidanceRules) {
+      this.avoidanceRules = state.avoidanceRules;
     }
 
     this.emit('state:imported');
@@ -463,6 +786,7 @@ export class ProceduralStore extends EventEmitter {
   clear(): void {
     this.workflows = [];
     this.strategies = [];
+    this.avoidanceRules = [];
     this.emit('store:cleared');
   }
 }

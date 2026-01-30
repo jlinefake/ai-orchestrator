@@ -268,12 +268,12 @@ import { ProviderStateService } from '../../core/services/provider-state.service
 
       <!-- Settings Modal -->
       @if (showSettings()) {
-        <app-settings (close)="showSettings.set(false)" />
+        <app-settings (closeDialog)="showSettings.set(false)" />
       }
 
       <!-- History Sidebar -->
       @if (showHistory()) {
-        <app-history-sidebar (close)="showHistory.set(false)" />
+        <app-history-sidebar (closeHistory)="showHistory.set(false)" />
       }
 
       <!-- Command Palette -->

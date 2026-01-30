@@ -8,7 +8,6 @@ import { VerificationStateService } from './verification-state.service';
 import { VerificationConfigStore } from './verification-config.store';
 import type {
   VerificationSession,
-  VerificationStatus,
   AgentProgress,
   PersonalityType,
   VerificationResult,
@@ -27,7 +26,8 @@ export class VerificationSessionStore {
   async startVerification(
     prompt: string,
     context?: string,
-    files?: File[]
+    files?: File[],
+    workingDirectory?: string
   ): Promise<string> {
     const config = this.stateService.state().defaultConfig;
     const sessionId = `verify-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -36,6 +36,7 @@ export class VerificationSessionStore {
       id: sessionId,
       prompt,
       context,
+      workingDirectory,
       config,
       status: 'running',
       startedAt: Date.now(),
@@ -73,6 +74,7 @@ export class VerificationSessionStore {
         id: sessionId,
         prompt,
         context,
+        workingDirectory,
         attachments,
         config: {
           cliAgents: config.cliAgents,

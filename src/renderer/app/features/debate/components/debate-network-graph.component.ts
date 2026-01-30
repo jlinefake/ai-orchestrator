@@ -21,7 +21,6 @@ import {
 } from '@angular/core';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
-import type { DebateContribution, AgentCritique } from '../../../../../shared/types/debate.types';
 
 export interface NetworkNode {
   id?: string;
@@ -205,9 +204,10 @@ export class DebateNetworkGraphComponent implements OnDestroy {
       renderer: 'canvas',
     });
 
-    this.chart.on('click', 'series.graph', (params: any) => {
-      if (params.dataType === 'node') {
-        this.nodeClick.emit(params.data.name);
+    this.chart.on('click', 'series.graph', (params) => {
+      const p = params as { dataType?: string; data?: { name?: string } };
+      if (p.dataType === 'node' && p.data?.name) {
+        this.nodeClick.emit(p.data.name);
       }
     });
 
@@ -276,31 +276,32 @@ export class DebateNetworkGraphComponent implements OnDestroy {
           color: '#fff',
           fontSize: 11,
         },
-        formatter: (params: any) => {
-          if (params.dataType === 'node') {
-            const node = nodes.find(n => n.agentId === params.name);
+        formatter: ((params: unknown) => {
+          const p = params as { dataType?: string; name?: string; data?: { source?: string; target?: string } };
+          if (p.dataType === 'node') {
+            const node = nodes.find(n => n.agentId === p.name);
             return `
               <div style="font-size: 11px;">
-                <div style="font-weight: 600; margin-bottom: 4px;">${params.name}</div>
+                <div style="font-weight: 600; margin-bottom: 4px;">${p.name || ''}</div>
                 <div>Confidence: ${((node?.confidence || 0) * 100).toFixed(0)}%</div>
                 <div>Contributions: ${node?.contributionCount || 0}</div>
               </div>
             `;
-          } else if (params.dataType === 'edge') {
+          } else if (p.dataType === 'edge' && p.data) {
             const link = links.find(l =>
-              l.source === params.data.source && l.target === params.data.target
+              l.source === p.data?.source && l.target === p.data?.target
             );
             const typeLabel = link?.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             return `
               <div style="font-size: 11px;">
-                <div style="font-weight: 600; margin-bottom: 4px;">${params.data.source} → ${params.data.target}</div>
-                <div>Type: ${typeLabel}</div>
+                <div style="font-weight: 600; margin-bottom: 4px;">${p.data.source || ''} → ${p.data.target || ''}</div>
+                <div>Type: ${typeLabel || ''}</div>
                 ${link?.issue ? `<div style="margin-top: 4px;">${link.issue}</div>` : ''}
               </div>
             `;
           }
           return '';
-        },
+        }) as (params: unknown) => string,
       },
       animationDuration: 1500,
       animationEasingUpdate: 'quinticInOut',

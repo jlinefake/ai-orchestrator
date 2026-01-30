@@ -13,6 +13,7 @@ import { BaseProvider, ProviderFactory } from './provider-interface';
 import { ClaudeCliProvider } from './claude-cli-provider';
 import { CodexCliProvider } from './codex-cli-provider';
 import { GeminiCliProvider } from './gemini-cli-provider';
+import { AnthropicApiProvider } from './anthropic-api-provider';
 import { CliDetectionService, CliInfo } from '../cli/cli-detection';
 
 /**
@@ -77,10 +78,10 @@ const DEFAULT_PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
  */
 const PROVIDER_FACTORIES: Partial<Record<ProviderType, ProviderFactory>> = {
   'claude-cli': (config) => new ClaudeCliProvider(config),
+  'anthropic-api': (config) => new AnthropicApiProvider(config),
   'openai': (config) => new CodexCliProvider(config),
   'google': (config) => new GeminiCliProvider(config),
   // Future providers will be added here:
-  // 'anthropic-api': (config) => new AnthropicApiProvider(config),
   // 'ollama': (config) => new OllamaProvider(config),
 };
 
@@ -274,6 +275,7 @@ export class ProviderRegistry {
       'codex': 'openai',
       'gemini': 'google',
       'ollama': 'ollama',
+      // Note: 'copilot' not mapped - no provider implementation yet
     };
     return mapping[cliName] || null;
   }

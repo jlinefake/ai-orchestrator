@@ -11,7 +11,16 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
   standalone: true,
   imports: [DatePipe],
   template: `
-    <div class="history-item" [class.error]="entry().status === 'error'" (click)="select.emit(entry())">
+    <div
+      class="history-item"
+      [class.error]="entry().status === 'error'"
+      (click)="selectEntry.emit(entry())"
+      (keydown.enter)="selectEntry.emit(entry())"
+      (keydown.space)="selectEntry.emit(entry())"
+      tabindex="0"
+      role="button"
+      [attr.aria-label]="'Select conversation: ' + entry().displayName"
+    >
       <div class="item-header">
         <span class="display-name">{{ entry().displayName }}</span>
         <button
@@ -143,12 +152,12 @@ import type { ConversationHistoryEntry } from '../../../../shared/types/history.
 export class HistoryItemComponent {
   entry = input.required<ConversationHistoryEntry>();
 
-  select = output<ConversationHistoryEntry>();
-  delete = output<ConversationHistoryEntry>();
+  selectEntry = output<ConversationHistoryEntry>();
+  deleteEntry = output<ConversationHistoryEntry>();
 
   onDelete(event: MouseEvent): void {
     event.stopPropagation();
-    this.delete.emit(this.entry());
+    this.deleteEntry.emit(this.entry());
   }
 
   shortenPath(path: string): string {

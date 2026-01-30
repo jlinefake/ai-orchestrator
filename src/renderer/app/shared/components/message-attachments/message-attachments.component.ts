@@ -452,7 +452,8 @@ export class MessageAttachmentsComponent {
   /**
    * Handle right-click on image to show native context menu with copy option
    */
-  onImageContextMenu(event: MouseEvent): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onImageContextMenu(_event?: MouseEvent): void {
     // Allow default context menu which includes "Copy Image" option in Electron
     // No need to prevent default - we want the native menu
   }

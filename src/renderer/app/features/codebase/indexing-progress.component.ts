@@ -33,7 +33,7 @@ import type { IndexingProgress, IndexingStatus } from '../../../../shared/types/
           }
         </div>
         @if (isActive()) {
-          <button class="cancel-btn" (click)="cancel.emit()" title="Cancel indexing">
+          <button class="cancel-btn" (click)="cancelIndexing.emit()" title="Cancel indexing">
             Cancel
           </button>
         }
@@ -231,7 +231,7 @@ export class IndexingProgressComponent {
   progress = input<IndexingProgress | null>(null);
 
   /** Cancel event */
-  cancel = output<void>();
+  cancelIndexing = output<void>();
 
   /** Whether indexing is active */
   isActive = computed(() => {

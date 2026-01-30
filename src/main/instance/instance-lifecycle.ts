@@ -15,10 +15,16 @@ import type { CliType } from '../cli/cli-detection';
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getHistoryManager } from '../history';
 import { getMemoryMonitor, getOutputStorageManager } from '../memory';
+import { getSupervisorTree } from '../process';
 import { getAgentById, getDefaultAgent } from '../../shared/types/agent.types';
 import { getDisallowedTools } from '../../shared/utils/permission-mapper';
 import { generateId } from '../../shared/utils/id-generator';
 import { LIMITS } from '../../shared/constants/limits';
+import {
+  createDefaultContextInheritance,
+  type ContextInheritanceConfig,
+  type TerminationPolicy,
+} from '../../shared/types/supervision.types';
 import type {
   Instance,
   InstanceCreateConfig,
@@ -84,6 +90,40 @@ export class InstanceLifecycleManager extends EventEmitter {
       : getDefaultAgent();
     const resolvedAgent = agent || getDefaultAgent();
 
+    // Resolve context inheritance (merge with defaults)
+    const defaultInheritance = createDefaultContextInheritance();
+    const contextInheritance: ContextInheritanceConfig = {
+      ...defaultInheritance,
+      ...config.contextInheritance,
+    };
+
+    // Calculate depth based on parent
+    let depth = 0;
+    let resolvedWorkingDir = config.workingDirectory;
+    let resolvedYoloMode = config.yoloMode ?? false;
+    let resolvedAgentId = resolvedAgent.id;
+
+    if (config.parentId) {
+      const parent = this.deps.getInstance(config.parentId);
+      if (parent) {
+        depth = parent.depth + 1;
+
+        // Apply context inheritance from parent
+        if (contextInheritance.inheritWorkingDirectory && !config.workingDirectory) {
+          resolvedWorkingDir = parent.workingDirectory;
+        }
+        if (contextInheritance.inheritYoloMode && config.yoloMode === undefined) {
+          resolvedYoloMode = parent.yoloMode;
+        }
+        if (contextInheritance.inheritAgentSettings && !config.agentId) {
+          resolvedAgentId = parent.agentId;
+        }
+      }
+    }
+
+    // Resolve termination policy
+    const terminationPolicy: TerminationPolicy = config.terminationPolicy || 'terminate-children';
+
     // Create instance object
     const instance: Instance = {
       id: generateId(),
@@ -93,8 +133,14 @@ export class InstanceLifecycleManager extends EventEmitter {
       parentId: config.parentId || null,
       childrenIds: [],
       supervisorNodeId: '',
+      workerNodeId: undefined,
+      depth,
 
-      agentId: resolvedAgent.id,
+      // Phase 2: Termination & Inheritance
+      terminationPolicy,
+      contextInheritance,
+
+      agentId: resolvedAgentId,
       agentMode: resolvedAgent.mode,
 
       planMode: {
@@ -112,8 +158,8 @@ export class InstanceLifecycleManager extends EventEmitter {
 
       processId: null,
       sessionId: config.sessionId || generateId(),
-      workingDirectory: config.workingDirectory,
-      yoloMode: config.yoloMode ?? false,
+      workingDirectory: resolvedWorkingDir,
+      yoloMode: resolvedYoloMode,
       provider: config.provider || 'auto',
 
       outputBuffer: config.initialOutputBuffer || [],
@@ -146,6 +192,19 @@ export class InstanceLifecycleManager extends EventEmitter {
         parent.childrenIds.push(instance.id);
       }
     }
+
+    // Register with supervisor tree
+    const supervisorTree = getSupervisorTree();
+    const { supervisorNodeId, workerNodeId } = supervisorTree.registerInstance(
+      instance.id,
+      instance.parentId,
+      instance.workingDirectory,
+      instance.displayName,
+      instance.terminationPolicy,
+      instance.contextInheritance
+    );
+    instance.supervisorNodeId = supervisorNodeId;
+    instance.workerNodeId = workerNodeId;
 
     // Initialize RLM
     await this.deps.initializeRlm(instance);
@@ -303,10 +362,52 @@ export class InstanceLifecycleManager extends EventEmitter {
         }
       }
 
-      // Terminate children
-      for (const childId of instance.childrenIds) {
+      // Handle children based on termination policy
+      const childrenToTerminate: string[] = [];
+      const childrenToOrphan: string[] = [];
+
+      switch (instance.terminationPolicy) {
+        case 'terminate-children':
+          // Terminate all children (default behavior)
+          childrenToTerminate.push(...instance.childrenIds);
+          break;
+
+        case 'orphan-children':
+          // Leave children running without parent
+          childrenToOrphan.push(...instance.childrenIds);
+          for (const childId of childrenToOrphan) {
+            const child = this.deps.getInstance(childId);
+            if (child) {
+              child.parentId = null;
+              console.log(`[Supervision] Orphaned child instance ${childId}`);
+            }
+          }
+          break;
+
+        case 'reparent-to-root':
+          // Reparent children to root (no parent)
+          for (const childId of instance.childrenIds) {
+            const child = this.deps.getInstance(childId);
+            if (child) {
+              child.parentId = null;
+              child.depth = 0;
+              console.log(`[Supervision] Reparented child instance ${childId} to root`);
+            }
+          }
+          break;
+      }
+
+      // Terminate children that need to be terminated
+      for (const childId of childrenToTerminate) {
         await this.terminateInstance(childId, graceful);
       }
+
+      // Clear the children list
+      instance.childrenIds = [];
+
+      // Unregister from supervisor tree
+      const supervisorTree = getSupervisorTree();
+      supervisorTree.unregisterInstance(instanceId);
 
       // Unregister from orchestration
       this.deps.unregisterOrchestration(instanceId);
@@ -520,12 +621,24 @@ export class InstanceLifecycleManager extends EventEmitter {
 
     const newYoloMode = !instance.yoloMode;
     console.log(`[InstanceLifecycleManager] Toggling YOLO mode for ${instanceId}: ${instance.yoloMode} -> ${newYoloMode}`);
+    console.log(`[InstanceLifecycleManager] Current adapter exists: ${!!this.deps.getAdapter(instanceId)}`);
+
+    // Check if there's actually a conversation to resume
+    // If outputBuffer is empty (or only contains system messages), start fresh instead of resuming
+    const hasConversation = instance.outputBuffer.some(
+      (msg) => msg.type === 'user' || msg.type === 'assistant'
+    );
+    console.log(`[InstanceLifecycleManager] Has conversation to resume: ${hasConversation}, outputBuffer length: ${instance.outputBuffer.length}`);
 
     // Terminate existing adapter
     const oldAdapter = this.deps.getAdapter(instanceId);
     if (oldAdapter) {
-      await oldAdapter.terminate(true);
+      console.log(`[InstanceLifecycleManager] Terminating old adapter for ${instanceId}`);
+      // Delete from map FIRST to prevent race condition with exit handler
       this.deps.deleteAdapter(instanceId);
+      console.log(`[InstanceLifecycleManager] Old adapter deleted from map, now terminating`);
+      await oldAdapter.terminate(true);
+      console.log(`[InstanceLifecycleManager] Old adapter terminated`);
     }
 
     instance.yoloMode = newYoloMode;
@@ -561,24 +674,33 @@ export class InstanceLifecycleManager extends EventEmitter {
       yoloMode: newYoloMode,
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      resume: true
+      // Only resume if there's actually a conversation to continue
+      resume: hasConversation
     };
+    console.log(`[InstanceLifecycleManager] Spawn options: resume=${spawnOptions.resume}, sessionId=${spawnOptions.sessionId}`);
 
     const adapter = createCliAdapter(cliType, spawnOptions);
 
+    console.log(`[InstanceLifecycleManager] Setting up adapter events for ${instanceId}`);
     this.deps.setupAdapterEvents(instanceId, adapter);
+    console.log(`[InstanceLifecycleManager] Storing new adapter for ${instanceId}`);
     this.deps.setAdapter(instanceId, adapter);
+    console.log(`[InstanceLifecycleManager] New adapter stored, adapter exists: ${!!this.deps.getAdapter(instanceId)}`);
 
     try {
+      console.log(`[InstanceLifecycleManager] Spawning new adapter for ${instanceId}`);
       const pid = await adapter.spawn();
       instance.processId = pid;
       instance.status = 'idle';
       console.log(`[InstanceLifecycleManager] YOLO mode toggled successfully, PID: ${pid}`);
+      console.log(`[InstanceLifecycleManager] Adapter still exists after spawn: ${!!this.deps.getAdapter(instanceId)}`);
 
       const modeMessage = newYoloMode
         ? '[System: YOLO mode enabled - all tool permissions are now auto-approved.]'
         : '[System: YOLO mode disabled - tool permissions will now require approval.]';
+      console.log(`[InstanceLifecycleManager] Sending mode message to adapter`);
       await adapter.sendInput(modeMessage);
+      console.log(`[InstanceLifecycleManager] Mode message sent, adapter exists: ${!!this.deps.getAdapter(instanceId)}`);
     } catch (error) {
       instance.status = 'error';
       console.error('[InstanceLifecycleManager] Failed to toggle YOLO mode:', error);
@@ -591,6 +713,7 @@ export class InstanceLifecycleManager extends EventEmitter {
       yoloMode: newYoloMode
     });
 
+    console.log(`[InstanceLifecycleManager] toggleYoloMode complete, final adapter check: ${!!this.deps.getAdapter(instanceId)}`);
     return instance;
   }
 

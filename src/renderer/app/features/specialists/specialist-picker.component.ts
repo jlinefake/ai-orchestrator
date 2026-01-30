@@ -18,7 +18,6 @@ import {
 import { SlicePipe } from '@angular/common';
 import type {
   SpecialistProfile,
-  SpecialistCommand,
 } from '../../../../shared/types/specialist.types';
 
 @Component({
@@ -62,6 +61,10 @@ import type {
             [class.selected]="selectedId() === specialist.id"
             [style.--accent-color]="specialist.color"
             (click)="selectSpecialist(specialist)"
+            (keydown.enter)="selectSpecialist(specialist)"
+            (keydown.space)="selectSpecialist(specialist)"
+            tabindex="0"
+            role="button"
           >
             <!-- Icon -->
             <div class="specialist-icon">

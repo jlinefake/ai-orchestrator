@@ -25,13 +25,12 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 // Import visualization components
-import { DebateNetworkGraphComponent, type NetworkNode, type NetworkLink } from './components/debate-network-graph.component';
-import { DebateTimelineComponent, type AgentPosition } from './components/debate-timeline.component';
+import { DebateNetworkGraphComponent } from './components/debate-network-graph.component';
+import { DebateTimelineComponent } from './components/debate-timeline.component';
 import { DebateConsensusHeatmapComponent, type TopicConsensus } from './components/debate-consensus-heatmap.component';
 import { DebateConfigPanelComponent, type DebateConfig } from './components/debate-config-panel.component';
 import { DebateExportService } from './services/debate-export.service';
 import { DebateStreamingService, type StreamingContribution } from './services/debate-streaming.service';
-import type { DebateResult, DebateContribution } from '../../../../shared/types/debate.types';
 
 type VisualizationView = 'network' | 'timeline' | 'heatmap' | 'split';
 
@@ -727,7 +726,7 @@ export class EnhancedDebateVisualizationComponent implements OnInit, OnDestroy {
     // Subscribe to streaming events
     this.streamingService.getEventStream()
       .pipe(takeUntil(this.destroy$))
-      .subscribe(event => {
+      .subscribe(() => {
         // Handle events if needed
       });
   }
