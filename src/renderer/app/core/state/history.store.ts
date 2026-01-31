@@ -3,7 +3,7 @@
  */
 
 import { Injectable, inject, signal, computed } from '@angular/core';
-import { ElectronIpcService } from '../services/ipc';
+import { HistoryIpcService } from '../services/ipc/history-ipc.service';
 import type { ConversationHistoryEntry, ConversationData } from '../../../../shared/types/history.types';
 
 interface HistoryState {
@@ -17,7 +17,7 @@ interface HistoryState {
 
 @Injectable({ providedIn: 'root' })
 export class HistoryStore {
-  private ipc = inject(ElectronIpcService);
+  private ipc = inject(HistoryIpcService);
 
   // Private mutable state
   private state = signal<HistoryState>({

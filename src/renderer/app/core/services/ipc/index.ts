@@ -32,6 +32,7 @@ export { LoggingIpcService } from './logging-ipc.service';
 export { StatsIpcService } from './stats-ipc.service';
 export { SearchIpcService } from './search-ipc.service';
 export { TrainingIpcService } from './training-ipc.service';
+export { RecentDirectoriesIpcService } from './recent-directories-ipc.service';
 
 // Import services for facade
 import { Injectable, inject } from '@angular/core';

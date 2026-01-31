@@ -7,15 +7,20 @@ import {
   input,
   output,
   computed,
+  inject,
+  OnInit,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { StatusIndicatorComponent } from '../instance-list/status-indicator.component';
+import { RecentDirectoriesDropdownComponent } from '../../shared/components/recent-directories-dropdown/recent-directories-dropdown.component';
+import { SkillStore } from '../../core/state/skill.store';
+import { HookStore } from '../../core/state/hook.store';
 import type { Instance } from '../../core/state/instance.store';
 
 @Component({
   selector: 'app-instance-header',
   standalone: true,
-  imports: [StatusIndicatorComponent],
+  imports: [StatusIndicatorComponent, RecentDirectoriesDropdownComponent],
   template: `
     <div class="detail-header">
       <div class="instance-identity">
@@ -107,15 +112,10 @@ import type { Instance } from '../../core/state/instance.store';
             {{ agentModeName() }}
           </button>
           <span class="separator">•</span>
-          <button
-            class="working-dir-btn mono truncate"
-            [title]="
-              instance().workingDirectory || 'Click to select a working folder'
-            "
-            (click)="selectFolder.emit()"
-          >
-            📁 {{ instance().workingDirectory || 'No folder selected' }}
-          </button>
+          <app-recent-directories-dropdown
+            [currentPath]="instance().workingDirectory || ''"
+            (folderSelected)="selectFolder.emit($event)"
+          />
           <span class="separator">•</span>
           <button
             class="yolo-badge"
@@ -132,6 +132,25 @@ import type { Instance } from '../../core/state/instance.store';
           >
             ⚡ YOLO {{ instance().yoloMode ? 'ON' : 'OFF' }}
           </button>
+          @if (activeSkillCount() > 0 || enabledHookCount() > 0) {
+            <span class="separator">•</span>
+          }
+          @if (activeSkillCount() > 0) {
+            <span
+              class="skills-badge"
+              [title]="activeSkillsTooltip()"
+            >
+              🧩 {{ activeSkillCount() }} skill{{ activeSkillCount() > 1 ? 's' : '' }}
+            </span>
+          }
+          @if (enabledHookCount() > 0) {
+            <span
+              class="hooks-badge"
+              [title]="enabledHooksTooltip()"
+            >
+              🪝 {{ enabledHookCount() }} hook{{ enabledHookCount() > 1 ? 's' : '' }}
+            </span>
+          }
         </div>
       </div>
 
@@ -465,6 +484,28 @@ import type { Instance } from '../../core/state/instance.store';
         }
       }
 
+      .skills-badge {
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+      }
+
+      .hooks-badge {
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: white;
+        box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
+      }
+
       @keyframes glow {
         0%,
         100% {
@@ -559,7 +600,10 @@ import type { Instance } from '../../core/state/instance.store';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class InstanceHeaderComponent {
+export class InstanceHeaderComponent implements OnInit {
+  private skillStore = inject(SkillStore);
+  private hookStore = inject(HookStore);
+
   instance = input.required<Instance>();
   isEditingName = input(false);
   isChangingMode = input(false);
@@ -568,13 +612,36 @@ export class InstanceHeaderComponent {
   selectedCopilotModel = input('claude-sonnet-4-5');
   copilotModels = input<{ id: string; name: string }[]>([]);
 
+  // Skills and hooks counts
+  activeSkillCount = computed(() => this.skillStore.activeSkillCount());
+  enabledHookCount = computed(() => this.hookStore.enabledHookCount());
+
+  // Tooltips for badges
+  activeSkillsTooltip = computed(() => {
+    const skills = this.skillStore.getActiveSkillBundles();
+    if (skills.length === 0) return '';
+    return 'Active skills:\n' + skills.map(s => `• ${s.metadata.name}`).join('\n');
+  });
+
+  enabledHooksTooltip = computed(() => {
+    const hooks = this.hookStore.enabledHooks();
+    if (hooks.length === 0) return '';
+    return 'Enabled hooks:\n' + hooks.map(h => `• ${h.name}`).join('\n');
+  });
+
+  ngOnInit(): void {
+    // Load skills and hooks on init
+    this.skillStore.discoverSkills();
+    this.hookStore.loadHooks();
+  }
+
   // Actions
   startEditName = output<void>();
   cancelEditName = output<void>();
   saveName = output<string>();
   cycleAgentMode = output<void>();
   toggleYolo = output<void>();
-  selectFolder = output<void>();
+  selectFolder = output<string>();
   interrupt = output<void>();
   restart = output<void>();
   terminate = output<void>();

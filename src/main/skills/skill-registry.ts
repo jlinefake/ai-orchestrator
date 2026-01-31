@@ -7,7 +7,6 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
-  SkillMetadata,
   SkillBundle,
   LoadedSkill,
   SkillMatch,
@@ -32,6 +31,25 @@ export class SkillRegistry extends EventEmitter {
 
   private constructor() {
     super();
+  }
+
+  // ============ Built-in Skills Path ============
+
+  /**
+   * Get the path to built-in orchestrator skills
+   */
+  getBuiltinSkillsPath(): string {
+    // Built-in skills are in src/main/skills/builtin relative to the app
+    return path.join(__dirname, 'builtin');
+  }
+
+  /**
+   * Discover skills including built-in orchestrator skills
+   */
+  async discoverSkillsWithBuiltins(searchPaths: string[]): Promise<SkillBundle[]> {
+    const builtinPath = this.getBuiltinSkillsPath();
+    const allPaths = [builtinPath, ...searchPaths];
+    return this.discoverSkills(allPaths);
   }
 
   // ============ Discovery ============

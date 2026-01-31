@@ -10,6 +10,7 @@ import {
   ProjectConfig,
   ResolvedConfig,
   PROJECT_CONFIG_FILE,
+  LEGACY_PROJECT_CONFIG_FILE,
   mergeConfigs,
 } from '../../../shared/types/settings.types';
 import { getSettingsManager } from './settings-manager';
@@ -19,16 +20,25 @@ const projectConfigCache = new Map<string, { config: ProjectConfig; mtime: numbe
 
 /**
  * Find the project config file by searching up the directory tree
+ * Checks for new name first, then falls back to legacy name for backward compatibility
  */
 export function findProjectConfigPath(startDir: string): string | null {
   let currentDir = path.resolve(startDir);
   const root = path.parse(currentDir).root;
 
   while (currentDir !== root) {
+    // Check new config name first
     const configPath = path.join(currentDir, PROJECT_CONFIG_FILE);
     if (fs.existsSync(configPath)) {
       return configPath;
     }
+
+    // Fall back to legacy config name for backward compatibility
+    const legacyConfigPath = path.join(currentDir, LEGACY_PROJECT_CONFIG_FILE);
+    if (fs.existsSync(legacyConfigPath)) {
+      return legacyConfigPath;
+    }
+
     currentDir = path.dirname(currentDir);
   }
 

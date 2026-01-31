@@ -50,12 +50,14 @@ const DEFAULT_OPTIONS: RemoteConfigOptions = {
 };
 
 /**
- * Well-known endpoint paths
+ * Well-known endpoint paths (includes legacy paths for backward compatibility)
  */
 const WELL_KNOWN_PATHS = [
-  '/.well-known/claude-orchestrator.json',
+  '/.well-known/ai-orchestrator.json',
+  '/.well-known/claude-orchestrator.json',  // Legacy
   '/.well-known/opencode.json',
-  '/.claude-orchestrator.json',
+  '/.ai-orchestrator.json',
+  '/.claude-orchestrator.json',  // Legacy
 ];
 
 /**
@@ -274,7 +276,7 @@ export class RemoteConfigManager {
     branch: string = 'main',
     options: RemoteConfigOptions = {}
   ): Promise<RemoteConfigResult> {
-    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.claude-orchestrator.json`;
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/.ai-orchestrator.json`;
     const result = await this.fetchFromUrl(url, options);
     result.source.type = 'github';
     return result;

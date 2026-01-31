@@ -17,16 +17,35 @@ import {
   UniqueInsight,
   ResponseRanking,
   PersonalityType,
+  AgentHealthConfig,
+  VerificationProgress,
   createDefaultVerificationConfig,
 } from '../../shared/types/verification.types';
-import type { DebateSessionRound, DebateRoundType, DebateContribution } from '../../shared/types/debate.types';
+import type { DebateSessionRound } from '../../shared/types/debate.types';
 import { PERSONALITY_PROMPTS, selectPersonalities } from './personalities';
+import { getVerificationCache, type VerificationCache } from './verification-cache';
+import { getConfidenceAnalyzer, type ConfidenceAnalyzer } from './confidence-analyzer';
+import { getEmbeddingService as getOrchestrationEmbeddingService, type EmbeddingService, type SemanticClusterConfig, type ResponseCluster } from './embedding-service';
+
+export class InsufficientAgentsError extends Error {
+  constructor(message: string, public successfulAgents: number, public minRequired: number) {
+    super(message);
+    this.name = 'InsufficientAgentsError';
+  }
+}
 
 export class MultiVerifyCoordinator extends EventEmitter {
   private static instance: MultiVerifyCoordinator;
   private activeVerifications: Map<string, VerificationRequest> = new Map();
   private results: Map<string, VerificationResult> = new Map();
   private defaultConfig: Partial<VerificationConfig> = {};
+  private agentRetryCount: Map<string, number> = new Map();
+  private failedAgents: Set<string> = new Set();
+
+  // Integrated services
+  private cache: VerificationCache;
+  private confidenceAnalyzer: ConfidenceAnalyzer;
+  private embeddingService: EmbeddingService;
 
   static getInstance(): MultiVerifyCoordinator {
     if (!this.instance) {
@@ -37,6 +56,10 @@ export class MultiVerifyCoordinator extends EventEmitter {
 
   private constructor() {
     super();
+    // Initialize integrated services
+    this.cache = getVerificationCache();
+    this.confidenceAnalyzer = getConfidenceAnalyzer();
+    this.embeddingService = getOrchestrationEmbeddingService();
   }
 
   /**
@@ -52,6 +75,87 @@ export class MultiVerifyCoordinator extends EventEmitter {
   getDefaultConfig(): Partial<VerificationConfig> {
     return { ...this.defaultConfig };
   }
+
+  // ============ Health & Failure Handling ============
+
+  private getHealthConfig(config: VerificationConfig): AgentHealthConfig {
+    return (
+      config.healthConfig || {
+        maxRetries: 2,
+        retryDelayMs: 1000,
+        timeoutMs: config.timeout,
+        minSuccessfulAgents: 2,
+      }
+    );
+  }
+
+  private async handleAgentFailure(
+    request: VerificationRequest,
+    agentId: string,
+    error: Error
+  ): Promise<'retry' | 'failed'> {
+    const config = request.config;
+    const healthConfig = this.getHealthConfig(config);
+
+    const currentRetries = this.agentRetryCount.get(agentId) || 0;
+
+    if (currentRetries < healthConfig.maxRetries) {
+      // Delay before retry
+      await new Promise((resolve) => setTimeout(resolve, healthConfig.retryDelayMs));
+      this.agentRetryCount.set(agentId, currentRetries + 1);
+      return 'retry';
+    } else {
+      // Mark agent as failed
+      this.failedAgents.add(agentId);
+      return 'failed';
+    }
+  }
+
+  private checkSufficientAgents(request: VerificationRequest, successfulCount: number): void {
+    const config = request.config;
+    const healthConfig = this.getHealthConfig(config);
+
+    if (successfulCount < healthConfig.minSuccessfulAgents) {
+      throw new InsufficientAgentsError(
+        `Insufficient agents succeeded. Required: ${healthConfig.minSuccessfulAgents}, Succeeded: ${successfulCount}`,
+        successfulCount,
+        healthConfig.minSuccessfulAgents
+      );
+    }
+  }
+
+  private resetAgentHealth(requestId: string): void {
+    // Clear retry counts and failed agents for new verification
+    const keysToDelete = Array.from(this.agentRetryCount.keys()).filter((k) => k.includes(requestId));
+    keysToDelete.forEach((k) => this.agentRetryCount.delete(k));
+
+    const failedToDelete = Array.from(this.failedAgents).filter((k) => k.includes(requestId));
+    failedToDelete.forEach((k) => this.failedAgents.delete(k));
+  }
+
+  private emitProgress(
+    request: VerificationRequest,
+    phase: VerificationProgress['phase'],
+    completedAgents: number,
+    totalAgents: number,
+    currentActivity: string,
+    partialResults?: Partial<VerificationResult>
+  ): void {
+    const progress: VerificationProgress = {
+      phase,
+      completedAgents,
+      totalAgents,
+      currentActivity,
+      partialResults,
+      timestamp: Date.now(),
+    };
+
+    this.emit('verification:progress', {
+      requestId: request.id,
+      progress,
+    });
+  }
+
 
   // ============ Verification Lifecycle ============
 
@@ -83,12 +187,16 @@ export class MultiVerifyCoordinator extends EventEmitter {
       taskType,
     };
 
+    // Reset health tracking for this verification
+    this.resetAgentHealth(request.id);
+
     this.activeVerifications.set(request.id, request);
     this.emit('verification:started', request);
 
     // Run verification asynchronously
     this.runVerification(request).catch((error) => {
       this.emit('verification:error', { request, error });
+      this.activeVerifications.delete(request.id);
     });
 
     return request.id;
@@ -97,6 +205,18 @@ export class MultiVerifyCoordinator extends EventEmitter {
   private async runVerification(request: VerificationRequest): Promise<void> {
     const startTime = Date.now();
     const { config } = request;
+
+    // Check cache first
+    const promptHash = this.cache.hashPrompt(request.prompt);
+    const cached = await this.cache.getCached(promptHash);
+    if (cached) {
+      // Return cached result
+      this.results.set(request.id, cached.result);
+      this.activeVerifications.delete(request.id);
+      this.emitProgress(request, 'complete', cached.result.responses.length, cached.result.responses.length, 'Returned cached result', cached.result);
+      this.emit('verification:completed', { ...cached.result, id: request.id, fromCache: true });
+      return;
+    }
 
     // Prepare agent configurations with diverse perspectives
     const agentConfigs = Array.from({ length: config.agentCount }, (_, i) => ({
@@ -112,32 +232,55 @@ export class MultiVerifyCoordinator extends EventEmitter {
       personalities: agentConfigs.map((a) => a.personality),
     });
 
+    // Emit progress: spawning phase
+    this.emitProgress(request, 'spawning', 0, config.agentCount, 'Preparing agents for execution');
+
     // Run all agents in parallel with timeout
     const responses = await Promise.all(agentConfigs.map((agentConfig) => this.runAgent(request, agentConfig)));
+
+    // Emit progress: collecting phase
+    const successfulCount = responses.filter((r) => !r.error).length;
+    this.emitProgress(request, 'collecting', successfulCount, config.agentCount, `Collected ${successfulCount} agent responses`);
+
+    // Filter out failed agents and check if we have enough successful responses
+    const successfulResponses = responses.filter((r) => !r.error && !this.failedAgents.has(r.agentId));
+    this.checkSufficientAgents(request, successfulResponses.length);
+
+    // Emit progress: analyzing phase
+    this.emitProgress(request, 'analyzing', successfulCount, config.agentCount, 'Analyzing agent responses');
 
     // Apply synthesis strategy
     let synthesizedResponse: string;
     let synthesisConfidence: number;
     let debateRounds: DebateSessionRound[] | undefined;
 
-    const analysis = await this.analyzeResponses(responses, config);
+    const analysis = await this.analyzeResponses(successfulResponses, config);
+
+    // Emit progress: synthesizing phase
+    this.emitProgress(
+      request,
+      'synthesizing',
+      successfulCount,
+      config.agentCount,
+      `Synthesizing responses using ${config.synthesisStrategy} strategy`
+    );
 
     switch (config.synthesisStrategy) {
       case 'debate':
-        const debateResult = await this.runDebate(request, responses, analysis);
+        const debateResult = await this.runDebate(request, successfulResponses, analysis);
         synthesizedResponse = debateResult.synthesizedResponse;
         synthesisConfidence = debateResult.confidence;
         debateRounds = debateResult.rounds;
         break;
 
       case 'hierarchical':
-        const hierResult = await this.synthesizeHierarchical(request, responses, analysis);
+        const hierResult = await this.synthesizeHierarchical(request, successfulResponses, analysis);
         synthesizedResponse = hierResult.synthesizedResponse;
         synthesisConfidence = hierResult.confidence;
         break;
 
       default:
-        const result = await this.synthesize(request, responses, analysis, config.synthesisStrategy);
+        const result = await this.synthesize(request, successfulResponses, analysis, config.synthesisStrategy);
         synthesizedResponse = result.synthesizedResponse;
         synthesisConfidence = result.confidence;
     }
@@ -145,20 +288,35 @@ export class MultiVerifyCoordinator extends EventEmitter {
     const verificationResult: VerificationResult = {
       id: request.id,
       request,
-      responses,
+      responses: successfulResponses,
       analysis,
       synthesizedResponse,
       synthesisMethod: config.synthesisStrategy,
       synthesisConfidence,
       totalDuration: Date.now() - startTime,
-      totalTokens: responses.reduce((sum, r) => sum + r.tokens, 0),
-      totalCost: responses.reduce((sum, r) => sum + r.cost, 0),
+      totalTokens: successfulResponses.reduce((sum, r) => sum + r.tokens, 0),
+      totalCost: successfulResponses.reduce((sum, r) => sum + r.cost, 0),
       completedAt: Date.now(),
       debateRounds,
     };
 
     this.results.set(request.id, verificationResult);
     this.activeVerifications.delete(request.id);
+
+    // Cache the result for future use
+    await this.cache.cache(verificationResult).catch((err) => {
+      console.warn('[MultiVerifyCoordinator] Failed to cache verification result:', err);
+    });
+
+    // Emit progress: complete phase
+    this.emitProgress(
+      request,
+      'complete',
+      successfulCount,
+      config.agentCount,
+      'Verification complete',
+      verificationResult
+    );
 
     this.emit('verification:completed', verificationResult);
   }
@@ -210,7 +368,17 @@ export class MultiVerifyCoordinator extends EventEmitter {
         cost: result.cost,
       };
     } catch (error: unknown) {
-      const err = error as { message?: string };
+      const err = error as Error;
+
+      // Attempt to handle failure with retry logic
+      const failureAction = await this.handleAgentFailure(request, agentConfig.agentId, err);
+
+      if (failureAction === 'retry') {
+        // Recursively retry the agent
+        return this.runAgent(request, agentConfig);
+      }
+
+      // Agent failed permanently
       return {
         agentId: agentConfig.agentId,
         agentIndex: agentConfig.agentIndex,
@@ -302,11 +470,17 @@ Brief summary of your reasoning approach.`;
   }
 
   private extractConfidence(response: string): number {
-    const confidenceMatch = response.match(/Overall Confidence[:\s]*(\d+)%?/i);
-    if (confidenceMatch) {
-      return parseInt(confidenceMatch[1]) / 100;
-    }
-    return 0.5; // Default medium confidence
+    // Use the confidence analyzer for a quick explicit check
+    // The full multi-signal analysis is done in analyzeResponses
+    return this.confidenceAnalyzer.findExplicitConfidence(response);
+  }
+
+  /**
+   * Enhanced confidence extraction using multi-signal analysis
+   */
+  private async extractEnhancedConfidence(response: AgentResponse): Promise<number> {
+    const assessment = await this.confidenceAnalyzer.extractConfidence(response);
+    return assessment.combined;
   }
 
   // ============ Analysis ============
@@ -387,7 +561,7 @@ Brief summary of your reasoning approach.`;
 
     for (const response of responses) {
       for (const point of response.keyPoints) {
-        // Normalize for comparison (simplified - production should use embeddings)
+        // Normalize for comparison (simplified fallback)
         const normalized = point.content
           .toLowerCase()
           .replace(/[^\w\s]/g, '')
@@ -402,6 +576,22 @@ Brief summary of your reasoning approach.`;
     }
 
     return clusters;
+  }
+
+  /**
+   * Enhanced response clustering using semantic embeddings
+   */
+  async clusterResponsesSemanticaly(
+    responses: AgentResponse[],
+    config?: Partial<SemanticClusterConfig>
+  ): Promise<ResponseCluster[]> {
+    const clusterConfig: SemanticClusterConfig = {
+      similarityThreshold: config?.similarityThreshold ?? 0.7,
+      embeddingModel: config?.embeddingModel ?? 'simple',
+      clusteringAlgorithm: config?.clusteringAlgorithm ?? 'dbscan',
+    };
+
+    return this.embeddingService.clusterResponses(responses, clusterConfig);
   }
 
   private detectDisagreements(responses: AgentResponse[]): DisagreementPoint[] {

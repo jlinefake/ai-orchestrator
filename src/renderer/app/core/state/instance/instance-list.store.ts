@@ -285,6 +285,25 @@ export class InstanceListStore {
   }
 
   /**
+   * Set working directory for an instance (terminates and recreates)
+   * Similar to selectWorkingDirectory but accepts a path directly
+   */
+  async setWorkingDirectory(instanceId: string, folder: string): Promise<void> {
+    const instance = this.stateService.getInstance(instanceId);
+    if (!instance || !folder) return;
+
+    const { displayName, parentId, yoloMode } = instance;
+    await this.terminateInstance(instanceId);
+
+    await this.createInstance({
+      workingDirectory: folder,
+      displayName,
+      parentId: parentId || undefined,
+      yoloMode,
+    });
+  }
+
+  /**
    * Set output messages for an instance (used for restoring history)
    */
   setInstanceMessages(instanceId: string, messages: OutputMessage[]): void {

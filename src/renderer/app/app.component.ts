@@ -88,6 +88,6 @@ export class AppComponent implements OnInit {
 
     // Signal app ready
     await this.ipcService.appReady();
-    console.log('Claude Orchestrator UI ready');
+    console.log('AI Orchestrator UI ready');
   }
 }

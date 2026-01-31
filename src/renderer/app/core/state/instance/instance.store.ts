@@ -292,6 +292,11 @@ export class InstanceStore implements OnDestroy {
     return this.listStore.selectWorkingDirectory(instanceId);
   }
 
+  /** Set working directory for an instance */
+  async setWorkingDirectory(instanceId: string, folder: string): Promise<void> {
+    return this.listStore.setWorkingDirectory(instanceId, folder);
+  }
+
   /** Toggle YOLO mode for an instance */
   async toggleYoloMode(instanceId: string): Promise<void> {
     return this.listStore.toggleYoloMode(instanceId);

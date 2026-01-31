@@ -253,20 +253,73 @@ export class DebateCoordinator extends EventEmitter {
     this.emit('debate:round-complete', { debateId: debate.id, round });
   }
 
-  // ============ Response Generation (Placeholder) ============
+  // ============ Response Generation (Real LLM Integration) ============
 
   private async generateInitialResponse(
     debate: ActiveDebate,
     agentIndex: number,
     temperature: number
   ): Promise<DebateContribution> {
-    // Placeholder - actual implementation calls LLM
+    const agentId = `agent-${agentIndex}`;
+
+    // Build prompt for initial response
+    const prompt = this.buildInitialResponsePrompt(debate, agentIndex);
+
+    // Emit event to request LLM generation
+    const result = await new Promise<{ response: string; tokens: number }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Initial response generation timed out'));
+      }, debate.config.timeout);
+
+      this.emit('debate:generate-response', {
+        debateId: debate.id,
+        agentId,
+        agentIndex,
+        temperature,
+        prompt,
+        context: debate.context,
+        callback: (response: string, tokens: number) => {
+          clearTimeout(timeout);
+          resolve({ response, tokens });
+        },
+      });
+    });
+
+    // Extract confidence and reasoning from response
+    const confidence = this.extractConfidenceFromResponse(result.response);
+    const reasoning = this.extractReasoningFromResponse(result.response);
+
     return {
-      agentId: `agent-${agentIndex}`,
-      content: `Initial response from agent ${agentIndex} for: ${debate.query}`,
-      confidence: 0.7 + Math.random() * 0.2,
-      reasoning: 'Based on initial analysis',
+      agentId,
+      content: result.response,
+      confidence,
+      reasoning,
     };
+  }
+
+  private buildInitialResponsePrompt(debate: ActiveDebate, agentIndex: number): string {
+    const context = debate.context ? `\n\n## Context\n${debate.context}` : '';
+
+    return `You are Agent ${agentIndex} participating in a multi-agent debate to address the following query.
+
+## Query
+${debate.query}${context}
+
+## Your Task
+Provide your independent response to this query. You will be participating in a debate with other agents, so:
+1. Be thorough and clear in your reasoning
+2. Explicitly state your confidence level (0-100%)
+3. Highlight key assumptions or uncertainties
+4. Consider multiple perspectives
+
+## Response Format
+Provide your response, then end with:
+
+## Confidence
+State your overall confidence in this response (0-100%): X%
+
+## Reasoning Summary
+Brief summary of your reasoning approach and key considerations.`;
   }
 
   private async generateCritiques(
@@ -274,19 +327,105 @@ export class DebateCoordinator extends EventEmitter {
     agentIndex: number,
     contributions: DebateContribution[]
   ): Promise<AgentCritique[]> {
+    const agentId = `agent-${agentIndex}`;
+
+    // Build prompt for critique generation
+    const prompt = this.buildCritiquePrompt(debate, agentIndex, contributions);
+
+    // Emit event to request LLM generation
+    const result = await new Promise<{ response: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Critique generation timed out'));
+      }, debate.config.timeout);
+
+      this.emit('debate:generate-critiques', {
+        debateId: debate.id,
+        agentId,
+        agentIndex,
+        prompt,
+        context: debate.context,
+        callback: (response: string) => {
+          clearTimeout(timeout);
+          resolve({ response });
+        },
+      });
+    });
+
+    // Parse critiques from response
+    return this.parseCritiquesFromResponse(result.response, contributions);
+  }
+
+  private buildCritiquePrompt(
+    debate: ActiveDebate,
+    agentIndex: number,
+    contributions: DebateContribution[]
+  ): string {
+    const otherContributions = contributions
+      .filter((_, i) => i !== agentIndex)
+      .map(
+        (c, i) => `### ${c.agentId}'s Response
+${c.content}
+(Confidence: ${(c.confidence * 100).toFixed(0)}%)`
+      )
+      .join('\n\n');
+
+    return `You are Agent ${agentIndex} in a debate. Your task is to critically analyze the other agents' responses.
+
+## Original Query
+${debate.query}
+
+## Other Agents' Responses
+${otherContributions}
+
+## Your Task
+Provide constructive critiques of each response. For each agent, identify:
+1. Potential issues or weaknesses in their reasoning
+2. Alternative perspectives they may have missed
+3. The severity of any concerns (major/minor/suggestion)
+
+## Response Format
+For each agent you're critiquing, use this format:
+
+### Critique of [agentId]
+**Issue**: [Brief description of the issue]
+**Severity**: [major/minor/suggestion]
+**Counterpoint**: [Alternative perspective or approach]
+
+---
+
+Provide your critiques:`;
+  }
+
+  private parseCritiquesFromResponse(response: string, contributions: DebateContribution[]): AgentCritique[] {
     const critiques: AgentCritique[] = [];
 
-    // Critique other agents' responses
-    for (let i = 0; i < contributions.length; i++) {
-      if (i === agentIndex) continue; // Skip self
+    // Look for critique sections
+    const critiqueMatches = response.matchAll(/### Critique of (agent-\d+)\s+\*\*Issue\*\*:\s*(.+?)\s+\*\*Severity\*\*:\s*(major|minor|suggestion)\s+\*\*Counterpoint\*\*:\s*(.+?)(?=###|$)/gis);
 
-      // Placeholder - actual implementation uses LLM
+    for (const match of critiqueMatches) {
+      const targetAgentId = match[1];
+      const issue = match[2].trim();
+      const severity = match[3].toLowerCase() as CritiqueSeverity;
+      const counterpoint = match[4].trim();
+
       critiques.push({
-        targetAgentId: `agent-${i}`,
-        issue: `Potential issue with agent ${i}'s approach`,
-        severity: 'minor' as CritiqueSeverity,
-        counterpoint: 'Alternative approach suggested',
+        targetAgentId,
+        issue,
+        severity,
+        counterpoint,
       });
+    }
+
+    // Fallback: if no structured critiques found, create generic ones for other agents
+    if (critiques.length === 0) {
+      for (const contribution of contributions) {
+        critiques.push({
+          targetAgentId: contribution.agentId,
+          issue: 'Analysis needed',
+          severity: 'minor',
+          counterpoint: 'Further consideration suggested',
+        });
+      }
     }
 
     return critiques;
@@ -297,22 +436,185 @@ export class DebateCoordinator extends EventEmitter {
     agentIndex: number,
     critiquesReceived: AgentCritique[]
   ): Promise<DebateContribution> {
-    // Placeholder - actual implementation uses LLM
-    const defenses = critiquesReceived.map(c => `Defense against: ${c.issue}`);
+    const agentId = `agent-${agentIndex}`;
+
+    // Get original response
+    const initialRound = debate.rounds.find(r => r.type === 'initial');
+    const originalContribution = initialRound?.contributions[agentIndex];
+
+    // Build prompt for defense generation
+    const prompt = this.buildDefensePrompt(debate, agentIndex, originalContribution, critiquesReceived);
+
+    // Emit event to request LLM generation
+    const result = await new Promise<{ response: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Defense generation timed out'));
+      }, debate.config.timeout);
+
+      this.emit('debate:generate-defense', {
+        debateId: debate.id,
+        agentId,
+        agentIndex,
+        prompt,
+        context: debate.context,
+        callback: (response: string) => {
+          clearTimeout(timeout);
+          resolve({ response });
+        },
+      });
+    });
+
+    // Extract defense points, confidence, and reasoning
+    const defenses = this.extractDefensesFromResponse(result.response);
+    const confidence = this.extractConfidenceFromResponse(result.response);
+    const reasoning = this.extractReasoningFromResponse(result.response);
 
     return {
-      agentId: `agent-${agentIndex}`,
-      content: `Revised position from agent ${agentIndex}`,
+      agentId,
+      content: result.response,
       defenses,
-      confidence: 0.75 + Math.random() * 0.2,
-      reasoning: 'Addressed critiques and refined position',
+      confidence,
+      reasoning,
     };
   }
 
+  private buildDefensePrompt(
+    debate: ActiveDebate,
+    agentIndex: number,
+    originalContribution: DebateContribution | undefined,
+    critiquesReceived: AgentCritique[]
+  ): string {
+    const critiquesList = critiquesReceived
+      .map(
+        (c) => `- **From ${c.targetAgentId}**: ${c.issue} (Severity: ${c.severity})
+  Counterpoint: ${c.counterpoint}`
+      )
+      .join('\n');
+
+    const originalResponse = originalContribution ? `\n\n## Your Original Response\n${originalContribution.content}` : '';
+
+    return `You are Agent ${agentIndex} in a debate. Other agents have critiqued your position.
+
+## Original Query
+${debate.query}${originalResponse}
+
+## Critiques You Received
+${critiquesList}
+
+## Your Task
+1. Address each critique thoughtfully
+2. Defend your position where it remains valid
+3. Acknowledge valid concerns and revise your position if needed
+4. Provide your updated/refined response
+
+## Response Format
+Provide your defense and revised position, then end with:
+
+## Defense Points
+- [List each specific defense against the critiques]
+
+## Confidence
+State your confidence in your revised position (0-100%): X%
+
+## Reasoning Summary
+Brief summary of how you addressed the critiques.`;
+  }
+
+  private extractDefensesFromResponse(response: string): string[] {
+    const defenses: string[] = [];
+
+    // Look for defense points section
+    const defenseMatch = response.match(/## Defense Points\s+([\s\S]*?)(?=\n##|$)/i);
+    if (defenseMatch) {
+      const lines = defenseMatch[1].split('\n').filter((l) => l.trim().startsWith('-'));
+      for (const line of lines) {
+        defenses.push(line.replace(/^-\s*/, '').trim());
+      }
+    }
+
+    return defenses;
+  }
+
   private async generateSynthesis(debate: ActiveDebate, consensusAnalysis: ConsensusAnalysis): Promise<string> {
-    // Placeholder - actual implementation uses LLM
-    const agreements = consensusAnalysis.agreements.map(a => a.topic).join(', ');
-    return `Synthesis: Key agreements on ${agreements}. Debate concluded with ${Math.round(consensusAnalysis.overallScore * 100)}% consensus.`;
+    // Build prompt for synthesis generation
+    const prompt = this.buildSynthesisPrompt(debate, consensusAnalysis);
+
+    // Emit event to request LLM generation
+    const result = await new Promise<{ response: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Synthesis generation timed out'));
+      }, debate.config.timeout);
+
+      this.emit('debate:generate-synthesis', {
+        debateId: debate.id,
+        agentId: 'moderator',
+        prompt,
+        context: debate.context,
+        callback: (response: string) => {
+          clearTimeout(timeout);
+          resolve({ response });
+        },
+      });
+    });
+
+    return result.response;
+  }
+
+  private buildSynthesisPrompt(debate: ActiveDebate, consensusAnalysis: ConsensusAnalysis): string {
+    // Summarize all rounds
+    const roundsSummary = debate.rounds
+      .map(
+        (r) => `### Round ${r.roundNumber}: ${r.type}
+Consensus Score: ${(r.consensusScore * 100).toFixed(0)}%
+Contributions: ${r.contributions.length}
+Duration: ${r.durationMs}ms`
+      )
+      .join('\n\n');
+
+    // Format agreements
+    const agreementsList = consensusAnalysis.agreements
+      .map((a) => `- ${a.topic} (Confidence: ${(a.confidence * 100).toFixed(0)}%, Supported by: ${a.supportingAgents.join(', ')})`)
+      .join('\n');
+
+    // Format disagreements
+    const disagreementsList = consensusAnalysis.disagreements
+      .map((d) => {
+        const positions = Array.from(d.positions.entries())
+          .map(([agentId, position]) => `  - ${agentId}: ${position}`)
+          .join('\n');
+        return `- ${d.topic} (Severity: ${d.severity})\n${positions}`;
+      })
+      .join('\n\n');
+
+    return `You are the moderator synthesizing a multi-agent debate.
+
+## Original Query
+${debate.query}
+
+## Debate Summary
+${roundsSummary}
+
+## Consensus Analysis
+Overall Score: ${(consensusAnalysis.overallScore * 100).toFixed(0)}%
+
+### Areas of Agreement
+${agreementsList || 'None identified'}
+
+### Areas of Disagreement
+${disagreementsList || 'None identified'}
+
+### Undecided Topics
+${consensusAnalysis.undecided.join(', ') || 'None'}
+
+## Your Task
+Create a comprehensive synthesis that:
+1. Integrates the strongest points from all agents
+2. Acknowledges areas of consensus
+3. Addresses unresolved disagreements with balanced perspective
+4. Provides a clear, actionable answer to the original query
+5. Notes any important caveats or limitations
+
+Provide your synthesis:`;
   }
 
   // ============ Consensus Analysis ============
@@ -400,6 +702,22 @@ export class DebateCoordinator extends EventEmitter {
   }
 
   // ============ Helper Methods ============
+
+  private extractConfidenceFromResponse(response: string): number {
+    const confidenceMatch = response.match(/Confidence[:\s]*(\d+)%?/i);
+    if (confidenceMatch) {
+      return parseInt(confidenceMatch[1]) / 100;
+    }
+    return 0.7; // Default confidence
+  }
+
+  private extractReasoningFromResponse(response: string): string {
+    const reasoningMatch = response.match(/## Reasoning Summary\s+([\s\S]*?)(?=\n##|$)/i);
+    if (reasoningMatch) {
+      return reasoningMatch[1].trim();
+    }
+    return 'Based on analysis of the query and context';
+  }
 
   private getAgentTemperature(agentIndex: number, config: DebateConfig): number {
     const [min, max] = config.temperatureRange;

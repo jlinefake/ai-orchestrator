@@ -23,6 +23,13 @@ export type PersonalityType =
   | 'domain-expert'
   | 'generalist';
 
+export interface AgentHealthConfig {
+  maxRetries: number;
+  retryDelayMs: number;
+  timeoutMs: number;
+  minSuccessfulAgents: number;
+}
+
 export interface VerificationConfig {
   agentCount: number; // Minimum 3 for meaningful verification
   models?: string[]; // Different models for diversity
@@ -32,6 +39,7 @@ export interface VerificationConfig {
   minAgreement?: number; // Minimum agents that must agree (for consensus)
   confidenceThreshold?: number; // Minimum confidence to include in synthesis
   maxDebateRounds?: number; // For debate strategy
+  healthConfig?: AgentHealthConfig; // Agent health and retry configuration
 }
 
 export interface VerificationRequest {
@@ -169,12 +177,23 @@ export interface DebateRound {
   convergenceScore: number; // How much agents converged this round
 }
 
+// Progress tracking
+export interface VerificationProgress {
+  phase: 'spawning' | 'collecting' | 'analyzing' | 'synthesizing' | 'complete';
+  completedAgents: number;
+  totalAgents: number;
+  currentActivity: string;
+  partialResults?: Partial<VerificationResult>;
+  timestamp: number;
+}
+
 // Events
 export type VerificationEventType =
   | 'verification:started'
   | 'verification:agents-launching'
   | 'verification:agent-completed'
   | 'verification:invoke-agent'
+  | 'verification:progress'
   | 'verification:synthesize'
   | 'verification:completed'
   | 'verification:error';

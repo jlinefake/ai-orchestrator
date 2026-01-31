@@ -3,6 +3,14 @@
  */
 
 import { CLAUDE_MODELS } from '../../shared/types/provider.types';
+import type {
+  ArtifactType,
+  ArtifactSeverity,
+  ReportResultCommand,
+  GetChildSummaryCommand,
+  GetChildArtifactsCommand,
+  GetChildSectionCommand,
+} from '../../shared/types/child-result.types';
 
 export const ORCHESTRATION_MARKER_START = ':::ORCHESTRATOR_COMMAND:::';
 export const ORCHESTRATION_MARKER_END = ':::END_COMMAND:::';
@@ -17,7 +25,12 @@ export type OrchestratorAction =
   | 'report_progress'
   | 'report_error'
   | 'get_task_status'
-  | 'request_user_action';
+  | 'request_user_action'
+  // New structured result commands
+  | 'report_result'
+  | 'get_child_summary'
+  | 'get_child_artifacts'
+  | 'get_child_section';
 
 export interface SpawnChildCommand {
   action: 'spawn_child';
@@ -132,7 +145,12 @@ export type OrchestratorCommand =
   | ReportProgressCommand
   | ReportErrorCommand
   | GetTaskStatusCommand
-  | RequestUserActionCommand;
+  | RequestUserActionCommand
+  // New structured result commands
+  | ReportResultCommand
+  | GetChildSummaryCommand
+  | GetChildArtifactsCommand
+  | GetChildSectionCommand;
 
 /**
  * Generate the system prompt that explains orchestration capabilities to Claude
@@ -140,7 +158,7 @@ export type OrchestratorCommand =
 export function generateOrchestrationPrompt(instanceId: string): string {
   return `## 🎭 You Are an Orchestrator
 
-You are a **parent instance** in Claude Orchestrator. You can spawn and manage child Claude instances for parallel work.
+You are a **parent instance** in AI Orchestrator. You can spawn and manage child AI instances for parallel work.
 
 ### When to Spawn Children
 - Multiple files/modules to analyze in parallel
@@ -175,9 +193,25 @@ ${ORCHESTRATION_MARKER_END}
 | spawn_child | task, name?, agentId?, model?, provider? |
 | message_child | childId, message |
 | get_children | (none) |
-| get_child_output | childId, lastN? |
 | terminate_child | childId |
 | request_user_action | requestType, title, message, targetMode?, options? |
+
+### Retrieving Child Results (Context-Safe)
+
+Children report structured results that are stored externally. Use these commands to retrieve them without context overflow:
+
+| Command | Parameters | Returns |
+|---------|------------|---------|
+| get_child_summary | childId | Summary + artifact count (~300 tokens) |
+| get_child_artifacts | childId, types?, severity?, limit? | Structured findings |
+| get_child_section | childId, section | "conclusions", "decisions", "artifacts", or "full" |
+| get_child_output | childId, lastN? | Raw output (⚠️ can be large!) |
+
+**Recommended workflow:**
+1. Wait for child to complete (reports automatically)
+2. Use \`get_child_summary\` first to see what they found
+3. Use \`get_child_artifacts\` if you need specific findings
+4. Only use \`get_child_output\` or \`get_child_section\` with "full" if you need the complete transcript
 
 ### Requesting User Actions
 
@@ -225,10 +259,44 @@ ${contextSection}
 
 Focus only on this task. Be thorough but concise. You cannot spawn children.
 
-**When done**, report completion:
+### Reporting Results
+
+**When done**, report your findings using structured artifacts to help your parent efficiently understand your work:
+
 ${ORCHESTRATION_MARKER_START}
-{"action": "report_task_complete", "success": true, "summary": "What you accomplished"}
+{
+  "action": "report_result",
+  "summary": "Brief summary of what you found/accomplished (1-2 sentences)",
+  "success": true,
+  "artifacts": [
+    {
+      "type": "finding",
+      "severity": "high",
+      "title": "Brief title",
+      "content": "Detailed description",
+      "file": "path/to/file.ts",
+      "lines": "45-52"
+    },
+    {
+      "type": "recommendation",
+      "content": "What should be done about this"
+    },
+    {
+      "type": "code_snippet",
+      "content": "relevant code here",
+      "file": "path/to/file.ts",
+      "lines": "10-20"
+    }
+  ],
+  "conclusions": ["Key conclusion 1", "Key conclusion 2"],
+  "keyDecisions": ["Decision made and why"]
+}
 ${ORCHESTRATION_MARKER_END}
+
+**Artifact types:** finding, recommendation, code_snippet, file_reference, decision, data, command, error, warning, success, metric
+**Severity levels:** critical, high, medium, low, info
+
+Your structured report is stored externally and your parent can retrieve specific parts without loading everything into context.
 
 Instance: ${childId} | Parent: ${parentId}
 `;
@@ -306,6 +374,20 @@ function isValidCommand(cmd: unknown): cmd is OrchestratorCommand {
         typeof (cmd as RequestUserActionCommand).requestType === 'string' &&
         typeof (cmd as RequestUserActionCommand).title === 'string' &&
         typeof (cmd as RequestUserActionCommand).message === 'string'
+      );
+    // New structured result commands
+    case 'report_result':
+      return typeof (cmd as ReportResultCommand).summary === 'string';
+    case 'get_child_summary':
+      return typeof (cmd as GetChildSummaryCommand).childId === 'string';
+    case 'get_child_artifacts':
+      return typeof (cmd as GetChildArtifactsCommand).childId === 'string';
+    case 'get_child_section':
+      return (
+        typeof (cmd as GetChildSectionCommand).childId === 'string' &&
+        ['conclusions', 'decisions', 'artifacts', 'full'].includes(
+          (cmd as GetChildSectionCommand).section
+        )
       );
     default:
       return false;

@@ -1,5 +1,5 @@
 /**
- * CLI Module - Multi-CLI support for Claude Orchestrator
+ * CLI Module - Multi-CLI support for AI Orchestrator
  *
  * This module provides adapters and utilities for managing multiple
  * AI CLI tools including Claude Code, OpenAI Codex, Google Gemini, and more.

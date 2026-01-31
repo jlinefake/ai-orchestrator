@@ -2,7 +2,7 @@
  * Settings Types - Application settings configuration
  *
  * Configuration hierarchy (highest to lowest priority):
- * 1. Project config (.claude-orchestrator.json in project root)
+ * 1. Project config (.ai-orchestrator.json in project root)
  * 2. User config (stored in app data)
  * 3. Default config (built-in defaults)
  */
@@ -43,6 +43,9 @@ export interface AppSettings {
   showThinking: boolean; // Display AI thinking process in collapsible panels
   thinkingDefaultExpanded: boolean; // Show thinking panels expanded instead of collapsed
 
+  // Recent Directories
+  maxRecentDirectories: number; // 5-50, max directories to remember
+
   // Advanced
   customModelOverride: string; // empty = use default
   parserBufferMaxKB: number; // max size for NDJSON parser buffer
@@ -79,6 +82,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showToolMessages: true,
   showThinking: true,
   thinkingDefaultExpanded: false,
+
+  // Recent Directories
+  maxRecentDirectories: 15,
 
   // Advanced
   customModelOverride: '',
@@ -263,6 +269,15 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
     type: 'boolean',
     category: 'display'
   },
+  {
+    key: 'maxRecentDirectories',
+    label: 'Recent Directories Limit',
+    description: 'Maximum number of recently opened directories to remember',
+    type: 'number',
+    category: 'display',
+    min: 5,
+    max: 50
+  },
 
   // Memory Management
   {
@@ -334,7 +349,7 @@ export const SETTINGS_METADATA: SettingMetadata[] = [
 
 /**
  * Project-level configuration file format
- * Stored in .claude-orchestrator.json in project root
+ * Stored in .ai-orchestrator.json in project root
  */
 export interface ProjectConfig {
   // Project identity
@@ -375,7 +390,12 @@ export interface ResolvedConfig {
 /**
  * Project config file name
  */
-export const PROJECT_CONFIG_FILE = '.claude-orchestrator.json';
+export const PROJECT_CONFIG_FILE = '.ai-orchestrator.json';
+
+/**
+ * Legacy project config file name (for backward compatibility)
+ */
+export const LEGACY_PROJECT_CONFIG_FILE = '.claude-orchestrator.json';
 
 /**
  * Merge project config with user settings

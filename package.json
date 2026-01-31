@@ -1,7 +1,7 @@
 {
-  "name": "claude-orchestrator",
+  "name": "ai-orchestrator",
   "version": "0.1.0",
-  "description": "Desktop application for managing multiple Claude Code CLI instances",
+  "description": "Desktop application for managing multiple AI CLI instances",
   "main": "dist/main/index.js",
   "scripts": {
     "ng": "ng",
@@ -27,8 +27,11 @@
     "rebuild:native": "node scripts/rebuild-native-modules.js"
   },
   "keywords": [
+    "ai",
+    "ai-orchestrator",
     "claude",
-    "claude-code",
+    "gemini",
+    "openai",
     "orchestrator",
     "electron",
     "angular"

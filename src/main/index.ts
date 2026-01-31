@@ -10,7 +10,7 @@ import { IpcMainHandler } from './ipc/ipc-main-handler';
 import { InstanceManager } from './instance/instance-manager';
 import { getHookManager } from './hooks/hook-manager';
 
-class ClaudeOrchestratorApp {
+class AIOrchestratorApp {
   private windowManager: WindowManager;
   private ipcHandler: IpcMainHandler;
   private instanceManager: InstanceManager;
@@ -26,7 +26,7 @@ class ClaudeOrchestratorApp {
   }
 
   async initialize(): Promise<void> {
-    console.log('Initializing Claude Orchestrator...');
+    console.log('Initializing AI Orchestrator...');
 
     // Register IPC handlers BEFORE creating window
     // (window might call handlers immediately on load)
@@ -45,7 +45,7 @@ class ClaudeOrchestratorApp {
     // Create main window (this loads the renderer which may call IPC)
     await this.windowManager.createMainWindow();
 
-    console.log('Claude Orchestrator initialized');
+    console.log('AI Orchestrator initialized');
   }
 
   private setupInstanceEventForwarding(): void {
@@ -95,7 +95,7 @@ class ClaudeOrchestratorApp {
 }
 
 // Application instance
-let orchestratorApp: ClaudeOrchestratorApp | null = null;
+let orchestratorApp: AIOrchestratorApp | null = null;
 
 // App ready handler
 app.whenReady().then(async () => {
@@ -109,7 +109,7 @@ app.whenReady().then(async () => {
     }
   }
 
-  orchestratorApp = new ClaudeOrchestratorApp();
+  orchestratorApp = new AIOrchestratorApp();
   await orchestratorApp.initialize();
 
   // macOS: Re-create window when dock icon is clicked

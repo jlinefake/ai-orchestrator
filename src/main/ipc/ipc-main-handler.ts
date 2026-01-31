@@ -39,7 +39,8 @@ import {
   registerAppHandlers,
   registerFileHandlers,
   registerCodebaseHandlers,
-  registerSupervisionHandlers
+  registerSupervisionHandlers,
+  registerRecentDirectoriesHandlers
 } from './handlers';
 
 export class IpcMainHandler {
@@ -248,6 +249,9 @@ export class IpcMainHandler {
 
     // Supervision handlers (Phase 2: Hierarchical Instances)
     registerSupervisionHandlers();
+
+    // Recent directories handlers
+    registerRecentDirectoriesHandlers();
 
     // Set up memory event forwarding to renderer
     this.setupMemoryEventForwarding();

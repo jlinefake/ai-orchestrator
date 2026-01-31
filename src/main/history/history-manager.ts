@@ -30,6 +30,7 @@ export class HistoryManager {
   private storageDir: string;
   private indexPath: string;
   private index: HistoryIndex;
+  private savePromise: Promise<void> | null = null; // Mutex for index saves
 
   constructor() {
     this.storageDir = path.join(app.getPath('userData'), 'conversation-history');
@@ -44,6 +45,13 @@ export class HistoryManager {
     // Don't archive if no messages
     if (!instance.outputBuffer || instance.outputBuffer.length === 0) {
       console.log(`History: Skipping archive for ${instance.id} - no messages`);
+      return;
+    }
+
+    // Prevent duplicate archives of the same instance
+    const alreadyArchived = this.index.entries.some(e => e.originalInstanceId === instance.id);
+    if (alreadyArchived) {
+      console.log(`History: Skipping archive for ${instance.id} - already archived`);
       return;
     }
 
@@ -239,7 +247,25 @@ export class HistoryManager {
   }
 
   private async saveIndex(): Promise<void> {
-    await fs.promises.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
+    // Use a mutex pattern to prevent concurrent writes that could corrupt the file.
+    // Wait for any pending save to complete before starting a new one.
+    if (this.savePromise) {
+      await this.savePromise;
+    }
+
+    this.savePromise = this.doSaveIndex();
+    try {
+      await this.savePromise;
+    } finally {
+      this.savePromise = null;
+    }
+  }
+
+  private async doSaveIndex(): Promise<void> {
+    // Write to a temp file first, then rename for atomic operation
+    const tempPath = `${this.indexPath}.tmp`;
+    await fs.promises.writeFile(tempPath, JSON.stringify(this.index, null, 2));
+    await fs.promises.rename(tempPath, this.indexPath);
   }
 
   private async saveConversation(entryId: string, data: ConversationData): Promise<void> {

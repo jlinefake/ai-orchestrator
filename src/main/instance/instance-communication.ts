@@ -7,6 +7,7 @@ import type { CliAdapter } from '../cli/adapters/adapter-factory';
 import { getHistoryManager } from '../history';
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getOutputStorageManager } from '../memory';
+import { getHookManager } from '../hooks/hook-manager';
 import type {
   Instance,
   InstanceStatus,
@@ -33,6 +34,7 @@ export interface CommunicationDependencies {
 export class InstanceCommunicationManager extends EventEmitter {
   private settings = getSettingsManager();
   private outputStorage = getOutputStorageManager();
+  private hookManager = getHookManager();
   private deps: CommunicationDependencies;
   private interruptedInstances: Set<string> = new Set();
 
@@ -114,9 +116,45 @@ export class InstanceCommunicationManager extends EventEmitter {
    * Set up event handlers for a CLI adapter
    */
   setupAdapterEvents(instanceId: string, adapter: CliAdapter): void {
-    adapter.on('output', (message: OutputMessage) => {
+    adapter.on('output', async (message: OutputMessage) => {
       const instance = this.deps.getInstance(instanceId);
       if (instance) {
+        // Trigger hooks for tool_use events (PreToolUse)
+        if (message.type === 'tool_use' && message.metadata) {
+          const metadata = message.metadata as Record<string, unknown>;
+          const toolName = (metadata['name'] as string) || 'unknown';
+
+          try {
+            await this.hookManager.triggerHooks('PreToolUse', {
+              instanceId,
+              toolName,
+              workingDirectory: instance.workingDirectory,
+            });
+          } catch (err) {
+            console.error(`[InstanceCommunicationManager] PreToolUse hook error:`, err);
+          }
+        }
+
+        // Trigger hooks for tool_result events (PostToolUse)
+        if (message.type === 'tool_result' && message.metadata) {
+          const metadata = message.metadata as Record<string, unknown>;
+          const isError = (metadata['is_error'] as boolean) || false;
+
+          try {
+            await this.hookManager.triggerHooks('PostToolUse', {
+              instanceId,
+              content: message.content,
+              workingDirectory: instance.workingDirectory,
+            });
+            // Log warning if tool result was an error
+            if (isError) {
+              console.warn(`[InstanceCommunicationManager] Tool execution reported an error for ${instanceId}`);
+            }
+          } catch (err) {
+            console.error(`[InstanceCommunicationManager] PostToolUse hook error:`, err);
+          }
+        }
+
         this.addToOutputBuffer(instance, message);
         this.emit('output', { instanceId, message });
 

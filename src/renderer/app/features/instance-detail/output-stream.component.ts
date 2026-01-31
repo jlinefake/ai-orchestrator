@@ -510,9 +510,11 @@ export class OutputStreamComponent {
 
   container = viewChild<ElementRef>('container');
 
-  // Scroll state
+  // Scroll state - stored per instance
   protected showScrollToBottom = signal(false);
   private userScrolledUp = false;
+  private scrollPositions = new Map<string, number>(); // instanceId -> scrollTop
+  private previousInstanceId: string | null = null;
 
   protected copiedMessageId = signal<string | null>(null);
   private copyResetTimer: number | null = null;
@@ -597,6 +599,44 @@ export class OutputStreamComponent {
   });
 
   constructor() {
+    // Handle instance changes - save/restore scroll position
+    effect(() => {
+      const currentInstanceId = this.instanceId();
+      const el = this.container()?.nativeElement;
+
+      if (this.previousInstanceId && this.previousInstanceId !== currentInstanceId && el) {
+        // Save scroll position for the previous instance
+        this.scrollPositions.set(this.previousInstanceId, el.scrollTop);
+      }
+
+      if (currentInstanceId !== this.previousInstanceId) {
+        // Instance changed - reset scroll state
+        this.userScrolledUp = false;
+        this.showScrollToBottom.set(false);
+
+        // Restore scroll position for the new instance (if we have one saved)
+        setTimeout(() => {
+          const savedPosition = this.scrollPositions.get(currentInstanceId);
+          const containerEl = this.container()?.nativeElement;
+          if (containerEl) {
+            if (savedPosition !== undefined) {
+              containerEl.scrollTop = savedPosition;
+              // Check if we should show scroll to bottom button
+              const scrollPosition = containerEl.scrollTop + containerEl.clientHeight;
+              const scrollHeight = containerEl.scrollHeight;
+              this.userScrolledUp = scrollPosition < scrollHeight - 100;
+              this.showScrollToBottom.set(scrollPosition < scrollHeight - 50);
+            } else {
+              // No saved position - scroll to bottom for new instances
+              containerEl.scrollTop = containerEl.scrollHeight;
+            }
+          }
+        }, 0);
+
+        this.previousInstanceId = currentInstanceId;
+      }
+    });
+
     // Auto-scroll to bottom when new messages arrive (only if user hasn't scrolled up)
     effect(() => {
       const msgs = this.messages();

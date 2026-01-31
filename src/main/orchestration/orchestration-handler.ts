@@ -19,6 +19,7 @@ import {
   generateOrchestrationPrompt
 } from './orchestration-protocol';
 import { getTaskManager } from './task-manager';
+import { getChildResultStorage } from './child-result-storage';
 import type {
   TaskExecution,
   TaskResult,
@@ -26,6 +27,15 @@ import type {
   TaskError
 } from '../../shared/types/task.types';
 import type { RoutingDecision } from '../routing';
+import type {
+  ReportResultCommand,
+  GetChildSummaryCommand,
+  GetChildArtifactsCommand,
+  GetChildSectionCommand,
+  ChildSummaryResponse,
+  ChildArtifactsResponse,
+  ChildSectionResponse,
+} from '../../shared/types/child-result.types';
 
 export interface OrchestrationContext {
   instanceId: string;
@@ -79,6 +89,27 @@ export interface OrchestrationEvents {
   ) => void;
   'task-error': (parentId: string, childId: string, error: TaskError) => void;
   'user-action-request': (request: UserActionRequest) => void;
+  // New structured result events
+  'report-result': (
+    childId: string,
+    command: ReportResultCommand,
+    callback: (response: ChildSummaryResponse | null) => void
+  ) => void;
+  'get-child-summary': (
+    parentId: string,
+    command: GetChildSummaryCommand,
+    callback: (response: ChildSummaryResponse | null) => void
+  ) => void;
+  'get-child-artifacts': (
+    parentId: string,
+    command: GetChildArtifactsCommand,
+    callback: (response: ChildArtifactsResponse | null) => void
+  ) => void;
+  'get-child-section': (
+    parentId: string,
+    command: GetChildSectionCommand,
+    callback: (response: ChildSectionResponse | null) => void
+  ) => void;
 }
 
 export interface ChildInfo {
@@ -204,6 +235,23 @@ export class OrchestrationHandler extends EventEmitter {
 
       case 'request_user_action':
         this.handleRequestUserAction(instanceId, command);
+        break;
+
+      // New structured result commands
+      case 'report_result':
+        this.handleReportResult(instanceId, command);
+        break;
+
+      case 'get_child_summary':
+        this.handleGetChildSummary(instanceId, command);
+        break;
+
+      case 'get_child_artifacts':
+        this.handleGetChildArtifacts(instanceId, command);
+        break;
+
+      case 'get_child_section':
+        this.handleGetChildSection(instanceId, command);
         break;
     }
   }
@@ -607,5 +655,152 @@ export class OrchestrationHandler extends EventEmitter {
       error,
       message: error
     });
+  }
+
+  // ============================================
+  // Structured Result Handlers
+  // ============================================
+
+  /**
+   * Handle report_result command from child
+   */
+  private handleReportResult(childId: string, command: ReportResultCommand): void {
+    const ctx = this.contexts.get(childId);
+    if (!ctx || !ctx.parentId) {
+      console.warn(`No parent for child ${childId} to report result to`);
+      return;
+    }
+
+    // Emit event for the orchestration manager to store the result
+    this.emit(
+      'report-result',
+      childId,
+      command,
+      (response: ChildSummaryResponse | null) => {
+        if (response) {
+          // Notify parent with compact summary
+          this.injectResponse(ctx.parentId!, 'child_result', true, {
+            ...response,
+            message: `Child ${childId} reported result: ${response.summary}`
+          });
+        }
+      }
+    );
+  }
+
+  /**
+   * Handle get_child_summary command from parent
+   */
+  private handleGetChildSummary(
+    parentId: string,
+    command: GetChildSummaryCommand
+  ): void {
+    const ctx = this.contexts.get(parentId);
+    if (!ctx) return;
+
+    // Verify the child belongs to this parent
+    if (!ctx.childrenIds.includes(command.childId)) {
+      this.injectResponse(parentId, 'get_child_summary', false, {
+        error: `Child ${command.childId} not found or not owned by you`
+      });
+      return;
+    }
+
+    this.emit(
+      'get-child-summary',
+      parentId,
+      command,
+      (response: ChildSummaryResponse | null) => {
+        if (response) {
+          this.injectResponse(parentId, 'get_child_summary', true, response);
+        } else {
+          // Fall back to checking if there's a stored result
+          this.injectResponse(parentId, 'get_child_summary', false, {
+            childId: command.childId,
+            error: 'No structured result available. Child may not have completed yet or used report_task_complete instead.',
+            suggestion: 'Use get_child_output to see raw output'
+          });
+        }
+      }
+    );
+  }
+
+  /**
+   * Handle get_child_artifacts command from parent
+   */
+  private handleGetChildArtifacts(
+    parentId: string,
+    command: GetChildArtifactsCommand
+  ): void {
+    const ctx = this.contexts.get(parentId);
+    if (!ctx) return;
+
+    // Verify the child belongs to this parent
+    if (!ctx.childrenIds.includes(command.childId)) {
+      this.injectResponse(parentId, 'get_child_artifacts', false, {
+        error: `Child ${command.childId} not found or not owned by you`
+      });
+      return;
+    }
+
+    this.emit(
+      'get-child-artifacts',
+      parentId,
+      command,
+      (response: ChildArtifactsResponse | null) => {
+        if (response) {
+          this.injectResponse(parentId, 'get_child_artifacts', true, response);
+        } else {
+          this.injectResponse(parentId, 'get_child_artifacts', false, {
+            childId: command.childId,
+            error: 'No artifacts available for this child'
+          });
+        }
+      }
+    );
+  }
+
+  /**
+   * Handle get_child_section command from parent
+   */
+  private handleGetChildSection(
+    parentId: string,
+    command: GetChildSectionCommand
+  ): void {
+    const ctx = this.contexts.get(parentId);
+    if (!ctx) return;
+
+    // Verify the child belongs to this parent
+    if (!ctx.childrenIds.includes(command.childId)) {
+      this.injectResponse(parentId, 'get_child_section', false, {
+        error: `Child ${command.childId} not found or not owned by you`
+      });
+      return;
+    }
+
+    this.emit(
+      'get-child-section',
+      parentId,
+      command,
+      (response: ChildSectionResponse | null) => {
+        if (response) {
+          // Warn if loading full transcript
+          if (command.section === 'full' && response.tokenCount > 5000) {
+            this.injectResponse(parentId, 'get_child_section', true, {
+              ...response,
+              warning: `Full transcript is ${response.tokenCount} tokens. Consider using get_child_summary or get_child_artifacts instead.`
+            });
+          } else {
+            this.injectResponse(parentId, 'get_child_section', true, response);
+          }
+        } else {
+          this.injectResponse(parentId, 'get_child_section', false, {
+            childId: command.childId,
+            section: command.section,
+            error: 'Section not available'
+          });
+        }
+      }
+    );
   }
 }

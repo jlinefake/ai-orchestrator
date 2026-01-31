@@ -145,11 +145,14 @@ export class DebugCommandsManager {
 
       // Check for project config
       if (workingDirectory) {
-        const projectConfigPath = path.join(workingDirectory, '.claude-orchestrator.json');
-        data['projectConfigExists'] = fs.existsSync(projectConfigPath);
+        // Check both new and legacy config file names
+        const projectConfigPath = path.join(workingDirectory, '.ai-orchestrator.json');
+        const legacyProjectConfigPath = path.join(workingDirectory, '.claude-orchestrator.json');
+        const actualProjectConfigPath = fs.existsSync(projectConfigPath) ? projectConfigPath : legacyProjectConfigPath;
+        data['projectConfigExists'] = fs.existsSync(actualProjectConfigPath);
         if (data['projectConfigExists']) {
           try {
-            data['projectConfig'] = JSON.parse(fs.readFileSync(projectConfigPath, 'utf-8'));
+            data['projectConfig'] = JSON.parse(fs.readFileSync(actualProjectConfigPath, 'utf-8'));
           } catch (e: any) {
             errors.push(`Failed to parse project config: ${e.message}`);
           }

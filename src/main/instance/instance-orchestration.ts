@@ -7,6 +7,7 @@ import { OrchestrationHandler } from '../orchestration/orchestration-handler';
 import { OutcomeTracker } from '../learning/outcome-tracker';
 import { StrategyLearner } from '../learning/strategy-learner';
 import { getTaskManager } from '../orchestration/task-manager';
+import { getChildResultStorage } from '../orchestration/child-result-storage';
 import { getModelRouter, type RoutingDecision } from '../routing';
 import { getUnifiedMemory } from '../memory';
 import { getAgentById, getDefaultAgent } from '../../shared/types/agent.types';
@@ -20,6 +21,15 @@ import type { Instance, OutputMessage } from '../../shared/types/instance.types'
 import type { TaskExecution } from '../../shared/types/task.types';
 import type { ToolUsageRecord } from '../../shared/types/self-improvement.types';
 import type { FastPathResult } from './instance-types';
+import type {
+  ReportResultCommand,
+  GetChildSummaryCommand,
+  GetChildArtifactsCommand,
+  GetChildSectionCommand,
+  ChildSummaryResponse,
+  ChildArtifactsResponse,
+  ChildSectionResponse,
+} from '../../shared/types/child-result.types';
 
 /**
  * Dependencies required by the orchestration manager
@@ -310,6 +320,108 @@ export class InstanceOrchestrationManager {
 
           await adapter.sendInput(response);
         }
+      }
+    );
+
+    // ============================================
+    // Structured Result Handlers
+    // ============================================
+
+    // Handle report_result from child
+    this.orchestration.on(
+      'report-result',
+      async (
+        childId: string,
+        command: ReportResultCommand,
+        callback: (response: ChildSummaryResponse | null) => void
+      ) => {
+        const child = this.deps.getInstance(childId);
+        if (!child || !child.parentId) {
+          callback(null);
+          return;
+        }
+
+        const taskManager = getTaskManager();
+        const task = taskManager.getTaskByChildId(childId);
+        const storage = getChildResultStorage();
+
+        try {
+          const result = await storage.storeResult(
+            childId,
+            child.parentId,
+            task?.task || 'Unknown task',
+            command,
+            child.outputBuffer,
+            child.createdAt
+          );
+
+          const summary = await storage.getChildSummary(childId);
+          callback(summary);
+
+          // Also record task completion
+          if (task) {
+            taskManager.completeTask(task.taskId, {
+              success: command.success !== false,
+              summary: command.summary,
+              data: { resultId: result.id },
+            });
+          }
+        } catch (error) {
+          console.error('[ChildResultStorage] Failed to store result:', error);
+          callback(null);
+        }
+      }
+    );
+
+    // Handle get_child_summary from parent
+    this.orchestration.on(
+      'get-child-summary',
+      async (
+        _parentId: string,
+        command: GetChildSummaryCommand,
+        callback: (response: ChildSummaryResponse | null) => void
+      ) => {
+        const storage = getChildResultStorage();
+        const summary = await storage.getChildSummary(command.childId);
+        callback(summary);
+      }
+    );
+
+    // Handle get_child_artifacts from parent
+    this.orchestration.on(
+      'get-child-artifacts',
+      async (
+        _parentId: string,
+        command: GetChildArtifactsCommand,
+        callback: (response: ChildArtifactsResponse | null) => void
+      ) => {
+        const storage = getChildResultStorage();
+        const artifacts = await storage.getChildArtifacts(
+          command.childId,
+          command.types,
+          command.severity,
+          command.limit
+        );
+        callback(artifacts);
+      }
+    );
+
+    // Handle get_child_section from parent
+    this.orchestration.on(
+      'get-child-section',
+      async (
+        _parentId: string,
+        command: GetChildSectionCommand,
+        callback: (response: ChildSectionResponse | null) => void
+      ) => {
+        const storage = getChildResultStorage();
+        const section = await storage.getChildSection(
+          command.childId,
+          command.section,
+          command.artifactId,
+          command.includeContext
+        );
+        callback(section);
       }
     );
   }
@@ -830,8 +942,120 @@ export class InstanceOrchestrationManager {
         } else {
           return `**No output from child** \`${data.childId}\``;
         }
+      // New structured result messages
+      case 'child_result':
+        return this.formatChildResultMessage(data);
+      case 'get_child_summary':
+        return this.formatChildSummaryMessage(status, data);
+      case 'get_child_artifacts':
+        return this.formatChildArtifactsMessage(status, data);
+      case 'get_child_section':
+        return this.formatChildSectionMessage(status, data);
       default:
         return `**Orchestration:** ${action} - ${status}`;
     }
+  }
+
+  private formatChildResultMessage(data: any): string {
+    const parts: string[] = [];
+    parts.push(`**Child Result** from \`${data.childId}\``);
+    parts.push('');
+    parts.push(`**Summary:** ${data.summary}`);
+    parts.push(`**Status:** ${data.success ? 'Success' : 'Failed'}`);
+
+    if (data.artifactCount > 0) {
+      parts.push(`**Artifacts:** ${data.artifactCount} (${data.artifactTypes?.join(', ') || 'various'})`);
+    }
+
+    if (data.conclusions && data.conclusions.length > 0) {
+      parts.push('');
+      parts.push('**Conclusions:**');
+      data.conclusions.slice(0, 3).forEach((c: string) => parts.push(`- ${c}`));
+      if (data.conclusions.length > 3) {
+        parts.push(`- ... and ${data.conclusions.length - 3} more`);
+      }
+    }
+
+    if (data.hasMoreDetails) {
+      parts.push('');
+      parts.push('_Use `get_child_artifacts` or `get_child_section` for more details._');
+    }
+
+    return parts.join('\n');
+  }
+
+  private formatChildSummaryMessage(status: string, data: any): string {
+    if (status !== 'SUCCESS') {
+      return `**Child Summary Error:** ${data.error || 'Unknown error'}\n\n${data.suggestion || ''}`;
+    }
+
+    const parts: string[] = [];
+    parts.push(`**Summary for child \`${data.childId}\`:**`);
+    parts.push('');
+    parts.push(data.summary);
+    parts.push('');
+    parts.push(`**Status:** ${data.success ? 'Success' : 'Failed'}`);
+
+    if (data.artifactCount > 0) {
+      parts.push(`**Artifacts:** ${data.artifactCount} (${data.artifactTypes?.join(', ') || 'various'})`);
+    }
+
+    if (data.conclusions && data.conclusions.length > 0) {
+      parts.push('');
+      parts.push('**Conclusions:**');
+      data.conclusions.forEach((c: string) => parts.push(`- ${c}`));
+    }
+
+    return parts.join('\n');
+  }
+
+  private formatChildArtifactsMessage(status: string, data: any): string {
+    if (status !== 'SUCCESS') {
+      return `**Artifacts Error:** ${data.error || 'Unknown error'}`;
+    }
+
+    const parts: string[] = [];
+    parts.push(`**Artifacts from child \`${data.childId}\`** (${data.filtered}/${data.total})`);
+
+    if (data.artifacts && data.artifacts.length > 0) {
+      for (const artifact of data.artifacts) {
+        parts.push('');
+        const severity = artifact.severity ? `[${artifact.severity.toUpperCase()}]` : '';
+        parts.push(`### ${severity} ${artifact.title || artifact.type}`);
+        if (artifact.file) {
+          const location = artifact.lines ? `${artifact.file}:${artifact.lines}` : artifact.file;
+          parts.push(`**Location:** \`${location}\``);
+        }
+        parts.push(artifact.content);
+      }
+    } else {
+      parts.push('_No artifacts found._');
+    }
+
+    if (data.hasMore) {
+      parts.push('');
+      parts.push(`_${data.total - data.filtered} more artifacts available. Use limit parameter to fetch more._`);
+    }
+
+    return parts.join('\n');
+  }
+
+  private formatChildSectionMessage(status: string, data: any): string {
+    if (status !== 'SUCCESS') {
+      return `**Section Error:** ${data.error || 'Unknown error'}`;
+    }
+
+    const parts: string[] = [];
+    parts.push(`**${data.section}** from child \`${data.childId}\` (${data.tokenCount} tokens)`);
+
+    if (data.warning) {
+      parts.push('');
+      parts.push(`⚠️ ${data.warning}`);
+    }
+
+    parts.push('');
+    parts.push(data.content);
+
+    return parts.join('\n');
   }
 }

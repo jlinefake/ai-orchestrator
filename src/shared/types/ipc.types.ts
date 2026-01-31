@@ -576,7 +576,14 @@ export const IPC_CHANNELS = {
   AB_GET_RESULTS: 'ab:get-results',
   AB_GET_WINNER: 'ab:get-winner',
   AB_GET_STATS: 'ab:get-stats',
-  AB_CONFIGURE: 'ab:configure'
+  AB_CONFIGURE: 'ab:configure',
+
+  // Recent Directories operations
+  RECENT_DIRS_GET: 'recent-dirs:get',
+  RECENT_DIRS_ADD: 'recent-dirs:add',
+  RECENT_DIRS_REMOVE: 'recent-dirs:remove',
+  RECENT_DIRS_PIN: 'recent-dirs:pin',
+  RECENT_DIRS_CLEAR: 'recent-dirs:clear'
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -2135,4 +2142,31 @@ export interface LLMStreamChunkPayload {
   chunk: string;
   done: boolean;
   error?: string;
+}
+
+// ============================================
+// Recent Directories Payloads
+// ============================================
+
+export interface RecentDirsGetPayload {
+  limit?: number;
+  sortBy?: 'lastAccessed' | 'frequency' | 'alphabetical';
+  includePinned?: boolean;
+}
+
+export interface RecentDirsAddPayload {
+  path: string;
+}
+
+export interface RecentDirsRemovePayload {
+  path: string;
+}
+
+export interface RecentDirsPinPayload {
+  path: string;
+  pinned: boolean;
+}
+
+export interface RecentDirsClearPayload {
+  keepPinned?: boolean;
 }

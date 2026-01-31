@@ -16,9 +16,9 @@ import {
   ViewChild,
   AfterViewInit
 } from '@angular/core';
-import { CommandStore } from '../../core/state/command.store';
+import { CommandStore, ExtendedCommand } from '../../core/state/command.store';
 import { InstanceStore } from '../../core/state/instance.store';
-import type { CommandTemplate } from '../../../../shared/types/command.types';
+import { SkillStore } from '../../core/state/skill.store';
 
 @Component({
   selector: 'app-command-palette',
@@ -79,6 +79,9 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
                 }
                 @if (cmd.builtIn) {
                   <span class="item-badge">Built-in</span>
+                }
+                @if (isSkillCommand(cmd)) {
+                  <span class="item-badge skill-badge">Skill</span>
                 }
               </button>
             }
@@ -235,6 +238,11 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
         text-transform: uppercase;
       }
 
+      .skill-badge {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+      }
+
       .palette-footer {
         display: flex;
         justify-content: center;
@@ -268,6 +276,7 @@ export class CommandPaletteComponent
 {
   commandStore = inject(CommandStore);
   private instanceStore = inject(InstanceStore);
+  private skillStore = inject(SkillStore);
 
   @ViewChild('searchInput') searchInput!: ElementRef<HTMLInputElement>;
 
@@ -351,10 +360,23 @@ export class CommandPaletteComponent
     }
   }
 
-  onSelectCommand(command: CommandTemplate): void {
+  /**
+   * Check if a command is a skill command
+   */
+  isSkillCommand(cmd: ExtendedCommand): boolean {
+    return cmd.isSkill === true;
+  }
+
+  onSelectCommand(command: ExtendedCommand): void {
     if (command.name === 'rlm') {
       this.commandExecuted.emit({ commandId: command.id, args: [] });
       this.closeRequested.emit();
+      return;
+    }
+
+    // Handle skill commands differently
+    if (this.isSkillCommand(command) && command.skillId) {
+      this.executeSkillCommand(command);
       return;
     }
 
@@ -385,6 +407,37 @@ export class CommandPaletteComponent
 
     this.commandExecuted.emit({ commandId: command.id, args });
     this.commandStore.executeCommand(command.id, instId, args);
+    this.closeRequested.emit();
+  }
+
+  /**
+   * Execute a skill command by loading the skill
+   */
+  private async executeSkillCommand(command: ExtendedCommand): Promise<void> {
+    if (!command.skillId) return;
+
+    const instId =
+      this.instanceId() || this.instanceStore.selectedInstance()?.id;
+
+    if (!instId) {
+      console.warn('No instance selected for skill execution');
+      this.closeRequested.emit();
+      return;
+    }
+
+    // Load the skill
+    const success = await this.skillStore.loadSkill(command.skillId);
+    if (success) {
+      console.log(`Skill loaded: ${command.name}`);
+      // The skill is now active and will be included in the instance's context
+      this.commandExecuted.emit({
+        commandId: `skill:${command.skillId}`,
+        args: [command.trigger || command.name],
+      });
+    } else {
+      console.error(`Failed to load skill: ${command.name}`);
+    }
+
     this.closeRequested.emit();
   }
 

@@ -57,6 +57,13 @@ const IPC_CHANNELS = {
   DIALOG_SELECT_FOLDER: 'dialog:select-folder',
   DIALOG_SELECT_FILES: 'dialog:select-files',
 
+  // Recent Directories
+  RECENT_DIRS_GET: 'recent-dirs:get',
+  RECENT_DIRS_ADD: 'recent-dirs:add',
+  RECENT_DIRS_REMOVE: 'recent-dirs:remove',
+  RECENT_DIRS_PIN: 'recent-dirs:pin',
+  RECENT_DIRS_CLEAR: 'recent-dirs:clear',
+
   // File operations
   FILE_READ_DIR: 'file:read-dir',
   FILE_GET_STATS: 'file:get-stats',
@@ -838,6 +845,49 @@ const electronAPI = {
     filters?: { name: string; extensions: string[] }[];
   }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILES, options);
+  },
+
+  // ============================================
+  // Recent Directories
+  // ============================================
+
+  /**
+   * Get recent directories
+   */
+  getRecentDirectories: (options?: {
+    limit?: number;
+    sortBy?: 'lastAccessed' | 'frequency' | 'alphabetical';
+    includePinned?: boolean;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECENT_DIRS_GET, options);
+  },
+
+  /**
+   * Add a directory to recent list
+   */
+  addRecentDirectory: (path: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECENT_DIRS_ADD, { path });
+  },
+
+  /**
+   * Remove a directory from recent list
+   */
+  removeRecentDirectory: (path: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECENT_DIRS_REMOVE, { path });
+  },
+
+  /**
+   * Pin or unpin a directory
+   */
+  pinRecentDirectory: (path: string, pinned: boolean): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECENT_DIRS_PIN, { path, pinned });
+  },
+
+  /**
+   * Clear all recent directories
+   */
+  clearRecentDirectories: (keepPinned?: boolean): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECENT_DIRS_CLEAR, { keepPinned });
   },
 
   // ============================================

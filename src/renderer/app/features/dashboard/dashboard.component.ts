@@ -72,7 +72,7 @@ import { ProviderStateService } from '../../core/services/provider-state.service
           <aside class="sidebar" [style.width.px]="sidebarWidth()">
             <div class="sidebar-header">
               <div class="header-row">
-                <h1 class="app-title">Claude Orchestrator</h1>
+                <h1 class="app-title">AI Orchestrator</h1>
                 <div class="header-actions">
                   <button
                     class="btn-header-icon"

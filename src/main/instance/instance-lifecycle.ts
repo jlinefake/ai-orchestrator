@@ -3,6 +3,9 @@
  */
 
 import { EventEmitter } from 'events';
+import { app } from 'electron';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { ClaudeCliAdapter } from '../cli/claude-cli-adapter';
 import {
   createCliAdapter,
@@ -72,6 +75,81 @@ export class InstanceLifecycleManager extends EventEmitter {
     this.deps = deps;
     this.startIdleCheckTimer();
     this.setupMemoryMonitoring();
+  }
+
+  // ============================================
+  // CLAUDE.md Prompt Loading
+  // ============================================
+
+  /**
+   * Parse frontmatter from CLAUDE.md file
+   */
+  private parseClaudeMdFrontmatter(content: string): Record<string, string> {
+    const metadata: Record<string, string> = {};
+
+    // Parse YAML frontmatter
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1];
+
+      // Simple YAML parsing
+      const lines = frontmatter.split('\n');
+      for (const line of lines) {
+        const [key, ...valueParts] = line.split(':');
+        const value = valueParts.join(':').trim();
+
+        if (key && value) {
+          metadata[key.trim()] = value;
+        }
+      }
+    }
+
+    return metadata;
+  }
+
+  /**
+   * Load CLAUDE.md prompt hierarchy
+   * Returns array of prompt contents (global first, then project)
+   */
+  private async loadPromptHierarchy(workDir: string): Promise<string[]> {
+    const prompts: string[] = [];
+
+    // Load global CLAUDE.md from ~/.claude/CLAUDE.md
+    try {
+      const homeDir = app.getPath('home');
+      const globalClaudeMdPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+      const globalContent = await fs.readFile(globalClaudeMdPath, 'utf-8');
+
+      // Remove frontmatter for inclusion in system prompt
+      const contentWithoutFrontmatter = globalContent.replace(/^---\n[\s\S]*?\n---\n/, '');
+      if (contentWithoutFrontmatter.trim()) {
+        prompts.push(contentWithoutFrontmatter.trim());
+      }
+
+      console.log(`[CLAUDE.md] Loaded global prompt from ${globalClaudeMdPath}`);
+    } catch (error) {
+      // Global CLAUDE.md is optional
+      console.log('[CLAUDE.md] No global CLAUDE.md found (this is optional)');
+    }
+
+    // Load project CLAUDE.md from {workDir}/.claude/CLAUDE.md
+    try {
+      const projectClaudeMdPath = path.join(workDir, '.claude', 'CLAUDE.md');
+      const projectContent = await fs.readFile(projectClaudeMdPath, 'utf-8');
+
+      // Remove frontmatter for inclusion in system prompt
+      const contentWithoutFrontmatter = projectContent.replace(/^---\n[\s\S]*?\n---\n/, '');
+      if (contentWithoutFrontmatter.trim()) {
+        prompts.push(contentWithoutFrontmatter.trim());
+      }
+
+      console.log(`[CLAUDE.md] Loaded project prompt from ${projectClaudeMdPath}`);
+    } catch (error) {
+      // Project CLAUDE.md is optional
+      console.log('[CLAUDE.md] No project CLAUDE.md found (this is optional)');
+    }
+
+    return prompts;
   }
 
   // ============================================
@@ -217,6 +295,17 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Get disallowed tools based on agent permissions
     const disallowedTools = getDisallowedTools(resolvedAgent.permissions);
 
+    // Load CLAUDE.md prompt hierarchy
+    const claudeMdPrompts = await this.loadPromptHierarchy(instance.workingDirectory);
+
+    // Build system prompt with CLAUDE.md content prepended
+    let systemPrompt = resolvedAgent.systemPrompt || '';
+    if (claudeMdPrompts.length > 0) {
+      const claudeMdSection = claudeMdPrompts.join('\n\n---\n\n');
+      systemPrompt = `${claudeMdSection}\n\n---\n\n${systemPrompt}`;
+      console.log(`[CLAUDE.md] Prepended ${claudeMdPrompts.length} prompt(s) to system prompt`);
+    }
+
     // Resolve CLI provider type
     const settingsAll = this.settings.getAll();
     console.log(
@@ -247,7 +336,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     const spawnOptions: UnifiedSpawnOptions = {
       sessionId: instance.sessionId,
       workingDirectory: config.workingDirectory,
-      systemPrompt: resolvedAgent.systemPrompt,
+      systemPrompt: systemPrompt,
       model: modelOverride,
       yoloMode: instance.yoloMode,
       allowedTools: defaultAllowedTools,

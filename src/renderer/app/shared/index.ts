@@ -11,3 +11,4 @@ export { TokenCounterComponent } from './components/token-counter/token-counter.
 export { CostEstimatorComponent } from './components/cost-estimator/cost-estimator.component';
 export { ConfidenceMeterComponent } from './components/confidence-meter/confidence-meter.component';
 export { TimelineViewComponent } from './components/timeline-view/timeline-view.component';
+export { RecentDirectoriesDropdownComponent } from './components/recent-directories-dropdown/recent-directories-dropdown.component';

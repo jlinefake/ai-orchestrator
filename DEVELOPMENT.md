@@ -1,8 +1,8 @@
-# Claude Orchestrator - Development Status
+# AI Orchestrator - Development Status
 
 ## Overview
 
-A desktop application for managing multiple Claude Code CLI instances with hierarchical supervision, cross-instance communication, and a scalable UI supporting 10,000+ instances.
+A desktop application for managing multiple AI CLI instances (Claude, Gemini, OpenAI) with hierarchical supervision, cross-instance communication, and a scalable UI supporting 10,000+ instances.
 
 ## Current Status: Phase 1 MVP Complete ✅
 
@@ -12,50 +12,65 @@ The foundational architecture is in place and compiles successfully.
 
 ```
 src/
-├── main/                          # Electron Main Process
-│   ├── index.ts                   # App entry point, lifecycle
-│   ├── window-manager.ts          # Window creation, IPC to renderer
+├── main/                              # Electron Main Process
+│   ├── index.ts                       # App entry point, lifecycle
+│   ├── window-manager.ts              # Window creation, IPC to renderer
 │   ├── cli/
-│   │   ├── claude-cli-adapter.ts  # Spawns claude CLI with --output-format stream-json
-│   │   ├── ndjson-parser.ts       # Parses newline-delimited JSON stream
-│   │   └── input-formatter.ts     # Formats messages for CLI stdin
-│   ├── instance/
-│   │   └── instance-manager.ts    # Instance CRUD, lifecycle, batched updates
-│   └── ipc/
-│       └── ipc-main-handler.ts    # Handles IPC calls from renderer
+│   │   ├── adapters/                  # CLI adapters (Claude, Copilot)
+│   │   └── ndjson-parser.ts           # NDJSON stream parsing
+│   ├── core/
+│   │   ├── config/                    # Configuration management
+│   │   └── system/                    # Health, stats, cost tracking
+│   ├── hooks/                         # Hook system (pre/post exec)
+│   ├── instance/                      # Instance management (lifecycle, state)
+│   ├── ipc/                           # IPC handlers for all features
+│   ├── learning/                      # ML/learning systems (GRPO, A/B testing)
+│   ├── memory/                        # Memory system (episodic, procedural)
+│   ├── orchestration/                 # Multi-instance orchestration
+│   ├── persistence/                   # Data persistence (RLM database)
+│   ├── providers/                     # Provider plugins (Claude, Codex)
+│   ├── rlm/                           # Reinforcement Learning from Memory
+│   ├── security/                      # Secret detection, redaction
+│   ├── session/                       # Session continuity
+│   ├── tasks/                         # Background tasks, todo management
+│   └── workspace/                     # Worktree management
 │
-├── renderer/                      # Angular 19 Application (Zoneless)
+├── renderer/                          # Angular 19 Application (Zoneless)
 │   ├── app/
-│   │   ├── app.component.ts       # Root component with macOS title bar support
-│   │   ├── app.config.ts          # Zoneless change detection config
+│   │   ├── app.component.ts           # Root component
+│   │   ├── app.config.ts              # Zoneless change detection
 │   │   ├── core/
-│   │   │   ├── state/
-│   │   │   │   └── instance.store.ts      # Signals-based state management
+│   │   │   ├── state/                 # Signal-based stores
+│   │   │   │   ├── instance/          # Instance state management
+│   │   │   │   └── verification/      # Verification state management
 │   │   │   └── services/
-│   │   │       ├── electron-ipc.service.ts # Bridge to Electron APIs
-│   │   │       └── update-batcher.service.ts # 50ms update batching
+│   │   │       └── ipc/               # Feature-specific IPC services
 │   │   └── features/
-│   │       ├── dashboard/         # Main layout with sidebar + detail
-│   │       ├── instance-list/     # Virtual scroll list, status indicators
-│   │       ├── instance-detail/   # Output stream, context bar, input panel
-│   │       └── file-drop/         # Drag & drop files, paste images
-│   └── styles.scss                # Global styles, CSS variables, dark/light theme
+│   │       ├── dashboard/             # Main layout
+│   │       ├── debate/                # Debate feature
+│   │       ├── file-drop/             # File handling
+│   │       ├── file-explorer/         # File browser
+│   │       ├── instance-detail/       # Instance view
+│   │       ├── instance-list/         # Instance list
+│   │       ├── providers/             # Provider management
+│   │       ├── rlm/                   # RLM analytics UI
+│   │       ├── settings/              # Settings panels
+│   │       ├── training/              # Training dashboard
+│   │       └── verification/          # Multi-agent verification
+│   │           ├── config/            # Agent config panels
+│   │           ├── dashboard/         # Verification dashboard
+│   │           ├── execution/         # Monitoring, selectors
+│   │           ├── results/           # Results, export, heatmap
+│   │           └── shared/            # Shared verification components
+│   └── styles.scss
 │
-├── shared/                        # Shared between main & renderer
-│   ├── types/
-│   │   ├── instance.types.ts      # Instance, ContextUsage, OutputMessage
-│   │   ├── ipc.types.ts           # IPC channels, payloads
-│   │   └── cli.types.ts           # CLI stream message types
-│   ├── constants/
-│   │   ├── status-colors.ts       # Color coding for statuses
-│   │   └── limits.ts              # System limits, defaults
-│   └── utils/
-│       └── id-generator.ts        # UUID, token generation
+├── shared/                            # Shared types and utils
+│   ├── types/                         # TypeScript interfaces
+│   ├── constants/                     # System constants
+│   └── utils/                         # Utility functions
 │
-├── preload/
-│   └── preload.ts                 # Secure context bridge for IPC
-│
-└── workers/                       # (Placeholder for Phase 4)
+└── preload/
+    └── preload.ts                     # Context bridge for IPC
 ```
 
 ### Key Features Implemented

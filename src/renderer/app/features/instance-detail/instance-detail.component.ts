@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { InstanceStore } from '../../core/state/instance.store';
 import { SettingsStore } from '../../core/state/settings.store';
-import { ElectronIpcService } from '../../core/services/ipc';
+import { ElectronIpcService, RecentDirectoriesIpcService } from '../../core/services/ipc';
 import { DraftService } from '../../core/services/draft.service';
 import { ProviderStateService } from '../../core/services/provider-state.service';
 import { OutputStreamComponent } from './output-stream.component';
@@ -66,7 +66,7 @@ import { InstanceWelcomeComponent } from './instance-welcome.component';
             (saveName)="onSaveName($event)"
             (cycleAgentMode)="onCycleAgentMode()"
             (toggleYolo)="onToggleYolo()"
-            (selectFolder)="onSelectFolder()"
+            (selectFolder)="onSelectFolder($event)"
             (interrupt)="onInterrupt()"
             (restart)="onRestart()"
             (terminate)="onTerminate()"
@@ -139,7 +139,7 @@ import { InstanceWelcomeComponent } from './instance-welcome.component';
       <app-instance-welcome
         [workingDirectory]="welcomeWorkingDirectory()"
         [pendingFiles]="welcomePendingFiles()"
-        (selectFolder)="onSelectWelcomeFolder()"
+        (selectFolder)="onSelectWelcomeFolder($event)"
         (sendMessage)="onWelcomeSendMessage($event)"
         (filesDropped)="onWelcomeFilesDropped($event)"
         (imagesPasted)="onWelcomeImagesPasted($event)"
@@ -279,6 +279,7 @@ export class InstanceDetailComponent {
   private store = inject(InstanceStore);
   private settingsStore = inject(SettingsStore);
   private ipc = inject(ElectronIpcService);
+  private recentDirsService = inject(RecentDirectoriesIpcService);
   private draftService = inject(DraftService);
   private providerState = inject(ProviderStateService);
 
@@ -370,12 +371,36 @@ export class InstanceDetailComponent {
 
   @HostListener('window:keydown', ['$event'])
   handleKeyboardShortcut(event: KeyboardEvent): void {
+    // Escape - interrupt busy instance
     if (event.key === 'Escape') {
       const inst = this.instance();
       if (inst && inst.status === 'busy') {
         event.preventDefault();
         this.onInterrupt();
       }
+    }
+
+    // Cmd/Ctrl + O - open folder selection
+    if ((event.metaKey || event.ctrlKey) && event.key === 'o') {
+      event.preventDefault();
+      this.openFolderSelection();
+    }
+  }
+
+  /**
+   * Open folder selection dialog via keyboard shortcut
+   */
+  async openFolderSelection(): Promise<void> {
+    const folder = await this.recentDirsService.selectFolderAndTrack();
+    if (!folder) return;
+
+    const inst = this.instance();
+    if (inst) {
+      // Update existing instance
+      this.store.setWorkingDirectory(inst.id, folder);
+    } else {
+      // Update welcome screen
+      this.welcomeWorkingDirectory.set(folder);
     }
   }
 
@@ -503,10 +528,10 @@ export class InstanceDetailComponent {
     }
   }
 
-  onSelectFolder(): void {
+  onSelectFolder(path: string): void {
     const inst = this.instance();
-    if (inst) {
-      this.store.selectWorkingDirectory(inst.id);
+    if (inst && path) {
+      this.store.setWorkingDirectory(inst.id, path);
     }
   }
 
@@ -626,8 +651,7 @@ export class InstanceDetailComponent {
     );
   }
 
-  async onSelectWelcomeFolder(): Promise<void> {
-    const folder = await this.ipc.selectFolder();
+  onSelectWelcomeFolder(folder: string): void {
     if (folder) {
       this.welcomeWorkingDirectory.set(folder);
     }

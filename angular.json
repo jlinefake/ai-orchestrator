@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "claude-orchestrator": {
+    "ai-orchestrator": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -67,10 +67,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "claude-orchestrator:build:production"
+              "buildTarget": "ai-orchestrator:build:production"
             },
             "development": {
-              "buildTarget": "claude-orchestrator:build:development"
+              "buildTarget": "ai-orchestrator:build:development"
             }
           },
           "defaultConfiguration": "development"

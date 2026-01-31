@@ -10,11 +10,12 @@ import {
 } from '@angular/core';
 import { DropZoneComponent } from '../file-drop/drop-zone.component';
 import { InputPanelComponent } from './input-panel.component';
+import { RecentDirectoriesDropdownComponent } from '../../shared/components/recent-directories-dropdown/recent-directories-dropdown.component';
 
 @Component({
   selector: 'app-instance-welcome',
   standalone: true,
-  imports: [DropZoneComponent, InputPanelComponent],
+  imports: [DropZoneComponent, InputPanelComponent, RecentDirectoriesDropdownComponent],
   template: `
     <app-drop-zone
       class="full-drop-zone"
@@ -24,19 +25,19 @@ import { InputPanelComponent } from './input-panel.component';
       <div class="welcome-view">
         <div class="welcome-content">
           <div class="welcome-icon">🤖</div>
-          <h1 class="welcome-title">Claude Orchestrator</h1>
+          <h1 class="welcome-title">AI Orchestrator</h1>
           <p class="welcome-hint">
             Start a conversation to create a new instance
           </p>
 
           <!-- Folder selector -->
-          <button
-            class="welcome-folder-btn"
-            (click)="selectFolder.emit()"
-            [title]="workingDirectory() || 'Click to select a working folder'"
-          >
-            📁 {{ workingDirectory() || 'Select working folder...' }}
-          </button>
+          <div class="welcome-folder-wrapper">
+            <app-recent-directories-dropdown
+              [currentPath]="workingDirectory() || ''"
+              placeholder="Select working folder..."
+              (folderSelected)="selectFolder.emit($event)"
+            />
+          </div>
         </div>
         <div class="welcome-input">
           <app-input-panel
@@ -156,31 +157,8 @@ import { InputPanelComponent } from './input-panel.component';
         animation: fadeInUp 0.6s ease-out 0.15s both;
       }
 
-      .welcome-folder-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--spacing-sm);
+      .welcome-folder-wrapper {
         margin-top: var(--spacing-lg);
-        padding: var(--spacing-sm) var(--spacing-lg);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-lg);
-        color: var(--text-muted);
-        font-family: var(--font-mono);
-        font-size: 13px;
-        cursor: pointer;
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        transition: all var(--transition-fast);
-
-        &:hover {
-          border-color: var(--primary-color);
-          color: var(--text-primary);
-          background: rgba(var(--primary-rgb), 0.1);
-          box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.15);
-        }
       }
     `
   ],
@@ -191,7 +169,7 @@ export class InstanceWelcomeComponent {
   pendingFiles = input<File[]>([]);
 
   // Actions
-  selectFolder = output<void>();
+  selectFolder = output<string>();
   sendMessage = output<string>();
   filesDropped = output<File[]>();
   imagesPasted = output<File[]>();

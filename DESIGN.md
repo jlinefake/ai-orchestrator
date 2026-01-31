@@ -1,16 +1,16 @@
-# Claude Orchestrator - Design Document
+# AI Orchestrator - Design Document
 
 ## Overview
 
-Claude Orchestrator is a desktop application for managing multiple Claude Code CLI instances. It provides a graphical interface for creating, monitoring, and coordinating Claude instances at scale, from a single instance up to thousands.
+AI Orchestrator is a high-performance desktop environment designed to manage, monitor, and coordinate multiple AI CLI instances (Claude, Gemini, OpenAI, and more). It bridges the gap between command-line power and graphical usability, scaling from individual agent interactions to massive, orchestrated swarms of thousands of concurrent instances.
 
 ## Core Goals
 
-1. **Wrap Claude Code CLI** - Provide a GUI around the Claude Code command-line interface
-2. **Scale to 10,000+ instances** - Support massive parallelization for large projects
-3. **Enable instance coordination** - Allow Claude instances to communicate and control each other
-4. **Visual feedback** - Real-time status indicators, context usage, and output streaming
-5. **Cross-platform** - Mac priority, Windows/Linux support planned
+1. **Seamless CLI Integration** - Encapsulate the Claude Code CLI within a robust, interactive GUI.
+2. **Massive Scalability** - Support the parallel execution of 10,000+ instances for enterprise-scale projects.
+3. **Agent Coordination** - Enable instances to communicate, delegate tasks, and form complex supervisor hierarchies.
+4. **Rich Visual Telemetry** - Provide real-time status indicators, token usage metrics, and streaming output visualization.
+5. **Cross-Platform Compatibility** - Prioritize macOS native integration, with planned support for Windows and Linux.
 
 ---
 
@@ -18,10 +18,10 @@ Claude Orchestrator is a desktop application for managing multiple Claude Code C
 
 ### Technology Stack
 
-- **Electron** - Desktop application framework
-- **Angular 19+** - Frontend framework (zoneless, signals-based)
-- **TypeScript** - Full-stack type safety
-- **Claude Code CLI** - Backend AI engine (spawned as child processes)
+- **Electron** - Robust desktop application framework for cross-platform deployment.
+- **Angular 19+** - Modern, zoneless frontend framework utilizing signals for reactive performance.
+- **TypeScript** - Ensuring full-stack type safety and shared interfaces between main and renderer processes.
+- **Claude Code CLI** - The core AI engine, managed as spawned child processes for isolation and control.
 
 ### Process Model
 
@@ -80,50 +80,68 @@ Inspired by Erlang OTP, instances can be organized in a supervision hierarchy:
 ### Phase 1: Core Functionality (Current)
 
 #### Instance Management
-- [x] Create new Claude instances
-- [x] Terminate instances
-- [x] Restart instances
-- [x] View instance list with filtering
-- [x] Select and view instance details
+- [x] **Lifecycle Control**: Create, terminate, and restart Claude instances.
+- [x] **List View**: Sortable and filterable list of active instances.
+- [x] **Detailed Inspection**: Deep dive into individual instance state and history.
 
 #### Visual Feedback
-- [x] Status indicators with color coding:
-  - 🟢 **Green** - Idle (ready for input)
-  - 🔵 **Blue** - Busy (processing)
-  - 🟡 **Amber** - Waiting for user input
-  - 🔴 **Red** - Error state
-- [x] Context usage bar (tokens used / max tokens)
-- [x] Real-time output streaming
+- [x] **Status Indicators**: Color-coded states for quick health assessment:
+  - 🟢 **Green** - Idle (Ready for input)
+  - 🔵 **Blue** - Busy (Processing)
+  - 🟡 **Amber** - Waiting (User input required)
+  - 🔴 **Red** - Error (Process failure)
+- [x] **Context Metrics**: Visual bar displaying token usage vs. limits.
+- [x] **Output Streaming**: Low-latency rendering of CLI output.
 
 #### Input/Output
-- [x] Text input with Enter to send
-- [x] File drag & drop support
-- [x] Image paste support (Cmd+V)
-- [x] Streaming JSON output parsing
+- [x] **Interactive Console**: Text input with standard command history and execution.
+- [x] **File Integration**: Drag & drop support for file context.
+- [x] **Rich Media**: Clipboard support for images (Cmd+V).
+- [x] **Structured Parsing**: Real-time parsing of JSON output streams.
 
 #### Native App Experience
-- [x] macOS traffic lights integration
-- [x] Native window dragging
-- [x] Dark theme optimized UI
-- [x] Vibrancy effects (macOS)
+- [x] **macOS Integration**: Native traffic lights and window controls.
+- [x] **Draggable Windows**: Native-feeling window management.
+- [x] **Theming**: Optimized dark mode for prolonged usage.
+- [x] **Visual Polish**: Platform-specific vibrancy effects (macOS).
 
-### Phase 2: Hierarchical Instances (Planned)
+### Phase 2: Hierarchical Instances (Implemented)
 
 #### Parent-Child Relationships
-- [ ] Create child instances from parent
-- [ ] Visual hierarchy in sidebar (tree view)
-- [ ] Cascade termination (terminate parent = terminate children)
-- [ ] Inherit working directory from parent
+- [x] **Spawn Control**: Capability to spawn child instances directly from a parent.
+- [x] **Tree Visualization**: Hierarchical sidebar view representing instance lineage (IPC handlers ready).
+- [x] **Cascade Management**: Configurable termination policies (terminate-children, orphan-children, reparent-to-root).
+- [x] **Context Inheritance**: Option for children to inherit working directory, environment, YOLO mode, and agent settings.
 
 #### Supervisor Strategies
-- [ ] **one-for-one** - Restart only the failed instance
-- [ ] **one-for-all** - Restart all siblings if one fails
-- [ ] **rest-for-one** - Restart failed instance and all started after it
+- [x] **One-for-One**: Restart only the specific failed instance.
+- [x] **One-for-All**: Restart the failed instance and all its siblings.
+- [x] **Rest-for-One**: Restart the failed instance and any siblings started after it.
+
+#### Phase 2 Implementation Details
+- **New Files Created**:
+  - `src/main/process/supervisor-tree.ts` - Root supervisor with auto-expansion for 10,000+ instances
+  - `src/main/process/supervisor-node.ts` - Individual supervisor nodes with restart strategies
+  - `src/main/process/circuit-breaker.ts` - Resource protection and restart rate limiting
+  - `src/main/ipc/handlers/supervision-handlers.ts` - IPC handlers for supervision tree UI
+
+- **Types Added** (in `supervision.types.ts`):
+  - `TerminationPolicy`: 'terminate-children' | 'orphan-children' | 'reparent-to-root'
+  - `ContextInheritanceConfig`: Working dir, env vars, YOLO mode, agent settings inheritance
+  - `ChildSpawnConfig`: Configuration for spawning child instances
+  - `InstanceHierarchy`: Hierarchical relationship tracking
+  - `HierarchyTreeNode`: Tree view node for UI rendering
+
+- **Instance Fields Added** (in `instance.types.ts`):
+  - `depth`: Position in hierarchy (0 = root)
+  - `workerNodeId`: Worker node ID in supervision tree
+  - `terminationPolicy`: Cascade termination behavior
+  - `contextInheritance`: What settings children inherit
 
 ### Phase 3: Cross-Instance Communication (Planned)
 
 #### Token-Based Messaging
-Instances can communicate via tokens with permission levels:
+Instances utilize a capability-based security model to communicate:
 
 ```typescript
 interface CommunicationToken {
@@ -135,55 +153,55 @@ interface CommunicationToken {
 }
 
 type TokenPermission =
-  | 'read'      // Can read target's output
-  | 'write'     // Can send messages to target
-  | 'control'   // Can restart/terminate target
+  | 'read'      // Can read target's output stream
+  | 'write'     // Can send messages to target input
+  | 'control'   // Can restart/terminate target lifecycle
   | 'spawn';    // Can create child instances
 ```
 
-#### Message Types
-- **Direct messages** - Instance A sends to Instance B
-- **Broadcast** - Parent sends to all children
-- **Pub/Sub** - Instances subscribe to topics
+#### Message Topologies
+- **Direct**: Point-to-point communication (Instance A → Instance B).
+- **Broadcast**: One-to-many communication (Parent → All Children).
+- **Pub/Sub**: Topic-based event subscription model.
 
 #### Use Cases
-- Code review: Reviewer instance reads Writer instance output
-- Test runner: Spawns child instances for parallel test execution
-- Agent orchestration: Coordinator delegates tasks to specialists
+- **Code Review**: A 'Reviewer' instance monitors and critiques the output of a 'Writer' instance.
+- **Test Runner**: A 'Coordinator' spawns ephemeral child instances for parallel test execution.
+- **Swarm Orchestration**: A 'Supervisor' delegates specialized tasks to a pool of 'Worker' agents.
 
 ### Phase 4: Scale & Performance (Planned)
 
-#### Virtual Scrolling
-- [x] CDK Virtual Scroll for instance list
-- [ ] Virtualized output buffer (for very long conversations)
+#### Virtualization
+- [x] **List Virtualization**: CDK Virtual Scroll for handling thousands of list items.
+- [ ] **Output Buffering**: Virtualized rendering for massive conversation histories.
 
-#### Batched Updates
-- [x] 50ms batching interval for state updates
-- [ ] Configurable batch intervals
-- [ ] Priority updates bypass batching (errors, termination)
+#### Optimized State Management
+- [x] **Batched Updates**: 50ms aggregation window for state changes to reduce render cycles.
+- [ ] **Configurable Intervals**: Dynamic batching based on system load.
+- [ ] **Priority Bypass**: Immediate processing for critical events (errors, termination).
 
-#### Resource Management
-- [ ] Memory limits per instance
-- [ ] CPU throttling for background instances
-- [ ] Automatic instance hibernation
-- [ ] Instance pooling for rapid spawning
+#### Resource Governance
+- [ ] **Memory Caps**: Hard limits per instance to prevent OOM.
+- [ ] **CPU Throttling**: Background priority management for non-active instances.
+- [ ] **Hibernation**: Automatic suspension of idle instances to swap.
+- [ ] **Instance Pooling**: Pre-warmed pools for instant spawn times.
 
 ### Phase 5: Advanced Features (Planned)
 
-#### Session Persistence
-- [ ] Save/restore sessions
-- [ ] Export conversation history
-- [ ] Resume sessions after restart
+#### Persistence & Continuity
+- [ ] **Session State**: Full serialization and restoration of instance state.
+- [ ] **Export**: JSON/Markdown export of conversation trees.
+- [ ] **Crash Recovery**: Automatic session resumption post-failure.
 
-#### Templates & Presets
-- [ ] Instance templates (pre-configured settings)
-- [ ] Quick-start presets (code review, testing, documentation)
-- [ ] Custom system prompts per instance
+#### Templating System
+- [ ] **Blueprints**: Pre-configured instance setups (System Prompt + Tools + Env).
+- [ ] **Quick-Start Library**: Built-in templates for common tasks (Review, Test, Doc).
+- [ ] **Per-Instance Customization**: Overridable system prompts and toolsets.
 
-#### Collaboration (Nice to Have)
-- [ ] Share instance view (read-only)
-- [ ] Multi-user coordination
-- [ ] Instance handoff between users
+#### Collaborative Features (Nice to Have)
+- [ ] **Shared View**: Read-only mirroring of instance state.
+- [ ] **Multi-User Sync**: Real-time coordination between multiple human operators.
+- [ ] **Handoff Protocols**: Transferring instance ownership between users.
 
 ---
 
@@ -192,7 +210,7 @@ type TokenPermission =
 ### Sidebar (Left Panel)
 ```
 ┌─────────────────────────┐
-│  Claude Orchestrator    │
+│  AI Orchestrator        │
 │  [+ New Instance]       │
 ├─────────────────────────┤
 │  [Filter...] [Status ▼] │
@@ -351,57 +369,55 @@ const LIMITS = {
 ```
 
 ### Per-Instance Settings (Planned)
-- Model selection (claude-sonnet-4-20250514, opus, haiku)
-- Max tokens
-- System prompt
-- Allowed/disallowed tools
-- Working directory
+- **Model Selection**: Granular control (e.g., `claude-3-opus`, `claude-3-sonnet`).
+- **Token Limits**: Configurable context windows.
+- **System Prompts**: Custom behavioral instructions.
+- **Tool Restrictions**: Allow/Deny lists for tool access.
+- **Environment**: Scoped working directories and environment variables.
 
 ---
 
 ## Error Handling
 
-### Instance Errors
-- CLI spawn failure → Mark instance as error, show message
-- CLI crash → Emit error event, offer restart
-- API errors → Display in output stream with error styling
+### Failure Modes
+- **Launch Failure**: If CLI fails to spawn, instance enters 'Error' state with accessible stderr logs.
+- **Process Crash**: Unexpected termination triggers an 'Error' event with automatic recovery options.
+- **API Errors**: Rate limits or API failures are rendered distinctly in the output stream.
 
 ### Recovery Strategies
-- Automatic restart with exponential backoff (planned)
-- Manual restart via UI
-- Session resume from last checkpoint (planned)
+- **Auto-Restart**: Exponential backoff strategy for transient failures (Planned).
+- **Manual Intervention**: UI controls for immediate restart or termination.
+- **State Restoration**: Resume from last known good checkpoint (Planned).
 
 ---
 
 ## Security Considerations
 
-### Process Isolation
-- Each Claude instance runs in its own process
-- Sandboxed preload script for IPC
-- Context isolation enabled
+### Isolation & Sandboxing
+- **Process Isolation**: Each Claude instance runs in a dedicated child process.
+- **Context Bridge**: Renderer communicates with Main process exclusively via secure IPC.
+- **Preload Hardening**: Context isolation enabled, preventing direct Node.js access in the UI.
 
-### Permissions
-- Instances cannot access each other without explicit tokens
-- Working directory scoped per instance
-- No direct filesystem access from renderer
+### Access Control
+- **Tokenized Communication**: Instances require explicit capabilities to interact.
+- **Filesystem Scoping**: Working directories are strictly enforced per instance.
+- **No Direct IO**: Renderer cannot access filesystem directly; all operations go through validated Main process handlers.
 
 ---
 
 ## Future Considerations
 
-### Multi-Model Support
-- Switch between Claude models mid-conversation
-- Cost optimization (use Haiku for simple tasks)
+### Extended Capabilities
+- **Model Switching**: Dynamic hot-swapping of models during a conversation.
+- **Cost Optimization**: Automated routing of simple tasks to lighter models (e.g., Haiku).
 
-### Plugin System
-- Custom output renderers
-- Integration with external tools
-- Workflow automation
+### Ecosystem
+- **Plugin Architecture**: API for custom renderers and third-party tool integrations.
+- **Workflow Automation**: Scriptable sequences of multi-agent interactions.
 
-### Analytics
-- Token usage tracking
-- Cost estimation
-- Performance metrics
+### Intelligence
+- **Analytics Dashboard**: Comprehensive view of token usage, costs, and performance metrics.
+- **Self-Optimization**: System suggestions for model selection based on task complexity.
 
 ---
 
@@ -411,26 +427,26 @@ const LIMITS = {
 ```
 claude-orchestrator/
 ├── src/
-│   ├── main/           # Electron main process
-│   │   ├── cli/        # Claude CLI integration
-│   │   ├── instance/   # Instance management
-│   │   ├── ipc/        # IPC handlers
-│   │   └── index.ts    # Entry point
-│   ├── preload/        # Context bridge
-│   ├── renderer/       # Angular app
+│   ├── main/           # Electron Main Process (Node.js)
+│   │   ├── cli/        # Claude CLI Adapter Layer
+│   │   ├── instance/   # Instance State Management
+│   │   ├── ipc/        # IPC Event Handlers
+│   │   └── index.ts    # Application Entry Point
+│   ├── preload/        # Secure Context Bridge
+│   ├── renderer/       # Angular 19+ Frontend
 │   │   └── app/
-│   │       ├── core/   # Services, state
-│   │       └── features/
-│   └── shared/         # Shared types, constants
-├── dist/               # Compiled output
+│   │       ├── core/   # Services, Stores, Models
+│   │       └── features/ # Feature Modules
+│   └── shared/         # Shared Interfaces & Types
+├── dist/               # Compilation Artifacts
 └── package.json
 ```
 
 ### Scripts
 ```bash
-npm start          # Development mode
-npm run build      # Production build
-npm run build:main # Build main process only
+npm start          # Launch in Development Mode
+npm run build      # Compile for Production
+npm run build:main # Recompile Main Process only
 ```
 
 ---

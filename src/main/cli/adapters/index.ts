@@ -1,5 +1,5 @@
 /**
- * CLI Adapters - Multi-CLI support for Claude Orchestrator
+ * CLI Adapters - Multi-CLI support for AI Orchestrator
  */
 
 // Base adapter
