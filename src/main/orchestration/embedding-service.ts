@@ -5,6 +5,7 @@
 
 import { EventEmitter } from 'events';
 import type { AgentResponse } from '../../shared/types/verification.types';
+import { STORAGE_LIMITS } from '../../shared/constants/limits';
 
 export interface SemanticClusterConfig {
   similarityThreshold: number; // 0.0-1.0
@@ -30,9 +31,11 @@ export class EmbeddingService extends EventEmitter {
   private cache = new Map<string, EmbeddingCacheEntry>();
   private vocabulary = new Map<string, number>();
   private documentFrequency = new Map<string, number>();
+  private vocabularyAccessOrder: string[] = []; // Track access order for LRU
   private documentCount = 0;
-  private maxCacheSize = 1000;
-  private cacheExpiryMs = 3600000; // 1 hour
+  private maxCacheSize: number = STORAGE_LIMITS.CACHE_ENTRIES;
+  private maxVocabularySize: number = STORAGE_LIMITS.MAX_VOCABULARY_SIZE;
+  private cacheExpiryMs: number = STORAGE_LIMITS.CACHE_TTL_LONG_MS;
 
   static getInstance(): EmbeddingService {
     if (!this.instance) {
@@ -41,8 +44,39 @@ export class EmbeddingService extends EventEmitter {
     return this.instance;
   }
 
+  /**
+   * Reset the singleton instance for testing.
+   * Clears all caches, vocabulary, and state.
+   */
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.clearCache();
+      this.instance.removeAllListeners();
+      (this.instance as any) = undefined;
+    }
+  }
+
   private constructor() {
     super();
+  }
+
+  /**
+   * Configure vocabulary size limit
+   */
+  setMaxVocabularySize(size: number): void {
+    this.maxVocabularySize = size;
+    this.evictVocabularyIfNeeded();
+  }
+
+  /**
+   * Get current vocabulary statistics
+   */
+  getVocabularyStats(): { size: number; maxSize: number; documentCount: number } {
+    return {
+      size: this.vocabulary.size,
+      maxSize: this.maxVocabularySize,
+      documentCount: this.documentCount
+    };
   }
 
   // ============ Public API ============
@@ -158,6 +192,10 @@ export class EmbeddingService extends EventEmitter {
       for (const token of uniqueTokens) {
         if (!this.vocabulary.has(token)) {
           this.vocabulary.set(token, this.vocabulary.size);
+          this.vocabularyAccessOrder.push(token);
+        } else {
+          // Move to end of access order (LRU update)
+          this.updateAccessOrder(token);
         }
         this.documentFrequency.set(
           token,
@@ -167,6 +205,48 @@ export class EmbeddingService extends EventEmitter {
     }
 
     this.documentCount += texts.length;
+
+    // Evict oldest vocabulary entries if over limit
+    this.evictVocabularyIfNeeded();
+  }
+
+  /**
+   * Update access order for LRU tracking
+   */
+  private updateAccessOrder(token: string): void {
+    const idx = this.vocabularyAccessOrder.indexOf(token);
+    if (idx !== -1) {
+      this.vocabularyAccessOrder.splice(idx, 1);
+      this.vocabularyAccessOrder.push(token);
+    }
+  }
+
+  /**
+   * Evict oldest vocabulary entries when over limit (LRU eviction)
+   */
+  private evictVocabularyIfNeeded(): void {
+    while (this.vocabulary.size > this.maxVocabularySize && this.vocabularyAccessOrder.length > 0) {
+      const oldestToken = this.vocabularyAccessOrder.shift();
+      if (oldestToken) {
+        this.vocabulary.delete(oldestToken);
+        this.documentFrequency.delete(oldestToken);
+      }
+    }
+
+    // Reindex vocabulary after eviction to keep indices contiguous
+    if (this.vocabulary.size > 0 && this.vocabulary.size < this.maxVocabularySize / 2) {
+      this.reindexVocabulary();
+    }
+  }
+
+  /**
+   * Reindex vocabulary to maintain contiguous indices
+   */
+  private reindexVocabulary(): void {
+    let index = 0;
+    for (const token of this.vocabulary.keys()) {
+      this.vocabulary.set(token, index++);
+    }
   }
 
   private tokenize(text: string): string[] {
@@ -637,6 +717,7 @@ export class EmbeddingService extends EventEmitter {
     this.cache.clear();
     this.vocabulary.clear();
     this.documentFrequency.clear();
+    this.vocabularyAccessOrder = [];
     this.documentCount = 0;
   }
 }

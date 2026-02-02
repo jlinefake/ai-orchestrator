@@ -26,6 +26,9 @@ import { PERSONALITY_PROMPTS, selectPersonalities } from './personalities';
 import { getVerificationCache, type VerificationCache } from './verification-cache';
 import { getConfidenceAnalyzer, type ConfidenceAnalyzer } from './confidence-analyzer';
 import { getEmbeddingService as getOrchestrationEmbeddingService, type EmbeddingService, type SemanticClusterConfig, type ResponseCluster } from './embedding-service';
+import { getLogger } from '../logging/logger';
+
+const logger = getLogger('MultiVerifyCoordinator');
 
 export class InsufficientAgentsError extends Error {
   constructor(message: string, public successfulAgents: number, public minRequired: number) {
@@ -52,6 +55,21 @@ export class MultiVerifyCoordinator extends EventEmitter {
       this.instance = new MultiVerifyCoordinator();
     }
     return this.instance;
+  }
+
+  /**
+   * Reset the singleton instance for testing.
+   * Clears all active verifications, results, and resets state.
+   */
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.activeVerifications.clear();
+      this.instance.results.clear();
+      this.instance.agentRetryCount.clear();
+      this.instance.failedAgents.clear();
+      this.instance.removeAllListeners();
+      (this.instance as any) = undefined;
+    }
   }
 
   private constructor() {
@@ -305,7 +323,7 @@ export class MultiVerifyCoordinator extends EventEmitter {
 
     // Cache the result for future use
     await this.cache.cache(verificationResult).catch((err) => {
-      console.warn('[MultiVerifyCoordinator] Failed to cache verification result:', err);
+      logger.warn('Failed to cache verification result', { requestId: request.id, error: String(err) });
     });
 
     // Emit progress: complete phase
@@ -330,6 +348,18 @@ export class MultiVerifyCoordinator extends EventEmitter {
     try {
       // Build agent prompt with personality
       const systemPrompt = this.buildAgentPrompt(agentConfig.personality);
+
+      // Check if any handlers are registered for this extensibility event
+      const listenerCount = this.listenerCount('verification:invoke-agent');
+      if (listenerCount === 0) {
+        logger.warn('No handlers registered for "verification:invoke-agent" event', {
+          hint: 'This is an extensibility point requiring an external handler. See CLAUDE.md for integration.'
+        });
+        throw new Error(
+          'No handler registered for verification:invoke-agent. ' +
+          'Connect an LLM invocation handler to use multi-agent verification.'
+        );
+      }
 
       // Emit event for orchestration handler to execute
       const result = await new Promise<{ response: string; tokens: number; cost: number }>((resolve, reject) => {

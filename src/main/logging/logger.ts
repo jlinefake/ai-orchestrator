@@ -453,3 +453,15 @@ export function getLogManager(): LogManager {
 export function getLogger(subsystem: string): SubsystemLogger {
   return getLogManager().getLogger(subsystem);
 }
+
+/**
+ * Reset the LogManager singleton for testing.
+ * Clears all loggers, buffers, and resets to default config.
+ */
+export function _resetLogManagerForTesting(): void {
+  if (logManagerInstance) {
+    logManagerInstance.clearBuffer();
+    logManagerInstance.removeAllListeners();
+    logManagerInstance = null;
+  }
+}

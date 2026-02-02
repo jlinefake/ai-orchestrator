@@ -104,7 +104,7 @@ import { RecentDirectoriesDropdownComponent } from '../../shared/components/rece
         text-align: center;
         max-width: 480px;
         position: relative;
-        z-index: 1;
+        z-index: 2;
         animation: fadeInUp 0.6s ease-out;
       }
 

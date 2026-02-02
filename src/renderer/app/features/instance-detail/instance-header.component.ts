@@ -39,10 +39,10 @@ import type { Instance } from '../../core/state/instance.store';
           } @else {
             <h2
               class="instance-name editable"
-              title="Click to rename"
+              title="Double-click to rename"
               role="button"
               tabindex="0"
-              (click)="startEditName.emit()"
+              (dblclick)="startEditName.emit()"
               (keydown.enter)="startEditName.emit()"
               (keydown.space)="startEditName.emit()"
             >
@@ -100,9 +100,9 @@ import type { Instance } from '../../core/state/instance.store';
             class="mode-badge"
             [class.plan]="instance().agentId === 'plan'"
             [class.review]="instance().agentId === 'review'"
-            [disabled]="isChangingMode() || instance().status === 'busy'"
+            [disabled]="isChangingMode() || instance().status === 'busy' || instance().status === 'respawning'"
             [title]="
-              instance().status === 'busy'
+              instance().status === 'busy' || instance().status === 'respawning'
                 ? 'Cannot change mode while instance is busy'
                 : 'Click to change mode'
             "
@@ -120,9 +120,9 @@ import type { Instance } from '../../core/state/instance.store';
           <button
             class="yolo-badge"
             [class.active]="instance().yoloMode"
-            [disabled]="isTogglingYolo() || instance().status === 'busy'"
+            [disabled]="isTogglingYolo() || instance().status === 'busy' || instance().status === 'respawning'"
             [title]="
-              instance().status === 'busy'
+              instance().status === 'busy' || instance().status === 'respawning'
                 ? 'Cannot toggle YOLO mode while instance is busy'
                 : instance().yoloMode
                   ? 'YOLO Mode: Auto-approve all tool calls without prompting. Click to disable'
@@ -168,7 +168,7 @@ import type { Instance } from '../../core/state/instance.store';
           class="btn-action"
           title="Restart instance"
           (click)="restart.emit()"
-          [disabled]="instance().status === 'initializing'"
+          [disabled]="instance().status === 'initializing' || instance().status === 'respawning'"
         >
           ↻ Restart
         </button>

@@ -26,6 +26,9 @@ import type {
   DebateRoundType,
   CritiqueSeverity,
 } from '../../shared/types/debate.types';
+import { getLogger } from '../logging/logger';
+
+const logger = getLogger('DebateCoordinator');
 
 export class DebateCoordinator extends EventEmitter {
   private static instance: DebateCoordinator;
@@ -49,6 +52,19 @@ export class DebateCoordinator extends EventEmitter {
     return this.instance;
   }
 
+  /**
+   * Reset the singleton instance for testing.
+   * Clears all active debates, results, and resets stats.
+   */
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.activeDebates.clear();
+      this.instance.completedDebates.clear();
+      this.instance.removeAllListeners();
+      (this.instance as any) = undefined;
+    }
+  }
+
   private constructor() {
     super();
     this.stats = {
@@ -59,6 +75,23 @@ export class DebateCoordinator extends EventEmitter {
       avgDurationMs: 0,
       avgTokensUsed: 0,
     };
+  }
+
+  /**
+   * Check if a handler is registered for an extensibility event.
+   * Logs a warning if no handler is found.
+   */
+  private checkExtensibilityHandler(eventName: string): void {
+    const count = this.listenerCount(eventName);
+    if (count === 0) {
+      logger.warn(`No handlers registered for "${eventName}" event`, {
+        hint: 'This is an extensibility point requiring an external handler. See CLAUDE.md for integration.'
+      });
+      throw new Error(
+        `No handler registered for ${eventName}. ` +
+        'Connect an LLM invocation handler to use the debate system.'
+      );
+    }
   }
 
   // ============ Debate Lifecycle ============
@@ -265,6 +298,9 @@ export class DebateCoordinator extends EventEmitter {
     // Build prompt for initial response
     const prompt = this.buildInitialResponsePrompt(debate, agentIndex);
 
+    // Check for registered handler before emitting
+    this.checkExtensibilityHandler('debate:generate-response');
+
     // Emit event to request LLM generation
     const result = await new Promise<{ response: string; tokens: number }>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -331,6 +367,9 @@ Brief summary of your reasoning approach and key considerations.`;
 
     // Build prompt for critique generation
     const prompt = this.buildCritiquePrompt(debate, agentIndex, contributions);
+
+    // Check for registered handler before emitting
+    this.checkExtensibilityHandler('debate:generate-critiques');
 
     // Emit event to request LLM generation
     const result = await new Promise<{ response: string }>((resolve, reject) => {
@@ -445,6 +484,9 @@ Provide your critiques:`;
     // Build prompt for defense generation
     const prompt = this.buildDefensePrompt(debate, agentIndex, originalContribution, critiquesReceived);
 
+    // Check for registered handler before emitting
+    this.checkExtensibilityHandler('debate:generate-defense');
+
     // Emit event to request LLM generation
     const result = await new Promise<{ response: string }>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -538,6 +580,9 @@ Brief summary of how you addressed the critiques.`;
   private async generateSynthesis(debate: ActiveDebate, consensusAnalysis: ConsensusAnalysis): Promise<string> {
     // Build prompt for synthesis generation
     const prompt = this.buildSynthesisPrompt(debate, consensusAnalysis);
+
+    // Check for registered handler before emitting
+    this.checkExtensibilityHandler('debate:generate-synthesis');
 
     // Emit event to request LLM generation
     const result = await new Promise<{ response: string }>((resolve, reject) => {

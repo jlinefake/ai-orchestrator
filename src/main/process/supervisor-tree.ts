@@ -67,6 +67,17 @@ export class SupervisorTree extends EventEmitter {
     return this.instance;
   }
 
+  /**
+   * Reset the singleton instance for testing.
+   * This cleans up all state and allows a fresh instance to be created.
+   */
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.destroy();
+      (this.instance as any) = undefined;
+    }
+  }
+
   private constructor() {
     super();
     this.config = { ...DEFAULT_TREE_CONFIG };
@@ -531,6 +542,14 @@ export class SupervisorTree extends EventEmitter {
   reset(): void {
     this.shutdown();
     this.config = { ...DEFAULT_TREE_CONFIG };
+  }
+
+  /**
+   * Destroy the tree and clean up all resources
+   */
+  destroy(): void {
+    this.shutdown();
+    this.removeAllListeners();
   }
 }
 

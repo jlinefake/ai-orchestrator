@@ -23,6 +23,8 @@
     "bench:search": "vitest bench src/main/indexing/benchmarks/search.bench.ts",
     "test:load": "vitest run src/main/indexing/__tests__/load/",
     "lint": "ng lint",
+    "verify:ipc": "node scripts/verify-ipc-channels.js",
+    "prebuild": "npm run verify:ipc",
     "postinstall": "node scripts/rebuild-native-modules.js",
     "rebuild:native": "node scripts/rebuild-native-modules.js"
   },
@@ -69,7 +71,8 @@
     "ngx-echarts": "^21.0.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.6.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "zod": "^4.3.6"
   },
   "overrides": {
     "tar": "^7.5.3"

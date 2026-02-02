@@ -14,6 +14,7 @@ export type InstanceStatus =
   | 'idle'
   | 'busy'
   | 'waiting_for_input'
+  | 'respawning'  // Instance is recovering from interrupt, cannot be interrupted again
   | 'error'
   | 'terminated';
 

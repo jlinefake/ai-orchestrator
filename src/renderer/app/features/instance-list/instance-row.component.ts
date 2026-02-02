@@ -86,7 +86,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
             <span
               class="instance-name"
               (dblclick)="onStartEditName($event)"
-              title="Double-click to rename"
+              [title]="isSelected() ? 'Double-click to rename' : 'Click to select, then double-click to rename'"
             >{{ instance().displayName }}</span>
           }
           @if (hasChildren() && !isExpanded()) {
@@ -522,6 +522,10 @@ export class InstanceRowComponent {
 
   onStartEditName(event: Event): void {
     event.stopPropagation();
+    // Only allow editing if the row is already selected
+    if (!this.isSelected()) {
+      return;
+    }
     this.isEditingName.set(true);
     // Focus input after Angular renders it
     setTimeout(() => {

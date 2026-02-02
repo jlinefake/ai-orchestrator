@@ -10,6 +10,7 @@ const STATUS_COLORS: Record<InstanceStatus, string> = {
   idle: '#10b981',         // Green
   busy: '#3b82f6',         // Blue
   waiting_for_input: '#f59e0b', // Amber
+  respawning: '#8b5cf6',   // Purple - recovering from interrupt
   error: '#ef4444',        // Red
   terminated: '#6b7280',   // Gray
 };
@@ -19,6 +20,7 @@ const STATUS_LABELS: Record<InstanceStatus, string> = {
   idle: 'Idle',
   busy: 'Processing...',
   waiting_for_input: 'Waiting for input',
+  respawning: 'Resuming session...',
   error: 'Error',
   terminated: 'Terminated',
 };
@@ -84,6 +86,6 @@ export class StatusIndicatorComponent {
   label = computed(() => STATUS_LABELS[this.status()]);
 
   isPulsing = computed(() =>
-    this.status() === 'busy' || this.status() === 'initializing'
+    this.status() === 'busy' || this.status() === 'initializing' || this.status() === 'respawning'
   );
 }

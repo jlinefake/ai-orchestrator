@@ -114,6 +114,7 @@ import { InstanceWelcomeComponent } from './instance-welcome.component';
             [queuedCount]="queuedMessageCount()"
             [queuedMessages]="queuedMessages()"
             [isBusy]="inst.status === 'busy'"
+            [isRespawning]="inst.status === 'respawning'"
             (sendMessage)="onSendMessage($event)"
             (removeFile)="onRemoveFile($event)"
             (removeFolder)="onRemoveFolder($event)"

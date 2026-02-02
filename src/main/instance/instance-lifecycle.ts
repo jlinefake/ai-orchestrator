@@ -35,6 +35,9 @@ import type {
   ContextUsage,
   OutputMessage
 } from '../../shared/types/instance.types';
+import { getLogger } from '../logging/logger';
+
+const logger = getLogger('InstanceLifecycle');
 
 /**
  * Dependencies required by the lifecycle manager
@@ -253,7 +256,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     };
 
     if (instance.yoloMode) {
-      console.warn('[Security] YOLO mode enabled for instance', {
+      logger.warn('YOLO mode enabled for instance', {
         instanceId: instance.id,
         parentId: instance.parentId,
         provider: instance.provider
@@ -379,7 +382,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     } catch (error) {
       instance.status = 'error';
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('InstanceLifecycleManager: Failed to spawn/initialize CLI:', errorMessage);
+      logger.error('Failed to spawn/initialize CLI', error instanceof Error ? error : undefined, { errorMessage });
 
       const errorOutput = {
         id: generateId(),
@@ -431,10 +434,7 @@ export class InstanceLifecycleManager extends EventEmitter {
           const status = instance.status === 'error' ? 'error' : 'completed';
           await history.archiveInstance(instance, status);
         } catch (error) {
-          console.error(
-            `Failed to archive instance ${instanceId} to history:`,
-            error
-          );
+          logger.error('Failed to archive instance to history', error instanceof Error ? error : undefined, { instanceId });
         }
       }
 
@@ -507,7 +507,7 @@ export class InstanceLifecycleManager extends EventEmitter {
 
       // Clean up disk storage
       this.outputStorage.deleteInstance(instanceId).catch((err) => {
-        console.error(`Failed to clean up storage for ${instanceId}:`, err);
+        logger.error('Failed to clean up storage', err instanceof Error ? err : undefined, { instanceId });
       });
 
       this.emit('removed', instanceId);
@@ -590,7 +590,7 @@ export class InstanceLifecycleManager extends EventEmitter {
       instance.status = 'idle';
     } catch (error) {
       instance.status = 'error';
-      console.error('Failed to restart CLI:', error);
+      logger.error('Failed to restart CLI', error instanceof Error ? error : undefined, { instanceId });
     }
 
     this.deps.queueUpdate(instanceId, instance.status, instance.contextUsage);
@@ -670,13 +670,13 @@ export class InstanceLifecycleManager extends EventEmitter {
       const pid = await adapter.spawn();
       instance.processId = pid;
       instance.status = 'idle';
-      console.log(`[InstanceLifecycleManager] Agent mode changed successfully, PID: ${pid}`);
+      logger.info('Agent mode changed successfully', { instanceId, newAgentId, pid });
 
       const modeChangeMessage = `[System: Agent mode changed to ${newAgent.name}. ${newAgent.description || ''}]`;
       await adapter.sendInput(modeChangeMessage);
     } catch (error) {
       instance.status = 'error';
-      console.error('[InstanceLifecycleManager] Failed to change agent mode:', error);
+      logger.error('Failed to change agent mode', error instanceof Error ? error : undefined, { instanceId, newAgentId });
       throw error;
     }
 
@@ -727,14 +727,14 @@ export class InstanceLifecycleManager extends EventEmitter {
       this.deps.deleteAdapter(instanceId);
       console.log(`[InstanceLifecycleManager] Old adapter deleted from map, now terminating`);
       await oldAdapter.terminate(true);
-      console.log(`[InstanceLifecycleManager] Old adapter terminated`);
+      logger.debug('Old adapter terminated', { instanceId });
     }
 
     instance.yoloMode = newYoloMode;
     instance.status = 'initializing';
 
     if (newYoloMode) {
-      console.warn('[Security] YOLO mode enabled for instance', {
+      logger.warn('YOLO mode enabled for instance', {
         instanceId: instance.id,
         parentId: instance.parentId,
         provider: instance.provider
@@ -782,17 +782,17 @@ export class InstanceLifecycleManager extends EventEmitter {
       instance.processId = pid;
       instance.status = 'idle';
       console.log(`[InstanceLifecycleManager] YOLO mode toggled successfully, PID: ${pid}`);
-      console.log(`[InstanceLifecycleManager] Adapter still exists after spawn: ${!!this.deps.getAdapter(instanceId)}`);
+      logger.debug('Adapter exists after spawn', { instanceId, adapterExists: !!this.deps.getAdapter(instanceId) });
 
       const modeMessage = newYoloMode
         ? '[System: YOLO mode enabled - all tool permissions are now auto-approved.]'
         : '[System: YOLO mode disabled - tool permissions will now require approval.]';
-      console.log(`[InstanceLifecycleManager] Sending mode message to adapter`);
+      logger.debug('Sending mode message to adapter', { instanceId, newYoloMode });
       await adapter.sendInput(modeMessage);
-      console.log(`[InstanceLifecycleManager] Mode message sent, adapter exists: ${!!this.deps.getAdapter(instanceId)}`);
+      logger.debug('Mode message sent', { instanceId, adapterExists: !!this.deps.getAdapter(instanceId) });
     } catch (error) {
       instance.status = 'error';
-      console.error('[InstanceLifecycleManager] Failed to toggle YOLO mode:', error);
+      logger.error('Failed to toggle YOLO mode', error instanceof Error ? error : undefined, { instanceId, newYoloMode });
       throw error;
     }
 
@@ -818,14 +818,13 @@ export class InstanceLifecycleManager extends EventEmitter {
     const instance = this.deps.getInstance(instanceId);
 
     if (!adapter || !instance) {
-      console.warn(`Cannot interrupt instance ${instanceId}: not found`);
+      logger.warn('Cannot interrupt instance: not found', { instanceId });
       return false;
     }
 
+    // Only allow interrupt when busy - block during respawning, initializing, etc.
     if (instance.status !== 'busy') {
-      console.warn(
-        `Cannot interrupt instance ${instanceId}: not busy (status: ${instance.status})`
-      );
+      logger.warn('Cannot interrupt instance: not busy', { instanceId, status: instance.status });
       return false;
     }
 
@@ -842,9 +841,10 @@ export class InstanceLifecycleManager extends EventEmitter {
       this.deps.addToOutputBuffer(instance, message);
       this.emit('output', { instanceId, message });
 
-      instance.status = 'initializing';
+      // Use 'respawning' status to prevent further interrupts during recovery
+      instance.status = 'respawning';
       instance.lastActivity = Date.now();
-      this.deps.queueUpdate(instanceId, 'initializing', instance.contextUsage);
+      this.deps.queueUpdate(instanceId, 'respawning', instance.contextUsage);
     } else {
       this.deps.clearInterrupted(instanceId);
     }
@@ -919,9 +919,9 @@ export class InstanceLifecycleManager extends EventEmitter {
       this.emit('output', { instanceId, message });
 
       this.deps.queueUpdate(instanceId, 'idle', instance.contextUsage);
-      console.log(`respawnAfterInterrupt: Complete, instance is now idle`);
+      logger.info('respawnAfterInterrupt complete', { instanceId });
     } catch (error) {
-      console.error(`respawnAfterInterrupt: Failed to spawn`, error);
+      logger.error('respawnAfterInterrupt: Failed to spawn', error instanceof Error ? error : undefined, { instanceId });
       instance.status = 'error';
       instance.processId = null;
       this.deps.queueUpdate(instanceId, 'error');
@@ -1167,7 +1167,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Second pass: cleanup adapters
     for (const instanceId of adapterEntriesToCleanup) {
       this.forceCleanupAdapter(instanceId).catch((err) => {
-        console.error(`Failed to cleanup zombie process ${instanceId}:`, err);
+        logger.error('Failed to cleanup zombie process', err instanceof Error ? err : undefined, { instanceId });
       });
     }
   }
@@ -1176,12 +1176,12 @@ export class InstanceLifecycleManager extends EventEmitter {
     const adapter = this.deps.getAdapter(instanceId);
     if (!adapter) return;
 
-    console.log(`Force cleaning up adapter for instance ${instanceId}`);
+    logger.info('Force cleaning up adapter', { instanceId });
 
     try {
       await adapter.terminate(false);
     } catch (error) {
-      console.error(`Error during force cleanup of ${instanceId}:`, error);
+      logger.error('Error during force cleanup', error instanceof Error ? error : undefined, { instanceId });
     } finally {
       this.deps.deleteAdapter(instanceId);
     }
@@ -1193,7 +1193,7 @@ export class InstanceLifecycleManager extends EventEmitter {
 
   private setupMemoryMonitoring(): void {
     this.memoryMonitor.on('warning', (stats) => {
-      console.log('Memory warning:', stats);
+      logger.warn('Memory warning', stats as Record<string, unknown>);
       this.emit('memory:warning', stats);
     });
 

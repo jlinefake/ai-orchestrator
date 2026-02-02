@@ -13,6 +13,13 @@ import type {
   InstanceRestartPayload,
   InstanceRenamePayload
 } from '../../../shared/types/ipc.types';
+import {
+  InstanceCreatePayloadSchema,
+  InstanceSendInputPayloadSchema,
+  InstanceTerminatePayloadSchema,
+  InstanceRenamePayloadSchema,
+  validateIpcPayload
+} from '../../../shared/validation/ipc-schemas';
 import { InstanceManager } from '../../instance/instance-manager';
 import { WindowManager } from '../../window-manager';
 import { getSettingsManager } from '../../core/config/settings-manager';
@@ -48,8 +55,15 @@ export function registerInstanceHandlers(deps: {
       payload: InstanceCreatePayload
     ): Promise<IpcResponse> => {
       try {
+        // Validate payload at IPC boundary
+        const validatedPayload = validateIpcPayload(
+          InstanceCreatePayloadSchema,
+          payload,
+          'INSTANCE_CREATE'
+        );
+
         // Use default working directory from settings if not provided or is just '.'
-        let workingDirectory = payload.workingDirectory;
+        let workingDirectory = validatedPayload.workingDirectory;
         if (!workingDirectory || workingDirectory === '.') {
           const settings = getSettingsManager();
           const defaultDir = settings.get('defaultWorkingDirectory');
@@ -62,15 +76,15 @@ export function registerInstanceHandlers(deps: {
 
         const instance = await instanceManager.createInstance({
           workingDirectory,
-          sessionId: payload.sessionId,
-          parentId: payload.parentInstanceId,
-          displayName: payload.displayName,
-          initialPrompt: payload.initialPrompt,
-          attachments: payload.attachments,
-          yoloMode: payload.yoloMode,
-          agentId: payload.agentId,
-          provider: payload.provider,
-          modelOverride: payload.model
+          sessionId: validatedPayload.sessionId,
+          parentId: validatedPayload.parentInstanceId,
+          displayName: validatedPayload.displayName,
+          initialPrompt: validatedPayload.initialPrompt,
+          attachments: payload.attachments, // Use original for proper typing
+          yoloMode: validatedPayload.yoloMode,
+          agentId: validatedPayload.agentId,
+          provider: payload.provider, // Use original for proper typing
+          modelOverride: validatedPayload.model
         });
 
         return {
@@ -148,17 +162,25 @@ export function registerInstanceHandlers(deps: {
       event: IpcMainInvokeEvent,
       payload: InstanceSendInputPayload
     ): Promise<IpcResponse> => {
-      console.log('IPC INSTANCE_SEND_INPUT received:', {
-        instanceId: payload.instanceId,
-        messageLength: payload.message?.length,
-        attachmentsCount: payload.attachments?.length ?? 0,
-        attachmentNames: payload.attachments?.map((a) => a.name)
-      });
       try {
+        // Validate payload at IPC boundary
+        const validatedPayload = validateIpcPayload(
+          InstanceSendInputPayloadSchema,
+          payload,
+          'INSTANCE_SEND_INPUT'
+        );
+
+        console.log('IPC INSTANCE_SEND_INPUT received:', {
+          instanceId: validatedPayload.instanceId,
+          messageLength: validatedPayload.message?.length,
+          attachmentsCount: validatedPayload.attachments?.length ?? 0,
+          attachmentNames: validatedPayload.attachments?.map((a) => a.name)
+        });
+
         await instanceManager.sendInput(
-          payload.instanceId,
-          payload.message,
-          payload.attachments
+          validatedPayload.instanceId,
+          validatedPayload.message,
+          validatedPayload.attachments
         );
 
         return { success: true };

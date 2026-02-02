@@ -125,7 +125,9 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
 
       <div class="input-hints">
         <span class="hint">Press Enter to send, Shift+Enter for new line</span>
-        @if (isBusy()) {
+        @if (isRespawning()) {
+          <span class="hint hint-respawning">Resuming session...</span>
+        } @else if (isBusy()) {
           <span class="hint hint-interrupt">Press Esc to interrupt</span>
         } @else {
           <span class="hint">Type / for commands, Cmd+K for palette</span>
@@ -428,6 +430,12 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       animation: pulse 2s ease-in-out infinite;
     }
 
+    .hint-respawning {
+      color: #8b5cf6; /* Purple - same as status indicator */
+      font-weight: 600;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
     /* Queue Section - Message queue display */
     .queue-section {
       margin-top: var(--spacing-sm);
@@ -612,6 +620,7 @@ export class InputPanelComponent implements OnDestroy {
   queuedCount = input<number>(0);
   queuedMessages = input<{ message: string; files?: File[] }[]>([]);
   isBusy = input<boolean>(false);
+  isRespawning = input<boolean>(false);
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
