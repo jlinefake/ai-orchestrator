@@ -228,12 +228,12 @@ Return JSON:
   - [x] KA-5: Document expected trace path
 - [x] Create context pre-fill scripts (realistic prior conversation)
 
-### Phase 3: Judging Pipeline (Needs API calls)
-- [ ] Implement `judge.ts` with Claude integration
-- [ ] Add Codex integration to `judge.ts`
-- [ ] Implement blind randomization
+### Phase 3: Judging Pipeline (Needs API calls) ✅
+- [x] Implement `judge.ts` with Claude integration
+- [x] Add Codex integration to `judge.ts`
+- [x] Implement blind randomization
 - [x] Implement `scorer.ts` for known-answer evaluation
-- [ ] Agreement tracking and human review flagging
+- [x] Agreement tracking and human review flagging
 
 ### Phase 4: Execution (After usage reset)
 - [ ] Run full benchmark suite (~180 runs)

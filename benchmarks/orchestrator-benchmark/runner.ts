@@ -24,12 +24,16 @@ import {
   generateReport,
   saveReport,
   loadSession,
+  getRuns,
 } from './result-storage.js';
+import { scoreKnownAnswer, hasGroundTruth } from './scorer.js';
+import { evaluateWithJudges, calculateAgreementStats } from './judge.js';
 import type {
   BenchmarkTask,
   BenchmarkRun,
   ContextStage,
   SystemType,
+  JudgeScores,
 } from './types.js';
 
 // Configuration
@@ -44,6 +48,8 @@ interface RunnerOptions {
   skipVanilla?: boolean;
   skipOrchestrator?: boolean;
   dryRun?: boolean;
+  skipScoring?: boolean;
+  scoreOnly?: boolean;
 }
 
 /**
@@ -80,6 +86,14 @@ function parseArgs(): RunnerOptions {
       case '--dry-run':
         options.dryRun = true;
         break;
+      case '--skip-scoring':
+        options.skipScoring = true;
+        break;
+      case '--score-only':
+        options.scoreOnly = true;
+        options.sessionId = next;
+        i++;
+        break;
       case '--help':
         printHelp();
         process.exit(0);
@@ -103,6 +117,8 @@ Options:
   --skip-vanilla        Skip vanilla Claude runs
   --skip-orchestrator   Skip orchestrator runs
   --dry-run             Show what would run without executing
+  --skip-scoring        Skip scoring/judging after runs complete
+  --score-only <session> Score an existing session without re-running
   --help                Show this help message
 
 Examples:
@@ -110,6 +126,7 @@ Examples:
   npx ts-node runner.ts --task KA-1        # Run task KA-1 only
   npx ts-node runner.ts --resume benchmark-2026-02-03-12-00-00
   npx ts-node runner.ts --report benchmark-2026-02-03-12-00-00
+  npx ts-node runner.ts --score-only benchmark-2026-02-03-12-00-00
 `);
 }
 
@@ -129,6 +146,23 @@ async function main(): Promise<void> {
     }
     saveReport(options.sessionId, report);
     printReportSummary(report);
+    return;
+  }
+
+  // Handle score-only mode
+  if (options.scoreOnly && options.sessionId) {
+    console.log(`Scoring session: ${options.sessionId}`);
+    const session = loadSession(options.sessionId);
+    if (!session) {
+      console.error(`Session not found: ${options.sessionId}`);
+      process.exit(1);
+    }
+    await scoreSession(options.sessionId, session.tasks);
+    const report = generateReport(options.sessionId);
+    if (report) {
+      saveReport(options.sessionId, report);
+      printReportSummary(report);
+    }
     return;
   }
 
@@ -225,6 +259,14 @@ async function main(): Promise<void> {
     }
   }
 
+  // Score/judge the runs
+  if (!options.skipScoring) {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('Scoring Results');
+    console.log(`${'='.repeat(60)}`);
+    await scoreSession(sessionId, tasks);
+  }
+
   // Complete session and generate report
   completeSession(sessionId);
 
@@ -242,6 +284,125 @@ async function main(): Promise<void> {
     saveReport(sessionId, report);
     console.log('\n');
     printReportSummary(report);
+  }
+}
+
+/**
+ * Score all runs in a session
+ */
+async function scoreSession(sessionId: string, tasks: BenchmarkTask[]): Promise<void> {
+  // Check ground truth for known-answer tasks
+  if (!hasGroundTruth()) {
+    console.warn('Ground truth not found. Run: npx ts-node tasks/setup/ground-truth.ts');
+    console.warn('Skipping known-answer task scoring.\n');
+  }
+
+  for (const task of tasks) {
+    console.log(`\nScoring ${task.id}: ${task.name}`);
+
+    if (task.category === 'known-answer') {
+      await scoreKnownAnswerTask(sessionId, task);
+    } else {
+      await scoreRealCodebaseTask(sessionId, task);
+    }
+  }
+}
+
+/**
+ * Score a known-answer task using ground truth comparison
+ */
+async function scoreKnownAnswerTask(sessionId: string, task: BenchmarkTask): Promise<void> {
+  if (!hasGroundTruth()) {
+    console.log('  [SKIP] No ground truth available');
+    return;
+  }
+
+  for (const stage of CONTEXT_STAGES) {
+    for (const system of SYSTEMS) {
+      const runs = getRuns(sessionId, task.id, system, stage);
+
+      for (const run of runs) {
+        if (run.knownAnswerScore) {
+          console.log(`  [SKIP] ${system}/${stage}/run${run.runNumber} - already scored`);
+          continue;
+        }
+
+        if (!run.output || run.error) {
+          console.log(`  [SKIP] ${system}/${stage}/run${run.runNumber} - no valid output`);
+          continue;
+        }
+
+        try {
+          const score = scoreKnownAnswer(task, run.output);
+          run.knownAnswerScore = score;
+          saveRun(sessionId, run);
+          console.log(`  [SCORED] ${system}/${stage}/run${run.runNumber}: ${score.correctness}%`);
+        } catch (e) {
+          console.error(`  [ERROR] ${system}/${stage}/run${run.runNumber}: ${e}`);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Score a real-codebase task using LLM judges
+ */
+async function scoreRealCodebaseTask(sessionId: string, task: BenchmarkTask): Promise<void> {
+  // For each context stage, get vanilla and orchestrator outputs and compare
+  for (const stage of CONTEXT_STAGES) {
+    const vanillaRuns = getRuns(sessionId, task.id, 'vanilla', stage);
+    const orchestratorRuns = getRuns(sessionId, task.id, 'orchestrator', stage);
+
+    // Match runs by run number and judge pairs
+    for (let runNum = 1; runNum <= RUNS_PER_CONFIG; runNum++) {
+      const vanillaRun = vanillaRuns.find(r => r.runNumber === runNum);
+      const orchRun = orchestratorRuns.find(r => r.runNumber === runNum);
+
+      if (!vanillaRun || !orchRun) {
+        console.log(`  [SKIP] ${stage}/run${runNum} - missing vanilla or orchestrator run`);
+        continue;
+      }
+
+      if (orchRun.judgeScores) {
+        console.log(`  [SKIP] ${stage}/run${runNum} - already judged`);
+        continue;
+      }
+
+      if (!vanillaRun.output || !orchRun.output) {
+        console.log(`  [SKIP] ${stage}/run${runNum} - missing output`);
+        continue;
+      }
+
+      console.log(`  [JUDGING] ${stage}/run${runNum}...`);
+
+      try {
+        const scores = await evaluateWithJudges(task, vanillaRun.output, orchRun.output);
+
+        if (scores) {
+          // Store scores on orchestrator run (we compare against vanilla)
+          orchRun.judgeScores = scores;
+          saveRun(sessionId, orchRun);
+
+          // Also create inverse scores for vanilla run
+          const vanillaScores: JudgeScores = {
+            claude: scores.claude, // Same judge, different perspective
+            codex: scores.codex,
+            needsHumanReview: scores.needsHumanReview,
+          };
+          vanillaRun.judgeScores = vanillaScores;
+          saveRun(sessionId, vanillaRun);
+
+          const avgScore = (scores.claude.completeness + scores.claude.accuracy + scores.claude.actionability) / 3;
+          const reviewFlag = scores.needsHumanReview ? ' [NEEDS REVIEW]' : '';
+          console.log(`            Orchestrator avg: ${avgScore.toFixed(1)}/10${reviewFlag}`);
+        } else {
+          console.log(`            Failed to get judge scores`);
+        }
+      } catch (e) {
+        console.error(`  [ERROR] ${stage}/run${runNum}: ${e}`);
+      }
+    }
   }
 }
 

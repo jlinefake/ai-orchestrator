@@ -37,6 +37,8 @@ npx ts-node runner.ts --task KA-1
 | `npx ts-node runner.ts --report <session>` | Generate report for session |
 | `npx ts-node runner.ts --skip-vanilla` | Only run orchestrator tests |
 | `npx ts-node runner.ts --skip-orchestrator` | Only run vanilla tests |
+| `npx ts-node runner.ts --skip-scoring` | Run tasks but skip scoring/judging |
+| `npx ts-node runner.ts --score-only <session>` | Score existing session without re-running |
 
 ## Test Matrix
 
@@ -142,7 +144,7 @@ Cost Multiplier: 2.3x
 - [x] **Phase 1**: Core harness (task runner, executors, storage)
 - [x] **Phase 2**: Task suite definition
 - [x] **Phase 2b**: Ground truth scripts and scorer for known-answer tasks
-- [ ] **Phase 3**: Judging pipeline (Claude + Codex evaluation)
+- [x] **Phase 3**: Judging pipeline (Claude + Codex evaluation)
 - [ ] **Phase 4**: Full execution
 - [ ] **Phase 5**: Analysis and insights
 

@@ -7,5 +7,6 @@ export * from './task-loader.js';
 export * from './context-filler.js';
 export * from './result-storage.js';
 export * from './scorer.js';
+export * from './judge.js';
 export { executeVanilla } from './executors/vanilla-executor.js';
 export { executeOrchestrator } from './executors/orchestrator-executor.js';
