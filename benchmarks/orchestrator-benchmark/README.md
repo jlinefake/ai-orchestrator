@@ -78,13 +78,38 @@ benchmarks/orchestrator-benchmark/
 ├── task-loader.ts         # Load tasks from JSON
 ├── context-filler.ts      # Generate context for stages
 ├── result-storage.ts      # Persist results, generate reports
+├── scorer.ts              # Score known-answer tasks against ground truth
 ├── executors/
 │   ├── vanilla-executor.ts      # Run via claude CLI
 │   └── orchestrator-executor.ts # Run via Orchestrator app
 ├── tasks/
 │   ├── task-suite.json    # Task definitions
-│   └── setup/             # Setup scripts for known-answer tasks
+│   └── setup/
+│       ├── ground-truth.ts     # Generate ground truth for KA tasks
+│       ├── ground-truth.json   # Generated ground truth data
+│       ├── inject-bugs.ts      # Inject bugs for KA-4
+│       └── remove-bugs.ts      # Remove injected bugs
 └── results/               # Output directory (gitignored)
+```
+
+## Setup Scripts
+
+Before running benchmarks, generate the ground truth:
+
+```bash
+cd benchmarks/orchestrator-benchmark
+
+# Generate ground truth for known-answer tasks
+npx ts-node tasks/setup/ground-truth.ts
+
+# For KA-4 (bug finding), inject the test bugs
+npx ts-node tasks/setup/inject-bugs.ts
+
+# After benchmarking KA-4, remove the bugs
+npx ts-node tasks/setup/remove-bugs.ts
+
+# Check bug injection status
+npx ts-node tasks/setup/inject-bugs.ts --status
 ```
 
 ## Results
@@ -116,6 +141,7 @@ Cost Multiplier: 2.3x
 
 - [x] **Phase 1**: Core harness (task runner, executors, storage)
 - [x] **Phase 2**: Task suite definition
+- [x] **Phase 2b**: Ground truth scripts and scorer for known-answer tasks
 - [ ] **Phase 3**: Judging pipeline (Claude + Codex evaluation)
 - [ ] **Phase 4**: Full execution
 - [ ] **Phase 5**: Analysis and insights
