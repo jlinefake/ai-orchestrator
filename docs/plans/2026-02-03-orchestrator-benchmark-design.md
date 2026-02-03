@@ -1,5 +1,7 @@
 # Orchestrator Benchmark Design
 
+> **Implementation**: See [`benchmarks/orchestrator-benchmark/`](../../benchmarks/orchestrator-benchmark/) for the harness code and [`README.md`](../../benchmarks/orchestrator-benchmark/README.md) for usage instructions.
+
 **Goal:** Determine if AI Orchestrator produces better results than vanilla Claude CLI for software engineering tasks, particularly those with multi-file scope or requiring large context.
 
 **Primary Questions:**
