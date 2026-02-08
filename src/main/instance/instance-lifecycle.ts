@@ -307,8 +307,10 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Get disallowed tools based on agent permissions
     const disallowedTools = getDisallowedTools(resolvedAgent.permissions);
 
-    // Load CLAUDE.md prompt hierarchy
-    const claudeMdPrompts = await this.loadPromptHierarchy(instance.workingDirectory);
+    // Load CLAUDE.md prompt hierarchy (skip for child instances to reduce token overhead)
+    const claudeMdPrompts = instance.depth === 0
+      ? await this.loadPromptHierarchy(instance.workingDirectory)
+      : [];
 
     // Build system prompt with CLAUDE.md content prepended
     let systemPrompt = resolvedAgent.systemPrompt || '';
@@ -665,6 +667,17 @@ export class InstanceLifecycleManager extends EventEmitter {
     instance.agentMode = newAgent.mode;
     instance.status = 'initializing';
 
+    // If leaving plan mode, reset plan mode state
+    if (instance.planMode.enabled && newAgent.mode !== 'plan') {
+      instance.planMode = {
+        enabled: false,
+        state: 'off',
+        planContent: undefined,
+        approvedAt: undefined
+      };
+      logger.info('Auto-exited plan mode due to agent mode change', { instanceId, newAgentId });
+    }
+
     const disallowedTools = getDisallowedTools(newAgent.permissions);
     const defaultAllowedTools = instance.yoloMode ? undefined : [
       'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
@@ -701,7 +714,20 @@ export class InstanceLifecycleManager extends EventEmitter {
       instance.status = 'idle';
       logger.info('Agent mode changed successfully', { instanceId, newAgentId, pid });
 
-      const modeChangeMessage = `[System: Agent mode changed to ${newAgent.name}. ${newAgent.description || ''}]`;
+      // Build a mode transition message. When resuming, the system prompt can't be changed,
+      // so we send an authoritative message that overrides the previous mode's instructions.
+      let modeChangeMessage: string;
+      if (oldAgentId === 'plan' && newAgentId !== 'plan') {
+        // Explicitly revoke plan mode restrictions since the old system prompt persists in the session
+        modeChangeMessage = `[SYSTEM MODE CHANGE - IMPORTANT]
+Your mode has been changed from PLAN to ${newAgent.name.toUpperCase()}.
+ALL previous PLAN MODE restrictions are now LIFTED. You are NO LONGER in plan mode.
+You now have FULL access to: read files, write files, edit files, execute bash commands, and all other tools.
+${newAgent.systemPrompt ? `New instructions: ${newAgent.systemPrompt}` : `You are in ${newAgent.name} mode: ${newAgent.description || 'Full access mode.'}`}
+Proceed with implementation. Do NOT request to switch modes - you are already in ${newAgent.name} mode.`;
+      } else {
+        modeChangeMessage = `[System: Agent mode changed to ${newAgent.name}. ${newAgent.description || ''}${newAgent.systemPrompt ? `\n\nNew instructions:\n${newAgent.systemPrompt}` : ''}]`;
+      }
       await adapter.sendInput(modeChangeMessage);
     } catch (error) {
       instance.status = 'error';

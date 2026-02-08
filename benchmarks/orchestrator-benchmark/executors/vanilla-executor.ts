@@ -93,9 +93,14 @@ export async function executeVanilla(
               }
             }
 
-            // Extract token usage
-            if (parsed.type === 'result' && parsed.usage) {
-              tokensUsed = (parsed.usage.input_tokens || 0) + (parsed.usage.output_tokens || 0);
+            // Extract output text and token usage from result messages
+            if (parsed.type === 'result') {
+              if (parsed.result && typeof parsed.result === 'string') {
+                output += parsed.result + '\n';
+              }
+              if (parsed.usage) {
+                tokensUsed = (parsed.usage.input_tokens || 0) + (parsed.usage.output_tokens || 0);
+              }
             }
 
           } catch {

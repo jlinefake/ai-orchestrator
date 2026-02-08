@@ -138,7 +138,7 @@ export class InstanceMessagingStore {
     try {
       attachments =
         files && files.length > 0
-          ? await Promise.all(files.map((f) => this.listStore.fileToAttachment(f)))
+          ? (await Promise.all(files.map((f) => this.listStore.fileToAttachments(f)))).flat()
           : undefined;
     } catch (error) {
       console.error('InstanceMessagingStore: File conversion failed:', error);

@@ -100,7 +100,7 @@ export class InstanceOrchestrationManager {
    * Set up orchestration event handlers
    */
   setupOrchestrationHandlers(
-    settings: { maxTotalInstances: number; maxChildrenPerParent: number },
+    settings: { maxTotalInstances: number; maxChildrenPerParent: number; allowNestedOrchestration: boolean },
     addToOutputBuffer: (instance: Instance, message: OutputMessage) => void,
     emit: (event: string, payload: any) => void
   ): void {
@@ -137,6 +137,16 @@ export class InstanceOrchestrationManager {
           this.orchestration.notifyError(
             parentId,
             `Cannot spawn child: maximum children per parent (${settings.maxChildrenPerParent}) reached`
+          );
+          return;
+        }
+
+        // Check if parent is already a child (nested orchestration)
+        if (!settings.allowNestedOrchestration && parent.depth > 0) {
+          console.log('Cannot spawn child: nested orchestration is disabled');
+          this.orchestration.notifyError(
+            parentId,
+            'Cannot spawn child: nested orchestration is not allowed'
           );
           return;
         }

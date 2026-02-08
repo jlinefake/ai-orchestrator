@@ -133,7 +133,8 @@ export class InstanceManager extends EventEmitter {
     this.orchestrationMgr.setupOrchestrationHandlers(
       {
         maxTotalInstances: settingsAll.maxTotalInstances,
-        maxChildrenPerParent: settingsAll.maxChildrenPerParent
+        maxChildrenPerParent: settingsAll.maxChildrenPerParent,
+        allowNestedOrchestration: settingsAll.allowNestedOrchestration,
       },
       (inst, msg) => this.communication.addToOutputBuffer(inst, msg),
       (event, payload) => this.emit(event, payload)
@@ -157,7 +158,8 @@ export class InstanceManager extends EventEmitter {
       this.orchestrationMgr.setupOrchestrationHandlers(
         {
           maxTotalInstances: newSettings.maxTotalInstances,
-          maxChildrenPerParent: newSettings.maxChildrenPerParent
+          maxChildrenPerParent: newSettings.maxChildrenPerParent,
+          allowNestedOrchestration: newSettings.allowNestedOrchestration,
         },
         (inst, msg) => this.communication.addToOutputBuffer(inst, msg),
         (event, payload) => this.emit(event, payload)
@@ -669,13 +671,13 @@ export class InstanceManager extends EventEmitter {
 
     const tempChildId = generateId();
 
-    // Extract parent context
+    // Extract parent context (limited to reduce token overhead for children)
     const parentContextMessages = parent.outputBuffer
-      .slice(-50)
+      .slice(-10)
       .filter((msg) => msg.type === 'assistant' || msg.type === 'user' || msg.type === 'tool_result')
       .map((msg) => {
         const prefix = msg.type === 'assistant' ? '[Assistant]' : msg.type === 'user' ? '[User]' : '[Tool Result]';
-        const content = msg.content.length > 1000 ? msg.content.substring(0, 1000) + '...[truncated]' : msg.content;
+        const content = msg.content.length > 500 ? msg.content.substring(0, 500) + '...[truncated]' : msg.content;
         return `${prefix} ${content}`;
       });
     const parentContext = parentContextMessages.length > 0 ? parentContextMessages.join('\n\n') : undefined;
@@ -694,9 +696,9 @@ export class InstanceManager extends EventEmitter {
     const commandProvider = command.provider === 'codex' ? 'openai' : command.provider;
     const resolvedProvider = commandProvider || parent.provider || 'auto';
 
-    // Pass relevant parent output to child for RLM indexing
+    // Pass relevant parent output to child for RLM indexing (limited for short-lived children)
     const initialOutputForChild = parent.outputBuffer
-      .slice(-100)
+      .slice(-20)
       .filter((msg) => msg.type === 'assistant' || msg.type === 'user' || msg.type === 'tool_result');
 
     const child = await this.createInstance({

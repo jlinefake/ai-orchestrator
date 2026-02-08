@@ -5,6 +5,7 @@
  * Outputs are presented blind (randomized order) to avoid bias.
  */
 
+import { spawn } from 'child_process';
 import type { BenchmarkTask, JudgeScore, JudgeScores } from './types.js';
 
 /**
@@ -25,7 +26,7 @@ const DEFAULT_CONFIG: Required<JudgeConfig> = {
   claudeModel: 'claude-sonnet-4-20250514',
   codexModel: 'gpt-4o',
   maxRetries: 3,
-  timeoutMs: 60000,
+  timeoutMs: 300000,
 };
 
 /**
@@ -161,6 +162,75 @@ function parseJudgeResponse(response: string): { response_a: JudgeScore; respons
 }
 
 /**
+ * Call Claude CLI as a judge fallback (no API key needed)
+ */
+async function callCliJudge(
+  prompt: string,
+  timeoutMs: number
+): Promise<JudgeScore[] | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('claude', ['--print', '--output-format', 'json'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
+    proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+    proc.stdin?.write(prompt);
+    proc.stdin?.end();
+
+    const timer = setTimeout(() => {
+      proc.kill('SIGTERM');
+      console.error('CLI judge timed out');
+      resolve(null);
+    }, timeoutMs);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+
+      // Extract text from JSON output (same as vanilla-executor pattern)
+      let output = '';
+      const lines = stdout.split('\n').filter(Boolean);
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.type === 'assistant' && parsed.message?.content) {
+            for (const block of parsed.message.content) {
+              if (block.type === 'text') output += block.text + '\n';
+            }
+          }
+          if (parsed.type === 'result' && parsed.result && typeof parsed.result === 'string') {
+            output += parsed.result + '\n';
+          }
+        } catch {
+          output += line + '\n';
+        }
+      }
+
+      const content = output.trim() || stdout.trim();
+      if (!content || code !== 0) {
+        console.error(`CLI judge failed (exit ${code}): ${stderr.slice(0, 200)}`);
+        resolve(null);
+        return;
+      }
+
+      const scores = parseJudgeResponse(content);
+      if (!scores) { resolve(null); return; }
+      resolve([scores.response_a, scores.response_b]);
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      console.error('CLI judge process error:', err.message);
+      resolve(null);
+    });
+  });
+}
+
+/**
  * Call Claude API for evaluation
  */
 async function callClaudeJudge(
@@ -168,8 +238,8 @@ async function callClaudeJudge(
   config: Required<JudgeConfig>
 ): Promise<JudgeScore[] | null> {
   if (!config.claudeApiKey) {
-    console.error('Claude API key not configured');
-    return null;
+    console.log('Claude API key not configured, falling back to CLI judge');
+    return callCliJudge(prompt, config.timeoutMs);
   }
 
   const controller = new AbortController();
@@ -230,8 +300,8 @@ async function callCodexJudge(
   config: Required<JudgeConfig>
 ): Promise<JudgeScore[] | null> {
   if (!config.codexApiKey) {
-    console.error('Codex/OpenAI API key not configured');
-    return null;
+    console.log('Codex/OpenAI API key not configured, falling back to CLI judge');
+    return callCliJudge(prompt, config.timeoutMs);
   }
 
   const controller = new AbortController();

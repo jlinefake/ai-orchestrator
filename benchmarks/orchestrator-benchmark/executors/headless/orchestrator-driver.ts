@@ -101,7 +101,8 @@ export class OrchestratorDriver {
       settings.update({
         enableDiskStorage: false,
         persistSessionContent: false,
-        maxTotalInstances: 20,
+        maxTotalInstances: 5,
+        maxChildrenPerParent: 3,
         autoTerminateIdleMinutes: 0,
         defaultCli: 'claude',
       });
