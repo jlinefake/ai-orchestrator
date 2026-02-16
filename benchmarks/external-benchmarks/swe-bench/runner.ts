@@ -10,7 +10,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import type {
   SWEBenchTask,
@@ -23,7 +24,7 @@ import type {
 } from './types.js';
 import { generatePatchVanilla, generatePatchOrchestrator, writePatch } from './adapter.js';
 
-const SCRIPT_DIR = resolve(import.meta.dirname);
+const SCRIPT_DIR = resolve(import.meta.dirname ?? dirname(fileURLToPath(import.meta.url)));
 const DATA_DIR = join(SCRIPT_DIR, 'data');
 const RESULTS_DIR = join(SCRIPT_DIR, 'results');
 const WORK_DIR = join(SCRIPT_DIR, 'workdir');
@@ -92,6 +93,7 @@ async function runBenchmark(options: RunnerOptions): Promise<void> {
   // Run tasks
   const runVanilla = options.system !== 'orchestrator';
   const runOrchestrator = options.system !== 'vanilla';
+  const taskTimeoutMs = (options.timeoutMinutes ?? 30) * 60 * 1000;
 
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
@@ -117,7 +119,7 @@ async function runBenchmark(options: RunnerOptions): Promise<void> {
     // Run vanilla
     if (needVanilla) {
       console.log('\n🔵 Running vanilla Claude...');
-      const vanillaResult = await generatePatchVanilla(task, taskWorkDir);
+      const vanillaResult = await generatePatchVanilla(task, taskWorkDir, taskTimeoutMs);
 
       console.log(`   Tokens: ${vanillaResult.tokensUsed.toLocaleString()}`);
       console.log(`   Duration: ${(vanillaResult.durationMs / 1000).toFixed(1)}s`);
@@ -142,7 +144,7 @@ async function runBenchmark(options: RunnerOptions): Promise<void> {
     // Run orchestrator
     if (needOrchestrator) {
       console.log('\n🟣 Running orchestrator...');
-      const orchestratorResult = await generatePatchOrchestrator(task, taskWorkDir);
+      const orchestratorResult = await generatePatchOrchestrator(task, taskWorkDir, taskTimeoutMs);
 
       console.log(`   Tokens: ${orchestratorResult.tokensUsed.toLocaleString()}`);
       console.log(`   Duration: ${(orchestratorResult.durationMs / 1000).toFixed(1)}s`);
@@ -311,17 +313,64 @@ function loadTasks(limit?: number): SWEBenchTask[] {
  * Setup workspace for a task (clone repo, checkout commit)
  */
 async function setupTaskWorkspace(task: SWEBenchTask): Promise<string> {
-  // Create task-specific directory
   const taskDir = join(WORK_DIR, task.instanceId.replace(/[^a-zA-Z0-9-_]/g, '_'));
 
-  // For now, just return the work directory
-  // In a full implementation, we would:
-  // 1. Clone the repository
-  // 2. Checkout the base commit
-  // 3. Apply environment setup
+  // If the repo is already cloned and at the right commit, skip
+  if (existsSync(join(taskDir, '.git'))) {
+    const currentCommit = await runGit(['rev-parse', 'HEAD'], taskDir);
+    if (currentCommit.trim() === task.baseCommit) {
+      console.log('   ℹ️  Workspace already set up, reusing');
+      // Clean any leftover changes
+      await runGit(['checkout', '.'], taskDir);
+      await runGit(['clean', '-fd'], taskDir);
+      return taskDir;
+    }
+    // Wrong commit — re-fetch and checkout
+    console.log('   ℹ️  Checking out correct base commit...');
+    await runGit(['fetch', '--all'], taskDir);
+    await runGit(['checkout', task.baseCommit], taskDir);
+    await runGit(['clean', '-fd'], taskDir);
+    return taskDir;
+  }
 
+  // Clone the repository
   mkdirSync(taskDir, { recursive: true });
+  const repoUrl = `https://github.com/${task.repo}.git`;
+  console.log(`   📦 Cloning ${task.repo}...`);
+
+  // Shallow clone with the specific commit — fetch commit separately since
+  // shallow clone may not include it directly
+  await runGit(
+    ['clone', '--no-checkout', '--filter=blob:none', repoUrl, taskDir],
+    WORK_DIR
+  );
+
+  // Checkout the base commit
+  console.log(`   🔀 Checking out ${task.baseCommit.substring(0, 8)}...`);
+  await runGit(['checkout', task.baseCommit], taskDir);
+
   return taskDir;
+}
+
+/**
+ * Run a git command and return stdout
+ */
+function runGit(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`git ${args[0]} failed (code ${code}): ${stderr}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+    child.on('error', (err) => reject(err));
+  });
 }
 
 /**

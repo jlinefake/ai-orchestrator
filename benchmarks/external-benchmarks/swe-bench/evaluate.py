@@ -69,30 +69,43 @@ def run_evaluation(predictions_path: str, output_path: str = None) -> Dict[str, 
     temp_dir = Path(predictions_path).parent / 'eval_temp'
     temp_dir.mkdir(exist_ok=True)
 
-    # Run SWE-bench evaluation
+    # Generate a run ID from the predictions file name
+    run_id = Path(predictions_path).stem or 'benchmark_run'
+
+    # Create report directory
+    report_dir = temp_dir / 'reports'
+    report_dir.mkdir(exist_ok=True)
+
+    # Run SWE-bench evaluation (updated API for swebench >= 2.0)
     try:
-        # SWE-bench evaluation command
+        # Extract instance IDs from predictions
+        instance_ids = [p['instance_id'] for p in predictions]
+
         cmd = [
             'python', '-m', 'swebench.harness.run_evaluation',
             '--predictions_path', predictions_path,
-            '--swe_bench_tasks', 'princeton-nlp/SWE-bench_Lite',
-            '--log_dir', str(temp_dir / 'logs'),
-            '--testbed', str(temp_dir / 'testbed'),
-            '--skip_existing', 'False',
-            '--timeout', '900',  # 15 minutes per test
-            '--num_workers', '1'  # Conservative for memory
-        ]
+            '--run_id', run_id,
+            '--dataset_name', 'princeton-nlp/SWE-bench_Lite',
+            '--split', 'test',
+            '--timeout', '900',
+            '--max_workers', '1',
+            '--report_dir', str(report_dir),
+            '--instance_ids',
+        ] + instance_ids
 
-        print(f"Running evaluation: {' '.join(cmd)}", file=sys.stderr)
+        print(f"Running evaluation: {' '.join(cmd[:10])}... ({len(instance_ids)} instances)", file=sys.stderr)
 
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=3600  # 1 hour total timeout
+            timeout=7200  # 2 hour total timeout
         )
 
         if result.returncode != 0:
+            # Check if it's just the deprecated API — try fallback
+            if 'run_id' in result.stderr and 'unrecognized' in result.stderr:
+                return _run_evaluation_legacy(predictions_path, predictions, temp_dir, output_path)
             return {
                 'error': f'Evaluation failed: {result.stderr}',
                 'success': False,
@@ -100,38 +113,27 @@ def run_evaluation(predictions_path: str, output_path: str = None) -> Dict[str, 
                 'stderr': result.stderr
             }
 
-        # Parse evaluation results
-        results_file = temp_dir / 'logs' / 'results.json'
-        if not results_file.exists():
-            # Try to find results in log directory
-            log_files = list((temp_dir / 'logs').glob('**/*.json'))
-            if log_files:
-                results_file = log_files[0]
-            else:
-                return {
-                    'error': 'Evaluation completed but no results file found',
-                    'success': False,
-                    'stdout': result.stdout
-                }
-
-        with open(results_file, 'r') as f:
-            results = json.load(f)
+        # Find report results
+        results = _find_evaluation_results(report_dir, temp_dir, run_id)
+        if results is None:
+            # Parse from stdout if possible
+            results = _parse_stdout_results(result.stdout, predictions)
 
         # Save results if output path specified
-        if output_path:
+        if output_path and results:
             with open(output_path, 'w') as f:
                 json.dump(results, f, indent=2)
 
         return {
             'success': True,
-            'results': results,
+            'results': results or [],
             'predictions_count': len(predictions),
-            'results_file': str(results_file)
+            'stdout': result.stdout,
         }
 
     except subprocess.TimeoutExpired:
         return {
-            'error': 'Evaluation timeout (>1 hour)',
+            'error': 'Evaluation timeout (>2 hours)',
             'success': False
         }
     except Exception as e:
@@ -139,6 +141,71 @@ def run_evaluation(predictions_path: str, output_path: str = None) -> Dict[str, 
             'error': f'Evaluation error: {str(e)}',
             'success': False
         }
+
+
+def _run_evaluation_legacy(predictions_path, predictions, temp_dir, output_path):
+    """Fallback for older swebench versions."""
+    cmd = [
+        'python', '-m', 'swebench.harness.run_evaluation',
+        '--predictions_path', predictions_path,
+        '--swe_bench_tasks', 'princeton-nlp/SWE-bench_Lite',
+        '--log_dir', str(temp_dir / 'logs'),
+        '--testbed', str(temp_dir / 'testbed'),
+        '--skip_existing', 'False',
+        '--timeout', '900',
+        '--num_workers', '1'
+    ]
+
+    print(f"Trying legacy API: {' '.join(cmd[:8])}...", file=sys.stderr)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+
+    if result.returncode != 0:
+        return {
+            'error': f'Legacy evaluation failed: {result.stderr}',
+            'success': False,
+        }
+
+    results_file = temp_dir / 'logs' / 'results.json'
+    if results_file.exists():
+        with open(results_file, 'r') as f:
+            results = json.load(f)
+        if output_path:
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+        return {'success': True, 'results': results, 'predictions_count': len(predictions)}
+
+    return {'error': 'No results found', 'success': False}
+
+
+def _find_evaluation_results(report_dir, temp_dir, run_id):
+    """Search for evaluation result files."""
+    # Check common output locations
+    for pattern in ['**/*.json', '**/*results*.json', '**/*report*.json']:
+        for d in [report_dir, temp_dir]:
+            found = list(d.glob(pattern))
+            if found:
+                try:
+                    with open(found[0], 'r') as f:
+                        return json.load(f)
+                except Exception:
+                    continue
+    return None
+
+
+def _parse_stdout_results(stdout, predictions):
+    """Parse evaluation results from stdout output."""
+    results = []
+    for pred in predictions:
+        instance_id = pred['instance_id']
+        model = pred.get('model_name_or_path', 'unknown')
+        # Check if stdout mentions this instance as resolved
+        resolved = f'{instance_id}' in stdout and ('PASS' in stdout or 'resolved' in stdout.lower())
+        results.append({
+            'instance_id': instance_id,
+            'model_name_or_path': model,
+            'resolved': resolved,
+        })
+    return results
 
 def evaluate_single_task(instance_id: str, patch: str, task_data: Dict[str, Any]) -> Dict[str, Any]:
     """

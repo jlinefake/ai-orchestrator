@@ -10,21 +10,29 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { SWEBenchTask, SWEBenchResult } from './types.js';
 
-const CLAUDE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
+
+/** Phase time budgets as fractions of the total timeout */
+const PHASE_BUDGETS = {
+  plan: 0.40,     // 40% — explore + plan
+  implement: 0.40, // 40% — generate patch
+  review: 0.20,    // 20% — validate/refine
+} as const;
 
 /**
  * Generate a patch using vanilla Claude CLI
  */
 export async function generatePatchVanilla(
   task: SWEBenchTask,
-  workDir: string
+  workDir: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS
 ): Promise<SWEBenchResult> {
   const startTime = Date.now();
   const startedAt = startTime;
 
   try {
     const prompt = buildSWEBenchPrompt(task, 'vanilla');
-    const output = await invokeClaude(prompt, workDir, CLAUDE_TIMEOUT_MS);
+    const output = await invokeClaude(prompt, workDir, timeoutMs);
 
     // Parse JSON response for token usage
     const { content, inputTokens, outputTokens } = parseClaudeOutput(output);
@@ -83,54 +91,107 @@ export async function generatePatchVanilla(
 /**
  * Generate a patch using orchestrator-style multi-agent coordination
  *
- * Since we can't import the actual orchestrator here, we simulate
- * multi-agent coordination by making multiple Claude CLI calls:
- * 1. Planning phase - analyze the issue and plan the solution
- * 2. Implementation phase - generate the patch
- * 3. Review phase - validate and refine the patch
+ * Uses a budget-based timeout system: the total timeout is divided across
+ * phases, with unused time from earlier phases rolling forward. Each phase
+ * has graceful degradation — if it times out, we recover partial output
+ * and continue with subsequent phases using whatever context we have.
+ *
+ * Phases:
+ * 1. Planning — explore repo and analyze the issue
+ * 2. Implementation — generate the patch based on the plan
+ * 3. Review — validate and refine (skipped if time is tight or patch looks good)
  */
 export async function generatePatchOrchestrator(
   task: SWEBenchTask,
-  workDir: string
+  workDir: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS
 ): Promise<SWEBenchResult> {
   const startTime = Date.now();
   const startedAt = startTime;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let agentTurns = 0;
+  const totalBudgetMs = timeoutMs;
+
+  /** Calculate remaining time budget */
+  const remainingMs = () => totalBudgetMs - (Date.now() - startTime);
+
+  /** Minimum time to bother starting a phase (2 minutes) */
+  const MIN_PHASE_MS = 2 * 60 * 1000;
 
   try {
-    // Phase 1: Planning
-    const planPrompt = buildPlanningPrompt(task);
-    const planOutput = await invokeClaude(planPrompt, workDir, CLAUDE_TIMEOUT_MS / 3);
-    const planResult = parseClaudeOutput(planOutput);
-    totalInputTokens += planResult.inputTokens;
-    totalOutputTokens += planResult.outputTokens;
-    agentTurns++;
+    // ── Phase 1: Planning ──────────────────────────────────────────
+    const planBudgetMs = Math.min(
+      totalBudgetMs * PHASE_BUDGETS.plan,
+      remainingMs() - MIN_PHASE_MS // leave room for at least one more phase
+    );
 
-    // Phase 2: Implementation
-    const implPrompt = buildImplementationPrompt(task, planResult.content);
-    const implOutput = await invokeClaude(implPrompt, workDir, CLAUDE_TIMEOUT_MS / 3);
-    const implResult = parseClaudeOutput(implOutput);
-    totalInputTokens += implResult.inputTokens;
-    totalOutputTokens += implResult.outputTokens;
-    agentTurns++;
+    let planContent = '';
+    if (planBudgetMs >= MIN_PHASE_MS) {
+      const planPrompt = buildPlanningPrompt(task);
+      const planOutput = await invokeClaudeGraceful(planPrompt, workDir, planBudgetMs);
+      const planResult = parseClaudeOutput(planOutput.output);
+      totalInputTokens += planResult.inputTokens;
+      totalOutputTokens += planResult.outputTokens;
+      agentTurns++;
+      planContent = planResult.content;
 
-    // Phase 3: Review
-    const reviewPrompt = buildReviewPrompt(task, implResult.content);
-    const reviewOutput = await invokeClaude(reviewPrompt, workDir, CLAUDE_TIMEOUT_MS / 3);
-    const reviewResult = parseClaudeOutput(reviewOutput);
-    totalInputTokens += reviewResult.inputTokens;
-    totalOutputTokens += reviewResult.outputTokens;
-    agentTurns++;
-
-    // Extract final patch from review output
-    let patch = extractPatchFromOutput(reviewResult.content);
-
-    // Fallback to implementation output if review doesn't have a patch
-    if (!patch) {
-      patch = extractPatchFromOutput(implResult.content);
+      if (planOutput.timedOut) {
+        console.log('      ⏱️  Planning phase timed out, continuing with partial plan');
+      }
     }
+
+    // ── Phase 2: Implementation ────────────────────────────────────
+    // Give implementation all remaining time minus review budget
+    const reviewReserveMs = Math.max(MIN_PHASE_MS, totalBudgetMs * PHASE_BUDGETS.review);
+    const implBudgetMs = Math.max(MIN_PHASE_MS, remainingMs() - reviewReserveMs);
+
+    let implContent = '';
+    let implPatch = '';
+    if (implBudgetMs >= MIN_PHASE_MS) {
+      const implPrompt = planContent
+        ? buildImplementationPrompt(task, planContent)
+        : buildSWEBenchPrompt(task, 'orchestrator'); // Fallback: act like vanilla if no plan
+      const implOutput = await invokeClaudeGraceful(implPrompt, workDir, implBudgetMs);
+      const implResult = parseClaudeOutput(implOutput.output);
+      totalInputTokens += implResult.inputTokens;
+      totalOutputTokens += implResult.outputTokens;
+      agentTurns++;
+      implContent = implResult.content;
+      implPatch = extractPatchFromOutput(implContent);
+
+      if (implOutput.timedOut) {
+        console.log('      ⏱️  Implementation phase timed out, attempting patch recovery');
+      }
+    }
+
+    // ── Phase 3: Review (optional) ─────────────────────────────────
+    // Skip review if: no time left, no implementation content, or we already have a clean patch
+    const reviewBudgetMs = remainingMs();
+    let reviewPatch = '';
+
+    const shouldSkipReview =
+      reviewBudgetMs < MIN_PHASE_MS ||
+      !implContent ||
+      !implPatch; // no point reviewing if there's nothing to review
+
+    if (!shouldSkipReview) {
+      const reviewPrompt = buildReviewPrompt(task, implContent);
+      const reviewOutput = await invokeClaudeGraceful(reviewPrompt, workDir, reviewBudgetMs);
+      const reviewResult = parseClaudeOutput(reviewOutput.output);
+      totalInputTokens += reviewResult.inputTokens;
+      totalOutputTokens += reviewResult.outputTokens;
+      agentTurns++;
+      reviewPatch = extractPatchFromOutput(reviewResult.content);
+
+      if (reviewOutput.timedOut) {
+        console.log('      ⏱️  Review phase timed out, using implementation patch');
+      }
+    }
+
+    // ── Select best patch ──────────────────────────────────────────
+    // Prefer review patch (refined) > implementation patch > plan patch (rare)
+    const patch = reviewPatch || implPatch || extractPatchFromOutput(planContent);
 
     if (!patch) {
       return {
@@ -186,28 +247,24 @@ export async function generatePatchOrchestrator(
 function buildSWEBenchPrompt(task: SWEBenchTask, mode: 'vanilla' | 'orchestrator'): string {
   const hintsSection = task.hints_text ? `\n\nHints:\n${task.hints_text}` : '';
 
-  return `You are an expert software engineer. You are given a GitHub issue from the ${task.repo} repository and need to generate a patch to fix it.
-
-Repository: ${task.repo}
-Base Commit: ${task.baseCommit}
-Version: ${task.version}
+  return `You are an expert software engineer. You are in a cloned checkout of the ${task.repo} repository at commit ${task.baseCommit.substring(0, 12)} (version ${task.version}). The repository source code is in the current working directory.
 
 Issue Description:
 ${task.problem_statement}${hintsSection}
 
 Your task:
-1. Analyze the issue carefully
-2. Identify the files that need to be changed
-3. Generate a unified diff patch that resolves the issue
-4. Ensure your patch applies cleanly to the base commit
+1. Explore the repository to understand the relevant code (use grep, find, cat etc.)
+2. Identify the root cause of the issue
+3. Make the minimal code changes needed to fix the issue
+4. Generate a unified diff patch of your changes
 
-Output your patch in unified diff format, enclosed in a \`\`\`diff code block.
-
-Important:
-- Your patch must be a valid unified diff
+IMPORTANT INSTRUCTIONS:
+- Explore the codebase first. The full source is available in the current directory.
+- Output your final patch in unified diff format, enclosed in a \`\`\`diff code block.
+- The patch must be a valid unified diff with proper context lines (3 lines before/after)
 - Include file paths relative to the repository root
-- Ensure proper context lines (usually 3 lines before and after changes)
-- The patch must be complete and apply cleanly with \`git apply\`
+- The patch must apply cleanly with \`git apply\`
+- Make minimal changes — fix only what's needed
 
 Generate the patch now:`;
 }
@@ -218,17 +275,13 @@ Generate the patch now:`;
 function buildPlanningPrompt(task: SWEBenchTask): string {
   const hintsSection = task.hints_text ? `\n\nHints:\n${task.hints_text}` : '';
 
-  return `You are a planning agent in a software engineering team. Analyze this GitHub issue and create a solution plan.
-
-Repository: ${task.repo}
-Base Commit: ${task.baseCommit}
-Version: ${task.version}
+  return `You are a planning agent in a software engineering team. You are in a cloned checkout of the ${task.repo} repository at commit ${task.baseCommit.substring(0, 12)} (version ${task.version}). The full source code is in the current working directory.
 
 Issue Description:
 ${task.problem_statement}${hintsSection}
 
-Create a detailed plan that includes:
-1. Root cause analysis - what is the underlying issue?
+Explore the repository to understand the relevant code. Then create a detailed plan:
+1. Root cause analysis - what is the underlying issue? (cite specific files and line numbers)
 2. Affected files - which files need to be modified?
 3. Solution approach - how should this be fixed?
 4. Edge cases - what scenarios should be handled?
@@ -319,14 +372,17 @@ export function extractPatchFromOutput(output: string): string {
 }
 
 /**
- * Invoke Claude CLI and capture output
+ * Invoke Claude CLI and capture output.
+ * On timeout, rejects with an error (no partial recovery).
  */
 function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = ['--print', '--output-format', 'json'];
+    const args = buildClaudeArgs();
+    const env = buildClaudeEnv();
 
     const child = spawn('claude', args, {
       cwd: workDir,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -353,11 +409,9 @@ function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promi
       reject(new Error(`Failed to spawn Claude CLI: ${error.message}`));
     });
 
-    // Send prompt via stdin
     child.stdin.write(prompt);
     child.stdin.end();
 
-    // Timeout handler
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error(`Claude CLI timeout after ${timeoutMs}ms`));
@@ -370,6 +424,91 @@ function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promi
 }
 
 /**
+ * Invoke Claude CLI with graceful timeout handling.
+ * On timeout, returns whatever partial output has been captured so far
+ * instead of throwing. This allows later phases to continue with
+ * partial context rather than losing everything.
+ */
+function invokeClaudeGraceful(
+  prompt: string,
+  workDir: string,
+  timeoutMs: number
+): Promise<{ output: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const args = buildClaudeArgs();
+    const env = buildClaudeEnv();
+
+    const child = spawn('claude', args, {
+      cwd: workDir,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let didTimeout = false;
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (didTimeout) {
+        // Return partial output on timeout
+        resolve({ output: stdout, timedOut: true });
+      } else if (code !== 0) {
+        // Non-zero exit but not timeout — still return what we have
+        resolve({ output: stdout || stderr, timedOut: false });
+      } else {
+        resolve({ output: stdout, timedOut: false });
+      }
+    });
+
+    child.on('error', (error) => {
+      // Spawn failure — resolve with empty output so orchestrator can continue
+      resolve({ output: '', timedOut: false });
+    });
+
+    child.stdin.write(prompt);
+    child.stdin.end();
+
+    const timeout = setTimeout(() => {
+      didTimeout = true;
+      child.kill('SIGTERM');
+      // Give the process 5s to write final output before SIGKILL
+      setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      }, 5000);
+    }, timeoutMs);
+
+    child.on('close', () => {
+      clearTimeout(timeout);
+    });
+  });
+}
+
+/** Build common Claude CLI arguments */
+function buildClaudeArgs(): string[] {
+  return [
+    '--print',
+    '--output-format', 'json',
+    '--dangerously-skip-permissions',
+    '--max-turns', '25',  // Prevent runaway exploration loops
+  ];
+}
+
+/** Build environment for Claude CLI (strip CLAUDECODE to allow nesting) */
+function buildClaudeEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env['CLAUDECODE'];
+  return env;
+}
+
+/**
  * Parse Claude CLI JSON output to extract content and token usage
  */
 function parseClaudeOutput(output: string): {
@@ -378,7 +517,8 @@ function parseClaudeOutput(output: string): {
   outputTokens: number;
 } {
   try {
-    // Claude CLI --output-format json produces JSON lines
+    // Claude CLI --print --output-format json produces a single JSON object
+    // with type "result" containing the response in `result` field
     const lines = output.trim().split('\n');
     let content = '';
     let inputTokens = 0;
@@ -390,20 +530,42 @@ function parseClaudeOutput(output: string): {
       try {
         const json = JSON.parse(line);
 
-        // Accumulate content from assistant messages
+        // Handle the result object (from --print --output-format json)
+        if (json.type === 'result' && json.result) {
+          content += json.result;
+
+          // Extract token usage from the result object
+          if (json.usage) {
+            inputTokens += json.usage.input_tokens || 0;
+            outputTokens += json.usage.output_tokens || 0;
+            // Also check cache tokens as part of input
+            inputTokens += json.usage.cache_read_input_tokens || 0;
+            inputTokens += json.usage.cache_creation_input_tokens || 0;
+          }
+
+          // Extract from modelUsage breakdown if available
+          if (json.modelUsage) {
+            for (const model of Object.values(json.modelUsage) as any[]) {
+              inputTokens += model.inputTokens || 0;
+              inputTokens += model.cacheReadInputTokens || 0;
+              inputTokens += model.cacheCreationInputTokens || 0;
+              outputTokens += model.outputTokens || 0;
+            }
+          }
+
+          continue;
+        }
+
+        // Handle streaming assistant messages
         if (json.type === 'assistant' || json.type === 'content') {
           content += json.content || json.text || '';
         }
 
-        // Extract token usage
-        if (json.usage) {
+        // Extract token usage from other message types
+        if (json.usage && json.type !== 'result') {
           inputTokens += json.usage.input_tokens || 0;
           outputTokens += json.usage.output_tokens || 0;
         }
-
-        // Also check top-level token fields
-        if (json.input_tokens) inputTokens += json.input_tokens;
-        if (json.output_tokens) outputTokens += json.output_tokens;
       } catch {
         // Not JSON, might be plain text - append to content
         content += line + '\n';
@@ -416,7 +578,7 @@ function parseClaudeOutput(output: string): {
     }
 
     return { content: content.trim(), inputTokens, outputTokens };
-  } catch (error) {
+  } catch {
     // Fallback: treat entire output as content
     return { content: output.trim(), inputTokens: 0, outputTokens: 0 };
   }
