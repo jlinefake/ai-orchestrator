@@ -11,6 +11,10 @@
  */
 
 import { EventEmitter } from 'events';
+
+const MAX_EPISODIC_SESSIONS = 5000;
+const MAX_EPISODIC_PATTERNS = 500;
+const MAX_PATTERN_CONTEXTS = 100;
 import type {
   UnifiedMemoryConfig,
   UnifiedMemoryState,
@@ -412,6 +416,10 @@ export class UnifiedMemoryController extends EventEmitter {
     };
 
     this.state.episodic.sessions.push(sessionMemory);
+    // Cap sessions to prevent unbounded growth
+    if (this.state.episodic.sessions.length > MAX_EPISODIC_SESSIONS) {
+      this.state.episodic.sessions = this.state.episodic.sessions.slice(-MAX_EPISODIC_SESSIONS);
+    }
 
     // Learn patterns from successful sessions
     if (outcome === 'success') {
@@ -453,8 +461,16 @@ export class UnifiedMemoryController extends EventEmitter {
         (existing.successRate * (existing.usageCount - 1) + 1) /
         existing.usageCount;
       existing.contexts.push(session.sessionId);
+      if (existing.contexts.length > MAX_PATTERN_CONTEXTS) {
+        existing.contexts = existing.contexts.slice(-MAX_PATTERN_CONTEXTS);
+      }
     } else {
       this.state.episodic.patterns.push(pattern);
+    }
+    // Cap patterns - keep highest usage count
+    if (this.state.episodic.patterns.length > MAX_EPISODIC_PATTERNS) {
+      this.state.episodic.patterns.sort((a, b) => b.usageCount - a.usageCount);
+      this.state.episodic.patterns = this.state.episodic.patterns.slice(0, MAX_EPISODIC_PATTERNS);
     }
   }
 
@@ -468,6 +484,10 @@ export class UnifiedMemoryController extends EventEmitter {
         pattern.usageCount++;
         if (!pattern.contexts.includes(sessionId)) {
           pattern.contexts.push(sessionId);
+          // Cap pattern contexts to prevent unbounded per-pattern growth
+          if (pattern.contexts.length > MAX_PATTERN_CONTEXTS) {
+            pattern.contexts = pattern.contexts.slice(-MAX_PATTERN_CONTEXTS);
+          }
         }
       }
     }

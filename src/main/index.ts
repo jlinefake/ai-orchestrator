@@ -100,6 +100,16 @@ class AIOrchestratorApp {
     orchestration.on('user-action-request', (request) => {
       console.log('Forwarding user action request to renderer:', request.id);
       this.windowManager.sendToRenderer('user-action:request', request);
+
+      if (request.requestType === 'switch_mode') {
+        const modeLabel = request.targetMode
+          ? `${request.targetMode.charAt(0).toUpperCase()}${request.targetMode.slice(1)}`
+          : 'requested';
+        this.windowManager.notifyUserActionRequest(
+          `Approval Needed: Switch to ${modeLabel} Mode`,
+          request.message || 'A mode switch is waiting for your approval.'
+        );
+      }
     });
   }
 
@@ -119,7 +129,7 @@ app.whenReady().then(async () => {
     try {
       const iconPath = path.join(__dirname, '../../build/icon.png');
       app.dock.setIcon(iconPath);
-    } catch (e) {
+    } catch {
       // Icon not found, ignore - packaged app uses Info.plist icon
     }
   }

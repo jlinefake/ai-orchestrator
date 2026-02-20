@@ -11,6 +11,7 @@
 import { EventEmitter } from 'events';
 import Anthropic from '@anthropic-ai/sdk';
 import { CLAUDE_MODELS } from '../../shared/types/provider.types';
+import { getTokenCounter } from '../rlm/token-counter';
 
 export interface CompactionConfig {
   /** Threshold to trigger compaction (0-1, default 0.85) */
@@ -74,6 +75,10 @@ export interface ConversationSummary {
   timestamp: number;
 }
 
+/** Maximum number of summaries to retain */
+const MAX_SUMMARIES = 50;
+const MAX_COMPACTION_HISTORY = 100;
+
 const DEFAULT_CONFIG: CompactionConfig = {
   triggerThreshold: 0.85,
   targetReduction: 0.5,
@@ -90,6 +95,7 @@ export class ContextCompactor extends EventEmitter {
   private anthropic: Anthropic | null = null;
   private state: ContextState;
   private compactionHistory: CompactionResult[] = [];
+  private compactionInProgress = false;
 
   private constructor() {
     super();
@@ -155,10 +161,15 @@ export class ContextCompactor extends EventEmitter {
     this.emit('turn-added', fullTurn);
 
     // Check if compaction needed
-    if (this.config.autoCompact && this.shouldCompact()) {
-      this.compact().catch(err => {
-        this.emit('error', err);
-      });
+    if (this.config.autoCompact && this.shouldCompact() && !this.compactionInProgress) {
+      this.compactionInProgress = true;
+      this.compact()
+        .catch(err => {
+          this.emit('error', err);
+        })
+        .finally(() => {
+          this.compactionInProgress = false;
+        });
     }
 
     return fullTurn;
@@ -240,6 +251,10 @@ export class ContextCompactor extends EventEmitter {
 
       // Update state
       this.state.summaries.push(summary);
+      // Cap summaries to prevent unbounded growth
+      if (this.state.summaries.length > MAX_SUMMARIES) {
+        this.state.summaries = this.state.summaries.slice(-MAX_SUMMARIES);
+      }
       this.state.turns = processedTurns;
       this.state.totalTokens = summaryTokens + preservedTokens;
       this.updateFillRatio();
@@ -256,6 +271,10 @@ export class ContextCompactor extends EventEmitter {
 
       this.state.lastCompaction = result;
       this.compactionHistory.push(result);
+      // Cap compaction history
+      if (this.compactionHistory.length > MAX_COMPACTION_HISTORY) {
+        this.compactionHistory = this.compactionHistory.slice(-MAX_COMPACTION_HISTORY);
+      }
       this.emit('compaction-completed', result);
 
       return result;

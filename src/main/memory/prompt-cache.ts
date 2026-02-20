@@ -375,8 +375,22 @@ export class PromptCacheManager extends EventEmitter {
    * Cache reads: 10% of base = $0.30/1M
    * Cache writes: 125% of base = $3.75/1M
    */
-  private calculateCostSavings(metrics: CacheMetrics): number {
-    const baseCostPerMillion = 3.0; // $3 per million tokens
+  private calculateCostSavings(metrics: CacheMetrics, model?: string): number {
+    // Model-aware pricing per 1M input tokens
+    const pricingMap: Record<string, number> = {
+      'haiku': 1.0,
+      'sonnet': 3.0,
+      'opus': 15.0,
+    };
+
+    const lowerModel = (model || '').toLowerCase();
+    let baseCostPerMillion = 3.0; // Default to Sonnet pricing
+    for (const [key, price] of Object.entries(pricingMap)) {
+      if (lowerModel.includes(key)) {
+        baseCostPerMillion = price;
+        break;
+      }
+    }
 
     // Cost if everything was regular
     const regularCost =

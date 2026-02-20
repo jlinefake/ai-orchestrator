@@ -516,12 +516,33 @@ export class SupervisorTree extends EventEmitter {
   // ============================================
 
   /**
+   * Clean up event listeners forwarded from rootSupervisor
+   */
+  private cleanupEventForwarding(): void {
+    if (!this.rootSupervisor) return;
+
+    this.rootSupervisor.removeAllListeners('worker:added');
+    this.rootSupervisor.removeAllListeners('worker:started');
+    this.rootSupervisor.removeAllListeners('worker:stopped');
+    this.rootSupervisor.removeAllListeners('worker:failed');
+    this.rootSupervisor.removeAllListeners('worker:restarting');
+    this.rootSupervisor.removeAllListeners('circuit-breaker:state-change');
+    this.rootSupervisor.removeAllListeners('supervision:exhausted');
+    this.rootSupervisor.removeAllListeners('supervision:escalated');
+    this.rootSupervisor.removeAllListeners('health:changed');
+    this.rootSupervisor.removeAllListeners('child-supervisor:created');
+  }
+
+  /**
    * Shutdown the supervisor tree
    */
   async shutdown(): Promise<void> {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
     }
+
+    // Clean up forwarded listeners BEFORE shutting down (while rootSupervisor still exists)
+    this.cleanupEventForwarding();
 
     if (this.rootSupervisor) {
       await this.rootSupervisor.shutdown();

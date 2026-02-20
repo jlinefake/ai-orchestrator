@@ -37,6 +37,7 @@ import { InstanceOrchestrationManager } from './instance-orchestration';
 import { InstancePersistenceManager } from './instance-persistence';
 import { getPermissionManager, type PermissionRequest, type PermissionScope } from '../security/permission-manager';
 import * as path from 'path';
+import type { UserActionRequest } from '../orchestration/orchestration-handler';
 
 // Singleton instance
 let instanceManager: InstanceManager | null = null;
@@ -141,14 +142,18 @@ export class InstanceManager extends EventEmitter {
     );
 
     // Start periodic task timeout checking
-    getTaskManager().startTimeoutChecker(15000, (timedOut) => {
+    getTaskManager().startTimeoutChecker(15000, async (timedOut) => {
       for (const task of timedOut) {
         console.warn(`[TaskManager] Task ${task.taskId} timed out (child: ${task.childId})`);
-        const orchestration = this.orchestrationMgr.getOrchestrationHandler();
-        orchestration.notifyError(
-          task.parentId,
-          `Child task "${task.task}" timed out after ${Math.round((task.timeout || 0) / 1000)}s`
-        );
+        try {
+          const orchestration = this.orchestrationMgr.getOrchestrationHandler();
+          await orchestration.notifyError(
+            task.parentId,
+            `Child task "${task.task}" timed out after ${Math.round((task.timeout || 0) / 1000)}s`
+          );
+        } catch (err) {
+          console.error(`[TaskManager] Failed to notify parent ${task.parentId} about timed out task ${task.taskId}:`, err);
+        }
       }
     });
 
@@ -213,6 +218,80 @@ export class InstanceManager extends EventEmitter {
       return path.join(workingDirectory, p);
     }
     return p;
+  }
+
+  private getLatestPendingSwitchModeRequest(
+    instanceId: string
+  ): UserActionRequest | undefined {
+    const pending = this.orchestrationMgr
+      .getOrchestrationHandler()
+      .getPendingUserActionsForInstance(instanceId)
+      .filter((request) => request.requestType === 'switch_mode');
+
+    if (pending.length === 0) return undefined;
+
+    return pending.sort((a, b) => b.createdAt - a.createdAt)[0];
+  }
+
+  private isAffirmativeApprovalReply(message: string): boolean {
+    const normalized = message.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+
+    return /^(yes|y|yeah|yep|sure|ok|okay|approved|approve|proceed|continue|go ahead|go for it|do it|sounds good|let'?s do it|switch)$/.test(normalized);
+  }
+
+  private isNegativeApprovalReply(message: string): boolean {
+    const normalized = message.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+
+    return /^(no|n|nope|nah|don'?t|do not|stop|cancel|reject|not now)$/.test(normalized);
+  }
+
+  private async maybeHandleSwitchModeReply(
+    instanceId: string,
+    message: string
+  ): Promise<boolean> {
+    const pendingRequest = this.getLatestPendingSwitchModeRequest(instanceId);
+    if (!pendingRequest) return false;
+
+    const approved = this.isAffirmativeApprovalReply(message);
+    const rejected = !approved && this.isNegativeApprovalReply(message);
+    if (!approved && !rejected) return false;
+
+    const orchestration = this.orchestrationMgr.getOrchestrationHandler();
+    orchestration.respondToUserAction(pendingRequest.id, approved);
+
+    if (approved && pendingRequest.targetMode) {
+      await this.changeAgentMode(instanceId, pendingRequest.targetMode);
+    }
+
+    const instance = this.state.getInstance(instanceId);
+    if (instance) {
+      const feedback = approved
+        ? pendingRequest.targetMode
+          ? `Mode switch approved via chat reply. Switched to ${pendingRequest.targetMode} mode.`
+          : 'Action approved via chat reply.'
+        : 'Mode switch rejected via chat reply.';
+
+      const systemMessage: OutputMessage = {
+        id: generateId(),
+        timestamp: Date.now(),
+        type: 'system',
+        content: feedback,
+        metadata: {
+          source: 'user-action-auto-response',
+          requestId: pendingRequest.id,
+          requestType: pendingRequest.requestType,
+          targetMode: pendingRequest.targetMode,
+          approved
+        }
+      };
+
+      this.communication.addToOutputBuffer(instance, systemMessage);
+      this.emit('instance:output', { instanceId, message: systemMessage });
+    }
+
+    return true;
   }
 
   private async handleInputRequired(payload: {
@@ -391,6 +470,10 @@ export class InstanceManager extends EventEmitter {
     const instance = this.state.getInstance(instanceId);
     if (!instance) {
       throw new Error(`Instance ${instanceId} not found`);
+    }
+
+    if (await this.maybeHandleSwitchModeReply(instanceId, message)) {
+      return;
     }
 
     // Resolve slash commands before we do any context budgeting or send to the provider.

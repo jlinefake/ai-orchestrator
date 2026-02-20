@@ -42,12 +42,19 @@ export class NdjsonParser {
     // Check buffer size limit
     const bufferSize = this.getBufferSize();
     if (bufferSize > this.maxBufferBytes) {
-      logger.warn('NDJSON buffer exceeded max size, resetting', { bufferSize, maxBufferBytes: this.maxBufferBytes });
-      // Try to salvage what we can from complete lines
-      const lines = this.buffer.split('\n');
-      this.buffer = ''; // Reset buffer
+      logger.warn('NDJSON buffer exceeded max size, attempting recovery', {
+        bufferSize,
+        maxBufferBytes: this.maxBufferBytes,
+        bufferPreview: this.buffer.substring(0, 200)
+      });
 
-      // Parse any complete lines we can salvage
+      // Try to salvage complete lines from the oversized buffer
+      const lines = this.buffer.split('\n');
+
+      // Preserve the last (potentially incomplete) line instead of discarding it
+      this.buffer = lines[lines.length - 1] || '';
+
+      // Parse all complete lines we can salvage
       for (const line of lines.slice(0, -1)) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -55,8 +62,11 @@ export class NdjsonParser {
           const parsed = JSON.parse(trimmed) as CliStreamMessage;
           parsed.timestamp = parsed.timestamp || Date.now();
           messages.push(parsed);
-        } catch {
-          // Discard unparseable lines
+        } catch (err) {
+          logger.warn('Failed to parse NDJSON line during buffer overflow recovery', {
+            linePreview: trimmed.substring(0, 100),
+            error: (err as Error).message
+          });
         }
       }
 

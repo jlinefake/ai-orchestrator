@@ -12,6 +12,8 @@ import type {
   SkillMetadata,
 } from '../../shared/types/skill.types';
 
+const MAX_CACHED_SKILLS = 50;
+
 // Local type for load level
 export type SkillLoadLevel = 'core' | 'references' | 'full';
 
@@ -194,6 +196,13 @@ export class SkillLoader extends EventEmitter {
       await this.loadExamples(loadedSkill, options.maxTokens);
     }
 
+    // LRU eviction: remove oldest entry if cache is full
+    if (this.loadedSkills.size >= MAX_CACHED_SKILLS) {
+      const oldestKey = this.loadedSkills.keys().next().value;
+      if (oldestKey) {
+        this.loadedSkills.delete(oldestKey);
+      }
+    }
     this.loadedSkills.set(bundle.metadata.name, loadedSkill);
     this.emit('skill:loaded', { name: bundle.metadata.name, level: this.getLoadLevel(loadedSkill) });
 

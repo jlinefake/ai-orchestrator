@@ -2,7 +2,7 @@
  * Window Manager - Creates and manages Electron windows
  */
 
-import { app, BrowserWindow, screen, Menu } from 'electron';
+import { app, BrowserWindow, screen, Menu, Notification, shell } from 'electron';
 import * as path from 'path';
 
 export class WindowManager {
@@ -95,7 +95,7 @@ export class WindowManager {
     // Open external links in default browser
     this.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        require('electron').shell.openExternal(url);
+        void shell.openExternal(url);
       }
       return { action: 'deny' };
     });
@@ -186,5 +186,45 @@ export class WindowManager {
 
   isMainWindowFocused(): boolean {
     return this.mainWindow?.isFocused() ?? false;
+  }
+
+  notifyUserActionRequest(title: string, body: string): void {
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title,
+        body,
+        urgency: 'normal'
+      });
+
+      notification.on('click', () => {
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+        if (this.mainWindow.isMinimized()) {
+          this.mainWindow.restore();
+        }
+        this.mainWindow.show();
+        this.mainWindow.focus();
+      });
+
+      notification.show();
+    }
+
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+    if (this.mainWindow.isFocused()) return;
+
+    this.mainWindow.flashFrame(true);
+    const stopFlash = () => {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.flashFrame(false);
+      }
+    };
+
+    this.mainWindow.once('focus', stopFlash);
+    setTimeout(stopFlash, 15000);
+
+    if (process.platform === 'darwin' && app.dock) {
+      const bounceId = app.dock.bounce('informational');
+      this.mainWindow.once('focus', () => app.dock?.cancelBounce(bounceId));
+      setTimeout(() => app.dock?.cancelBounce(bounceId), 15000);
+    }
   }
 }

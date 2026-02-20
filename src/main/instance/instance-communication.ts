@@ -265,9 +265,17 @@ export class InstanceCommunicationManager extends EventEmitter {
   // ============================================
 
   /**
-   * Set up event handlers for a CLI adapter
+   * Set up event handlers for a CLI adapter.
+   * Cleans up listeners on any previously-attached adapter to prevent leaks.
    */
   setupAdapterEvents(instanceId: string, adapter: CliAdapter): void {
+    // Clean up listeners on the old adapter to prevent memory leaks
+    // when adapters are replaced (e.g., toggleYoloMode, changeModel, changeAgentMode)
+    const oldAdapter = this.deps.getAdapter(instanceId);
+    if (oldAdapter && oldAdapter !== adapter) {
+      oldAdapter.removeAllListeners();
+    }
+
     adapter.on('output', async (message: OutputMessage) => {
       // Guard: ignore output events from a replaced adapter
       const currentAdapter = this.deps.getAdapter(instanceId);
