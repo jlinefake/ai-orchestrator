@@ -5,12 +5,15 @@
  * either vanilla Claude or the orchestrator.
  */
 
-import { spawn } from 'child_process';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { spawn, execSync } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { SWEBenchTask, SWEBenchResult } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
+
+/** Orchestrator phase — drives model selection and prompt behavior */
+type Phase = 'plan' | 'implement' | 'review' | 'vanilla';
 
 /** Phase time budgets as fractions of the total timeout */
 const PHASE_BUDGETS = {
@@ -32,7 +35,7 @@ export async function generatePatchVanilla(
 
   try {
     const prompt = buildSWEBenchPrompt(task, 'vanilla');
-    const output = await invokeClaude(prompt, workDir, timeoutMs);
+    const output = await invokeClaude(prompt, workDir, timeoutMs, 'vanilla');
 
     // Parse JSON response for token usage
     const { content, inputTokens, outputTokens } = parseClaudeOutput(output);
@@ -116,8 +119,8 @@ export async function generatePatchOrchestrator(
   /** Calculate remaining time budget */
   const remainingMs = () => totalBudgetMs - (Date.now() - startTime);
 
-  /** Minimum time to bother starting a phase (2 minutes) */
-  const MIN_PHASE_MS = 2 * 60 * 1000;
+  /** Minimum time to bother starting a phase (reduced to 1 min to allow late saves) */
+  const MIN_PHASE_MS = 60 * 1000;
 
   try {
     // ── Phase 1: Planning ──────────────────────────────────────────
@@ -129,7 +132,7 @@ export async function generatePatchOrchestrator(
     let planContent = '';
     if (planBudgetMs >= MIN_PHASE_MS) {
       const planPrompt = buildPlanningPrompt(task);
-      const planOutput = await invokeClaudeGraceful(planPrompt, workDir, planBudgetMs);
+      const planOutput = await invokeClaudeGraceful(planPrompt, workDir, planBudgetMs, 'plan');
       const planResult = parseClaudeOutput(planOutput.output);
       totalInputTokens += planResult.inputTokens;
       totalOutputTokens += planResult.outputTokens;
@@ -138,6 +141,12 @@ export async function generatePatchOrchestrator(
 
       if (planOutput.timedOut) {
         console.log('      ⏱️  Planning phase timed out, continuing with partial plan');
+      }
+
+      // Futility check: if planning produced nothing useful, fall back to single-shot
+      if (planContent && !hasUsefulContent(planContent, 'plan')) {
+        console.log('      ⚠️  Plan has no file references, falling back to single-shot');
+        planContent = ''; // Clear so implementation uses vanilla-style prompt
       }
     }
 
@@ -152,7 +161,7 @@ export async function generatePatchOrchestrator(
       const implPrompt = planContent
         ? buildImplementationPrompt(task, planContent)
         : buildSWEBenchPrompt(task, 'orchestrator'); // Fallback: act like vanilla if no plan
-      const implOutput = await invokeClaudeGraceful(implPrompt, workDir, implBudgetMs);
+      const implOutput = await invokeClaudeGraceful(implPrompt, workDir, implBudgetMs, 'implement');
       const implResult = parseClaudeOutput(implOutput.output);
       totalInputTokens += implResult.inputTokens;
       totalOutputTokens += implResult.outputTokens;
@@ -165,19 +174,45 @@ export async function generatePatchOrchestrator(
       }
     }
 
-    // ── Phase 3: Review (optional) ─────────────────────────────────
-    // Skip review if: no time left, no implementation content, or we already have a clean patch
+    // ── Patch Validation Gate ────────────────────────────────────────
+    let patchValid = false;
+    let applyError = '';
+    if (implPatch) {
+      const checkPath = join(workDir, 'temp_check.patch');
+      try {
+        writeFileSync(checkPath, implPatch);
+        execSync('git apply --check temp_check.patch', { cwd: workDir, stdio: 'pipe' });
+        patchValid = true;
+      } catch (e) {
+        applyError = e instanceof Error ? e.message : String(e);
+      } finally {
+        try { unlinkSync(checkPath); } catch { /* ignore */ }
+      }
+    }
+
+    // ── Phase 3: Review (conditional) ─────────────────────────────
     const reviewBudgetMs = remainingMs();
     let reviewPatch = '';
 
     const shouldSkipReview =
       reviewBudgetMs < MIN_PHASE_MS ||
       !implContent ||
-      !implPatch; // no point reviewing if there's nothing to review
+      !implPatch ||
+      (patchValid && isPatchSmallAndFocused(implPatch));
 
-    if (!shouldSkipReview) {
-      const reviewPrompt = buildReviewPrompt(task, implContent);
-      const reviewOutput = await invokeClaudeGraceful(reviewPrompt, workDir, reviewBudgetMs);
+    if (shouldSkipReview && patchValid) {
+      // Patch is valid and small — skip review entirely
+      console.log('      ✅ Patch passes git apply --check, skipping LLM review to save tokens');
+      reviewPatch = implPatch;
+    } else if (!shouldSkipReview) {
+      // Run review — pass apply error if patch was invalid so reviewer can fix
+      const reviewPrompt = patchValid
+        ? buildReviewPrompt(task, implContent)
+        : buildReviewPrompt(task, implContent, applyError || undefined);
+      console.log(patchValid
+        ? '      🔍 Running LLM review (large patch)'
+        : '      🔧 Patch failed git apply --check, sending to review for repair');
+      const reviewOutput = await invokeClaudeGraceful(reviewPrompt, workDir, reviewBudgetMs, 'review');
       const reviewResult = parseClaudeOutput(reviewOutput.output);
       totalInputTokens += reviewResult.inputTokens;
       totalOutputTokens += reviewResult.outputTokens;
@@ -242,16 +277,30 @@ export async function generatePatchOrchestrator(
 }
 
 /**
- * Build the main prompt for vanilla Claude
+ * Build common context for all phases to maximize prompt caching.
+ * Putting the heavy context (repo info + problem statement) first allows
+ * the API to cache it across different phases/processes.
  */
-function buildSWEBenchPrompt(task: SWEBenchTask, mode: 'vanilla' | 'orchestrator'): string {
+function buildCommonContext(task: SWEBenchTask): string {
   const hintsSection = task.hints_text ? `\n\nHints:\n${task.hints_text}` : '';
-
-  return `You are an expert software engineer. You are in a cloned checkout of the ${task.repo} repository at commit ${task.baseCommit.substring(0, 12)} (version ${task.version}). The repository source code is in the current working directory.
+  return `Repository: ${task.repo}
+Commit: ${task.baseCommit.substring(0, 12)} (version ${task.version})
+Working Directory: Current directory (full source available)
 
 Issue Description:
 ${task.problem_statement}${hintsSection}
+`;
+}
 
+/**
+ * Build the main prompt for vanilla Claude
+ */
+function buildSWEBenchPrompt(task: SWEBenchTask, mode: 'vanilla' | 'orchestrator'): string {
+  const context = buildCommonContext(task);
+  
+  return `${context}
+
+You are an expert software engineer.
 Your task:
 1. Explore the repository to understand the relevant code (use grep, find, cat etc.)
 2. Identify the root cause of the issue
@@ -273,55 +322,108 @@ Generate the patch now:`;
  * Build planning prompt for orchestrator
  */
 function buildPlanningPrompt(task: SWEBenchTask): string {
-  const hintsSection = task.hints_text ? `\n\nHints:\n${task.hints_text}` : '';
+  const context = buildCommonContext(task);
 
-  return `You are a planning agent in a software engineering team. You are in a cloned checkout of the ${task.repo} repository at commit ${task.baseCommit.substring(0, 12)} (version ${task.version}). The full source code is in the current working directory.
+  return `${context}
 
-Issue Description:
-${task.problem_statement}${hintsSection}
+You are a localization and planning agent. Follow this exact process:
 
-Explore the repository to understand the relevant code. Then create a detailed plan:
-1. Root cause analysis - what is the underlying issue? (cite specific files and line numbers)
-2. Affected files - which files need to be modified?
-3. Solution approach - how should this be fixed?
-4. Edge cases - what scenarios should be handled?
-5. Testing strategy - how to verify the fix?
+STEP 1 — FILE LOCALIZATION
+Search the repository to find the 3-5 most relevant files. Use grep/find to search for:
+- Error messages or keywords from the issue
+- Class/function names mentioned in the issue
+- Related test files
+List each file with a one-line reason why it's relevant.
 
-Provide your analysis and plan:`;
+STEP 2 — FUNCTION LOCALIZATION
+For each relevant file, identify the specific function(s) or class(es) that need modification.
+Cite exact function names and line numbers.
+
+STEP 3 — ROOT CAUSE
+Based on the localized code, explain the root cause in 2-3 sentences.
+
+STEP 4 — FIX PLAN
+For each function that needs changes:
+- File path
+- Function name and line number
+- What to change (be specific about the logic change)
+- Any edge cases to handle
+
+Keep your response concise and structured. Do not write code — only specify locations and changes.`;
 }
 
 /**
  * Build implementation prompt for orchestrator
  */
+/**
+ * Compress a plan to its most actionable content to reduce input tokens.
+ * Priority: file paths > structured content > code references.
+ */
+function compressPlan(plan: string, maxChars = 8000): string {
+  const lines = plan.split('\n');
+
+  // Priority 1: Lines with file paths (most actionable for implementation)
+  const fileRefs = lines.filter(l =>
+    /\.(py|js|ts|java|go|rb|rs|c|cpp|h|css|html)\b/.test(l) || /line\s+\d+/i.test(l)
+  );
+
+  // Priority 2: Structured content (bullets, numbers, headers)
+  const structured = lines.filter(l => /^\s*[0-9]+\.|^\s*[-*]|^\s*#/.test(l));
+
+  // Priority 3: Lines with code references (backticks, function/class keywords)
+  const codeRefs = lines.filter(l =>
+    /`[^`]+`/.test(l) || /\b(def|class|function|method|import)\b/.test(l)
+  );
+
+  // Combine, deduplicate, preserve order
+  const seen = new Set<string>();
+  const combined: string[] = [];
+  for (const line of [...fileRefs, ...structured, ...codeRefs]) {
+    if (!seen.has(line)) {
+      seen.add(line);
+      combined.push(line);
+    }
+  }
+
+  // Cap at 50 lines and maxChars
+  const capped = combined.slice(0, 50).join('\n');
+  return capped.length > maxChars ? capped.substring(0, maxChars) : capped;
+}
+
 function buildImplementationPrompt(task: SWEBenchTask, plan: string): string {
-  return `You are an implementation agent. Based on the following plan, generate a patch to fix the issue.
+  const context = buildCommonContext(task);
+  const compressedPlan = compressPlan(plan);
 
-Issue: ${task.instanceId}
-Repository: ${task.repo}
+  return `${context}
 
-Plan from planning agent:
-${plan}
+You are an implementation agent. Generate a minimal patch to fix the issue based on this plan.
 
-Now generate a unified diff patch that implements this plan. The patch must:
-- Be a valid unified diff format
-- Include all necessary file changes
-- Apply cleanly to base commit ${task.baseCommit}
-- Handle all edge cases mentioned in the plan
+Plan Summary:
+${compressedPlan}
 
-Output the patch enclosed in a \`\`\`diff code block:`;
+INSTRUCTIONS:
+- Output ONLY a unified diff patch in a \`\`\`diff code block
+- Make the MINIMUM changes needed — do not refactor unrelated code
+- The patch must apply cleanly with \`git apply\`
+- Include proper context lines (3 lines before/after changes)
+- File paths must be relative to the repository root
+
+\`\`\`diff code block:`;
 }
 
 /**
  * Build review prompt for orchestrator
  */
-function buildReviewPrompt(task: SWEBenchTask, implementation: string): string {
-  return `You are a review agent. Review and validate the following patch implementation.
+function buildReviewPrompt(task: SWEBenchTask, implementation: string, error?: string): string {
+  const context = buildCommonContext(task);
+  const errorContext = error ? `\n\nReview Trigger: The previous patch failed to apply.\nError: ${error}` : '';
 
-Issue: ${task.instanceId}
-Repository: ${task.repo}
+  return `${context}
+
+You are a review agent. Review and validate the following patch implementation.
 
 Implementation:
-${implementation}
+${implementation}${errorContext}
 
 Review the patch for:
 1. Correctness - does it solve the issue?
@@ -333,6 +435,43 @@ If the patch is good, output it in final form in a \`\`\`diff code block.
 If it needs fixes, provide the corrected patch in a \`\`\`diff code block.
 
 Final patch:`;
+}
+
+/**
+ * Check whether a phase produced useful, actionable content.
+ * Used for futility detection — if a phase fails to produce
+ * meaningful output, we can abort early and fall back.
+ */
+function hasUsefulContent(output: string, phase: Phase): boolean {
+  if (!output || output.trim().length < 50) return false;
+
+  if (phase === 'plan') {
+    // A useful plan should reference at least one source file
+    return /\.(py|js|ts|java|go|rb|rs|c|cpp|h)\b/.test(output);
+  }
+
+  if (phase === 'implement') {
+    // Implementation should contain diff markers
+    return output.includes('diff --git') ||
+      (output.includes('---') && output.includes('+++'));
+  }
+
+  return true;
+}
+
+/**
+ * Check if a patch is small and focused enough to skip LLM review.
+ * Small patches (1-2 files, <30 changed lines) are unlikely to benefit
+ * from a full review pass.
+ */
+function isPatchSmallAndFocused(patch: string): boolean {
+  const lines = patch.split('\n');
+  const changedFiles = lines.filter(l => l.startsWith('diff --git')).length;
+  const changedLines = lines.filter(l =>
+    (l.startsWith('+') && !l.startsWith('+++')) ||
+    (l.startsWith('-') && !l.startsWith('---'))
+  ).length;
+  return changedFiles <= 2 && changedLines < 30;
 }
 
 /**
@@ -375,9 +514,9 @@ export function extractPatchFromOutput(output: string): string {
  * Invoke Claude CLI and capture output.
  * On timeout, rejects with an error (no partial recovery).
  */
-function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promise<string> {
+function invokeClaude(prompt: string, workDir: string, timeoutMs: number, phase?: Phase): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = buildClaudeArgs();
+    const args = buildClaudeArgs(phase);
     const env = buildClaudeEnv();
 
     const child = spawn('claude', args, {
@@ -409,6 +548,13 @@ function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promi
       reject(new Error(`Failed to spawn Claude CLI: ${error.message}`));
     });
 
+    // Handle stdin errors (EPIPE if process exits before write completes)
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') {
+        stderr += `stdin error: ${err.message}\n`;
+      }
+    });
+
     child.stdin.write(prompt);
     child.stdin.end();
 
@@ -432,10 +578,11 @@ function invokeClaude(prompt: string, workDir: string, timeoutMs: number): Promi
 function invokeClaudeGraceful(
   prompt: string,
   workDir: string,
-  timeoutMs: number
+  timeoutMs: number,
+  phase?: Phase
 ): Promise<{ output: string; timedOut: boolean }> {
   return new Promise((resolve) => {
-    const args = buildClaudeArgs();
+    const args = buildClaudeArgs(phase);
     const env = buildClaudeEnv();
 
     const child = spawn('claude', args, {
@@ -473,6 +620,13 @@ function invokeClaudeGraceful(
       resolve({ output: '', timedOut: false });
     });
 
+    // Handle stdin errors (EPIPE if process exits before write completes)
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') {
+        stderr += `stdin error: ${err.message}\n`;
+      }
+    });
+
     child.stdin.write(prompt);
     child.stdin.end();
 
@@ -491,14 +645,33 @@ function invokeClaudeGraceful(
   });
 }
 
+/** Select model based on orchestrator phase */
+function getModelForPhase(phase: Phase): string | undefined {
+  switch (phase) {
+    case 'plan':
+    case 'review':
+      // Sonnet for analysis phases — cheaper, still accurate
+      return 'claude-sonnet-4-20250514';
+    case 'implement':
+    case 'vanilla':
+      // Default CLI model for code generation (needs precision)
+      return undefined;
+  }
+}
+
 /** Build common Claude CLI arguments */
-function buildClaudeArgs(): string[] {
-  return [
+function buildClaudeArgs(phase?: Phase): string[] {
+  const args = [
     '--print',
     '--output-format', 'json',
     '--dangerously-skip-permissions',
-    '--max-turns', '25',  // Prevent runaway exploration loops
+    '--max-turns', '15',
   ];
+  const model = phase ? getModelForPhase(phase) : undefined;
+  if (model) {
+    args.push('--model', model);
+  }
+  return args;
 }
 
 /** Build environment for Claude CLI (strip CLAUDECODE to allow nesting) */
@@ -543,15 +716,8 @@ function parseClaudeOutput(output: string): {
             inputTokens += json.usage.cache_creation_input_tokens || 0;
           }
 
-          // Extract from modelUsage breakdown if available
-          if (json.modelUsage) {
-            for (const model of Object.values(json.modelUsage) as any[]) {
-              inputTokens += model.inputTokens || 0;
-              inputTokens += model.cacheReadInputTokens || 0;
-              inputTokens += model.cacheCreationInputTokens || 0;
-              outputTokens += model.outputTokens || 0;
-            }
-          }
+          // NOTE: json.modelUsage is a per-model breakdown of the SAME data
+          // as json.usage — do NOT sum both or tokens will be double-counted.
 
           continue;
         }
@@ -582,6 +748,32 @@ function parseClaudeOutput(output: string): {
     // Fallback: treat entire output as content
     return { content: output.trim(), inputTokens: 0, outputTokens: 0 };
   }
+}
+
+/**
+ * Classify a task's difficulty based on heuristics.
+ * Used by the runner to route easy tasks to the vanilla fast-path.
+ */
+export function classifyDifficulty(task: SWEBenchTask): 'easy' | 'medium' | 'hard' {
+  const issueLength = task.problem_statement.length;
+  let failTests = 0;
+  try {
+    const parsed = typeof task.FAIL_TO_PASS === 'string'
+      ? JSON.parse(task.FAIL_TO_PASS)
+      : task.FAIL_TO_PASS;
+    failTests = Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    failTests = 0;
+  }
+  const hasHints = !!task.hints_text?.trim();
+
+  // Easy: short issue, single test, has hints
+  if (issueLength < 500 && failTests <= 1 && hasHints) return 'easy';
+
+  // Hard: long issue or many failing tests
+  if (issueLength > 2000 || failTests > 3) return 'hard';
+
+  return 'medium';
 }
 
 /**

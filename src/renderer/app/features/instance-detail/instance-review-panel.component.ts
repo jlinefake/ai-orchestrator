@@ -18,13 +18,47 @@ import { ElectronIpcService } from '../../core/services/ipc';
 import { VcsIpcService } from '../../core/services/ipc/vcs-ipc.service';
 import { IPC_CHANNELS } from '../../../../shared/types/ipc.types';
 import { ReviewResultsComponent } from '../review/review-results.component';
-import type { ReviewIssue, ReviewSummary } from '../../../../shared/types/review-agent.types';
+import type {
+  ReviewIssue,
+  ReviewSummary,
+  ReviewSessionStatus,
+  SeverityLevel
+} from '../../../../shared/types/review-agent.types';
 
-type ReviewAgent = {
+interface ReviewAgent {
   id: string;
   name: string;
   description: string;
-};
+}
+
+interface ReviewAgentRecord {
+  id: unknown;
+  name: unknown;
+  description?: unknown;
+}
+
+interface GitRepoStatus {
+  isRepo?: boolean;
+}
+
+interface GitStatusFileChange {
+  path: string;
+}
+
+interface GitStatusPayload {
+  staged?: GitStatusFileChange[];
+  unstaged?: GitStatusFileChange[];
+  untracked?: string[];
+}
+
+interface ReviewStartSessionData {
+  sessionId?: string;
+}
+
+interface ReviewSessionData {
+  status?: ReviewSessionStatus;
+  aggregatedIssues?: ReviewIssue[];
+}
 
 @Component({
   selector: 'app-instance-review-panel',
@@ -347,7 +381,9 @@ export class InstanceReviewPanelComponent {
       this.error.set(resp.error?.message || 'Failed to load review agents');
       return;
     }
-    const agents = (resp.data as any[]) || [];
+    const agents = Array.isArray(resp.data)
+      ? (resp.data as ReviewAgentRecord[])
+      : [];
     const list: ReviewAgent[] = agents.map((a) => ({
       id: String(a.id),
       name: String(a.name),
@@ -377,7 +413,8 @@ export class InstanceReviewPanelComponent {
     this.error.set(null);
     const wd = this.workingDirectory();
     const repoResp = await this.vcs.vcsIsRepo(wd);
-    if (!repoResp.success || !(repoResp.data as any)?.isRepo) {
+    const repoStatus = repoResp.data as GitRepoStatus | undefined;
+    if (!repoResp.success || !repoStatus?.isRepo) {
       this.files.set([]);
       return;
     }
@@ -386,11 +423,11 @@ export class InstanceReviewPanelComponent {
       this.error.set(statusResp.error?.message || 'Failed to read git status');
       return;
     }
-    const st = statusResp.data as any;
+    const st = (statusResp.data as GitStatusPayload | undefined) ?? {};
     const files = [
-      ...(st?.staged || []).map((c: any) => c.path),
-      ...(st?.unstaged || []).map((c: any) => c.path),
-      ...(st?.untracked || []),
+      ...(st.staged ?? []).map((c) => c.path),
+      ...(st.unstaged ?? []).map((c) => c.path),
+      ...(st.untracked ?? []),
     ]
       .filter(Boolean)
       .slice(0, 200);
@@ -428,7 +465,13 @@ export class InstanceReviewPanelComponent {
         this.sessionStatus.set('failed');
         return;
       }
-      const sessionId = (resp.data as any)?.sessionId as string;
+      const sessionData = resp.data as ReviewStartSessionData | undefined;
+      const sessionId = sessionData?.sessionId;
+      if (!sessionId) {
+        this.error.set('Invalid review session response');
+        this.sessionStatus.set('failed');
+        return;
+      }
       this.sessionId.set(sessionId);
       await this.pollSession(sessionId);
     } catch (e) {
@@ -440,7 +483,13 @@ export class InstanceReviewPanelComponent {
   }
 
   private buildSummary(issues: ReviewIssue[]): ReviewSummary {
-    const bySeverity: any = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    const bySeverity: Record<SeverityLevel, number> = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      info: 0
+    };
     const byAgent: Record<string, number> = {};
     const fileCount: Record<string, number> = {};
 
@@ -483,8 +532,8 @@ export class InstanceReviewPanelComponent {
         return;
       }
 
-      const session = resp.data as any;
-      const status = session?.status as any;
+      const session = (resp.data as ReviewSessionData | undefined) ?? {};
+      const status = session.status;
       if (status === 'failed') {
         this.sessionStatus.set('failed');
         return;
@@ -524,4 +573,3 @@ export class InstanceReviewPanelComponent {
     });
   }
 }
-

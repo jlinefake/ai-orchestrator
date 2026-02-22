@@ -205,7 +205,7 @@ export class GeminiCliProvider extends BaseProvider {
    * Estimate cost based on Gemini pricing
    */
   private estimateCost(tokens: number): number {
-    // Gemini 1.5 Pro pricing (approximate)
+    // Gemini Pro pricing (approximate blended rate)
     const pricePerMillion = 3.5; // $3.50 per million tokens (blended)
     return (tokens / 1_000_000) * pricePerMillion;
   }

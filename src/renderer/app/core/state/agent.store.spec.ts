@@ -74,7 +74,7 @@ describe('AgentStore', () => {
 
         expect(geminiPreference).toBeDefined();
         expect(geminiPreference?.command).toBe('gemini');
-        expect(geminiPreference?.defaultModel).toBe('gemini-3-flash');
+        expect(geminiPreference?.defaultModel).toBe('gemini-3.1-pro-preview');
         expect(geminiPreference?.defaultTimeout).toBe(300);
         expect(geminiPreference?.autoApprove).toBe(false);
         expect(geminiPreference?.personality).toBe('creative-solver');
@@ -365,7 +365,7 @@ describe('AgentStore', () => {
             },
             gemini: {
               command: 'gemini',
-              defaultModel: 'gemini-3-flash',
+              defaultModel: 'gemini-3.1-pro-preview',
               defaultTimeout: 300,
               autoApprove: false,
               personality: 'creative-solver',
@@ -409,7 +409,7 @@ describe('AgentStore', () => {
             },
             gemini: {
               command: 'gemini',
-              defaultModel: 'gemini-3-flash',
+              defaultModel: 'gemini-3.1-pro-preview',
               defaultTimeout: 300,
               autoApprove: false,
               personality: 'creative-solver',
@@ -457,7 +457,7 @@ describe('AgentStore', () => {
             },
             gemini: {
               command: 'gemini',
-              defaultModel: 'gemini-3-flash',
+              defaultModel: 'gemini-3.1-pro-preview',
               defaultTimeout: 300,
               autoApprove: false,
               personality: 'creative-solver',

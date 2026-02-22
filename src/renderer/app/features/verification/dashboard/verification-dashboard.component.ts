@@ -145,7 +145,7 @@ import type { SynthesisStrategy } from '../../../../../shared/types/verification
 
                 <!-- Working Directory Selector -->
                 <div class="form-group">
-                  <label class="form-label">Working Directory</label>
+                  <span class="form-label">Working Directory</span>
                   <div class="directory-selector">
                     <button
                       class="directory-btn"

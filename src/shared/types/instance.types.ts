@@ -227,7 +227,7 @@ export function createInstance(config: InstanceCreateConfig): Instance {
 
   return {
     id: crypto.randomUUID(),
-    displayName: config.displayName || `Instance ${now}`,
+    displayName: config.displayName || (config.workingDirectory && config.workingDirectory.split(/[/\\]/).filter(Boolean).pop()) || `Instance ${now}`,
     createdAt: now,
 
     parentId: config.parentId || null,

@@ -188,6 +188,18 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       // Set up stdin formatter
       if (this.process.stdin) {
         this.formatter = new InputFormatter(this.process.stdin);
+
+        // Handle stdin errors (EPIPE when process exits before write completes)
+        this.process.stdin.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code === 'EPIPE') {
+            logger.warn('stdin EPIPE - CLI process closed before write completed', {
+              pid: this.process?.pid,
+            });
+          } else {
+            logger.error('stdin stream error', error);
+          }
+          this.emit('error', error);
+        });
       }
 
       // Prepare message content with file attachments
@@ -500,6 +512,18 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     // Set up stdin formatter
     if (this.process.stdin) {
       this.formatter = new InputFormatter(this.process.stdin);
+
+      // Handle stdin errors (EPIPE when process exits before write completes)
+      this.process.stdin.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EPIPE') {
+          logger.warn('stdin EPIPE - CLI process closed before write completed', {
+            pid: this.process?.pid,
+          });
+        } else {
+          logger.error('stdin stream error', error);
+        }
+        this.emit('error', error);
+      });
     }
 
     // Set up stdout handler (NDJSON stream)

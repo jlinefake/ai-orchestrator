@@ -82,7 +82,7 @@ def run_evaluation(predictions_path: str, output_path: str = None) -> Dict[str, 
         instance_ids = [p['instance_id'] for p in predictions]
 
         cmd = [
-            'python', '-m', 'swebench.harness.run_evaluation',
+            sys.executable, '-m', 'swebench.harness.run_evaluation',
             '--predictions_path', predictions_path,
             '--run_id', run_id,
             '--dataset_name', 'princeton-nlp/SWE-bench_Lite',
@@ -146,7 +146,7 @@ def run_evaluation(predictions_path: str, output_path: str = None) -> Dict[str, 
 def _run_evaluation_legacy(predictions_path, predictions, temp_dir, output_path):
     """Fallback for older swebench versions."""
     cmd = [
-        'python', '-m', 'swebench.harness.run_evaluation',
+        sys.executable, '-m', 'swebench.harness.run_evaluation',
         '--predictions_path', predictions_path,
         '--swe_bench_tasks', 'princeton-nlp/SWE-bench_Lite',
         '--log_dir', str(temp_dir / 'logs'),

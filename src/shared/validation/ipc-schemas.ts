@@ -273,6 +273,272 @@ export const PlanModeGetStatePayloadSchema = z.object({
   instanceId: InstanceIdSchema,
 });
 
+// ============ Memory & Debate ============
+
+const TaskIdSchema = z.string().min(1).max(200);
+const DebateIdSchema = z.string().min(1).max(200);
+const ScoreSchema = z.number().finite().min(-1).max(1);
+
+const MemoryTypeSchema = z.enum([
+  'short_term',
+  'long_term',
+  'episodic',
+  'semantic',
+  'procedural',
+  'skills',
+]);
+
+const SessionOutcomeSchema = z.enum(['success', 'partial', 'failure']);
+const MemoryOperationSchema = z.enum(['ADD', 'UPDATE', 'DELETE', 'NOOP']);
+const MemorySourceTypeSchema = z.enum([
+  'user_input',
+  'agent_output',
+  'tool_result',
+  'derived',
+]);
+
+const MemoryManagerConfigSchema = z.object({
+  maxEntries: z.number().int().min(1).max(1_000_000).optional(),
+  maxTokens: z.number().int().min(100).max(10_000_000).optional(),
+  topK: z.number().int().min(1).max(200).optional(),
+  similarityThreshold: z.number().min(0).max(1).optional(),
+  enableLearning: z.boolean().optional(),
+  learningRate: z.number().positive().max(1).optional(),
+  rewardDiscount: z.number().min(0).max(1).optional(),
+  batchSize: z.number().int().min(1).max(4096).optional(),
+  embeddingModel: z.string().min(1).max(200).optional(),
+  embeddingDimension: z.number().int().min(32).max(8192).optional(),
+});
+
+const MemoryManagerDecisionSchema = z.object({
+  operation: MemoryOperationSchema,
+  entryId: z.string().min(1).max(200).optional(),
+  content: z.string().min(1).max(1_000_000).optional(),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string().min(1).max(10_000),
+});
+
+const MemoryEntrySchema = z.object({
+  id: z.string().min(1).max(200),
+  content: z.string().min(1).max(1_000_000),
+  embedding: z.array(z.number().finite()).min(1).max(8192).optional(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  accessCount: z.number().int().nonnegative(),
+  lastAccessedAt: z.number().int().nonnegative(),
+  sourceType: MemorySourceTypeSchema,
+  sourceSessionId: z.string().max(200),
+  sourceMessageId: z.string().max(200).optional(),
+  relevanceScore: z.number().min(0).max(1),
+  confidenceScore: z.number().min(0).max(1),
+  linkedEntries: z.array(z.string().min(1).max(200)).max(200),
+  tags: z.array(z.string().max(200)).max(200),
+  expiresAt: z.number().int().nonnegative().optional(),
+  isArchived: z.boolean(),
+});
+
+const MemoryOperationLogSchema = z.object({
+  id: z.string().min(1).max(200),
+  operation: MemoryOperationSchema,
+  entryId: z.string().max(200),
+  reason: z.string().max(10_000),
+  timestamp: z.number().int().nonnegative(),
+  taskId: TaskIdSchema,
+  outcomeScore: ScoreSchema.optional(),
+});
+
+const RetrievalLogSchema = z.object({
+  id: z.string().min(1).max(200),
+  query: z.string().max(1_000_000),
+  retrievedIds: z.array(z.string().min(1).max(200)).max(5000),
+  selectedIds: z.array(z.string().min(1).max(200)).max(5000),
+  timestamp: z.number().int().nonnegative(),
+  taskId: TaskIdSchema,
+  retrievalQuality: ScoreSchema.optional(),
+});
+
+export const MemoryR1DecideOperationPayloadSchema = z.object({
+  context: z.string().max(1_000_000),
+  candidateContent: z.string().min(1).max(1_000_000),
+  taskId: TaskIdSchema,
+});
+
+export const MemoryR1ExecuteOperationPayloadSchema = MemoryManagerDecisionSchema;
+
+export const MemoryR1AddEntryPayloadSchema = z.object({
+  content: z.string().min(1).max(1_000_000),
+  reason: z.string().min(1).max(10_000),
+  sourceType: MemorySourceTypeSchema.optional(),
+  sourceSessionId: SessionIdSchema.optional(),
+});
+
+export const MemoryR1DeleteEntryPayloadSchema = z.string().min(1).max(200);
+export const MemoryR1GetEntryPayloadSchema = z.string().min(1).max(200);
+
+export const MemoryR1RetrievePayloadSchema = z.object({
+  query: z.string().min(1).max(1_000_000),
+  taskId: TaskIdSchema,
+});
+
+export const MemoryR1RecordOutcomePayloadSchema = z.object({
+  taskId: TaskIdSchema,
+  success: z.boolean(),
+  score: ScoreSchema,
+});
+
+export const MemoryR1LoadPayloadSchema = z.object({
+  version: z.string().min(1).max(20),
+  timestamp: z.number().int().nonnegative(),
+  entries: z.array(z.tuple([z.string().min(1).max(200), MemoryEntrySchema])).max(100_000),
+  operationHistory: z.array(MemoryOperationLogSchema).max(100_000),
+  retrievalHistory: z.array(RetrievalLogSchema).max(100_000),
+});
+
+export const MemoryR1ConfigurePayloadSchema = MemoryManagerConfigSchema;
+
+const ContextBudgetSplitSchema = z.object({
+  shortTerm: z.number().min(0).max(1),
+  longTerm: z.number().min(0).max(1),
+  procedural: z.number().min(0).max(1),
+}).superRefine((split, ctx) => {
+  const total = split.shortTerm + split.longTerm + split.procedural;
+  if (total <= 0 || total > 1.01) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'contextBudgetSplit values must have a total in the range (0, 1]',
+    });
+  }
+});
+
+const UnifiedMemoryConfigSchema = z.object({
+  shortTermMaxTokens: z.number().int().min(100).max(1_000_000).optional(),
+  shortTermSummarizeAt: z.number().int().min(50).max(1_000_000).optional(),
+  longTermMaxEntries: z.number().int().min(1).max(1_000_000).optional(),
+  longTermPersistPath: z.string().max(4000).optional(),
+  retrievalBlend: z.number().min(0).max(1).optional(),
+  contextBudgetSplit: ContextBudgetSplitSchema.optional(),
+  qualityCostProfile: z.enum(['quality', 'balanced', 'cost']).optional(),
+  diversityThreshold: z.number().min(0).max(1).optional(),
+  rlmMaxResults: z.number().int().min(1).max(100).optional(),
+  semanticCacheMaxEntries: z.number().int().min(0).max(10_000).optional(),
+  semanticCacheTtlMs: z.number().int().min(0).max(7 * 24 * 60 * 60 * 1000).optional(),
+  trainingStage: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  enableGRPO: z.boolean().optional(),
+});
+
+export const UnifiedMemoryProcessInputPayloadSchema = z.object({
+  input: z.string().min(1).max(1_000_000),
+  sessionId: SessionIdSchema,
+  taskId: TaskIdSchema,
+});
+
+export const UnifiedMemoryRetrievePayloadSchema = z.object({
+  query: z.string().min(1).max(1_000_000),
+  taskId: TaskIdSchema,
+  options: z.object({
+    types: z.array(MemoryTypeSchema).max(6).optional(),
+    maxTokens: z.number().int().min(1).max(1_000_000).optional(),
+    sessionId: SessionIdSchema.optional(),
+    instanceId: InstanceIdSchema.optional(),
+  }).optional(),
+});
+
+export const UnifiedMemoryRecordSessionEndPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  outcome: SessionOutcomeSchema,
+  summary: z.string().min(1).max(1_000_000),
+  lessons: z.array(z.string().min(1).max(20_000)).max(200),
+});
+
+export const UnifiedMemoryRecordWorkflowPayloadSchema = z.object({
+  name: z.string().min(1).max(500),
+  steps: z.array(z.string().min(1).max(20_000)).min(1).max(200),
+  applicableContexts: z.array(z.string().min(1).max(500)).max(200),
+});
+
+export const UnifiedMemoryRecordStrategyPayloadSchema = z.object({
+  strategy: z.string().min(1).max(20_000),
+  conditions: z.array(z.string().min(1).max(2_000)).max(200),
+  taskId: TaskIdSchema,
+  success: z.boolean(),
+  score: ScoreSchema,
+});
+
+export const UnifiedMemoryRecordOutcomePayloadSchema = z.object({
+  taskId: TaskIdSchema,
+  success: z.boolean(),
+  score: ScoreSchema,
+});
+
+export const UnifiedMemoryGetSessionsPayloadSchema = z.number().int().min(1).max(10_000).optional();
+export const UnifiedMemoryGetPatternsPayloadSchema = z.number().min(0).max(1).optional();
+
+export const UnifiedMemoryLoadPayloadSchema = z.object({
+  version: z.string().min(1).max(20),
+  timestamp: z.number().int().nonnegative(),
+  shortTerm: z.object({
+    buffer: z.array(z.string().max(1_000_000)).max(100_000),
+    summaries: z.array(z.string().max(1_000_000)).max(100_000),
+  }),
+  episodic: z.object({
+    sessions: z.array(z.object({
+      sessionId: SessionIdSchema,
+      summary: z.string().max(1_000_000),
+      keyEvents: z.array(z.string().max(20_000)).max(1000),
+      outcome: SessionOutcomeSchema,
+      lessonsLearned: z.array(z.string().max(20_000)).max(1000),
+      timestamp: z.number().int().nonnegative(),
+    })).max(100_000),
+    patterns: z.array(z.object({
+      id: z.string().min(1).max(200),
+      pattern: z.string().max(1_000_000),
+      successRate: z.number().min(0).max(1),
+      usageCount: z.number().int().nonnegative(),
+      contexts: z.array(z.string().max(200)).max(5000),
+    })).max(100_000),
+  }),
+  procedural: z.object({
+    workflows: z.array(z.object({
+      id: z.string().min(1).max(200),
+      name: z.string().max(500),
+      steps: z.array(z.string().max(20_000)).max(500),
+      successRate: z.number().min(0).max(1),
+      applicableContexts: z.array(z.string().max(500)).max(500),
+    }).passthrough()).max(100_000),
+    strategies: z.array(z.object({
+      id: z.string().min(1).max(200),
+      strategy: z.string().max(20_000),
+      conditions: z.array(z.string().max(2000)).max(500),
+      outcomes: z.array(z.object({
+        taskId: TaskIdSchema,
+        success: z.boolean(),
+        score: ScoreSchema,
+        timestamp: z.number().int().nonnegative(),
+      })).max(5000),
+    })).max(100_000),
+  }),
+});
+
+export const UnifiedMemoryConfigurePayloadSchema = UnifiedMemoryConfigSchema;
+
+const DebateConfigSchema = z.object({
+  agents: z.number().int().min(2).max(16),
+  maxRounds: z.number().int().min(1).max(10),
+  convergenceThreshold: z.number().min(0).max(1),
+  synthesisModel: z.string().min(1).max(200),
+  temperatureRange: z.tuple([z.number().min(0).max(2), z.number().min(0).max(2)]),
+  timeout: z.number().int().min(1000).max(3_600_000),
+});
+
+export const DebateStartPayloadSchema = z.object({
+  query: z.string().min(1).max(1_000_000),
+  context: z.string().max(1_000_000).optional(),
+  config: DebateConfigSchema.partial().optional(),
+});
+
+export const DebateGetResultPayloadSchema = DebateIdSchema;
+export const DebateCancelPayloadSchema = DebateIdSchema;
+
 // ============ File Operations ============
 
 // Editor operations

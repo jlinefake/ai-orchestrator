@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'events';
 import type { CliAdapter } from '../cli/adapters/adapter-factory';
-import { getHistoryManager } from '../history';
+// History archiving moved exclusively to instance-lifecycle.ts terminateInstance()
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getOutputStorageManager } from '../memory';
 import { getHookManager } from '../hooks/hook-manager';
@@ -540,6 +540,16 @@ export class InstanceCommunicationManager extends EventEmitter {
           }
         }
 
+        // Add error message to output buffer so user sees it in the UI
+        const errorMessage: OutputMessage = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'error',
+          content: error instanceof Error ? error.message : String(error)
+        };
+        this.addToOutputBuffer(instance, errorMessage);
+        this.emit('output', { instanceId, message: errorMessage });
+
         instance.errorCount++;
 
         // Don't mark as error if we're in the middle of respawning - let respawnAfterInterrupt handle it
@@ -614,14 +624,11 @@ export class InstanceCommunicationManager extends EventEmitter {
           this.deps.onChildExit(instanceId, instance, code);
         }
 
-        // Archive crashed/unexpectedly terminated instances to history
-        if (!instance.parentId && instance.outputBuffer.length > 0) {
-          const history = getHistoryManager();
-          history.archiveInstance(instance, newStatus === 'error' ? 'error' : 'completed')
-            .catch((err) => {
-              console.error(`Failed to archive crashed instance ${instanceId} to history:`, err);
-            });
-        }
+        // NOTE: History archiving is handled exclusively by terminateInstance()
+        // in instance-lifecycle.ts. Previously this exit handler also archived,
+        // which caused a race condition: both paths would call archiveInstance()
+        // concurrently, leading to duplicate entries and corrupted index saves
+        // (the same index.json.tmp file was written by concurrent operations).
       }
     });
   }

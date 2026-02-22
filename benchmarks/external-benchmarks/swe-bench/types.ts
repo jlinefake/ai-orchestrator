@@ -27,8 +27,8 @@ export interface SWEBenchTask {
   /** Patch that would solve the issue (gold reference) */
   patch?: string;
   /** PASS_TO_PASS or FAIL_TO_PASS */
-  FAIL_TO_PASS?: string[];
-  PASS_TO_PASS?: string[];
+  FAIL_TO_PASS?: string | string[];
+  PASS_TO_PASS?: string | string[];
 }
 
 export interface SWEBenchResult {

@@ -59,6 +59,7 @@ import type { RecentDirectoryEntry } from '../../../../../shared/types/recent-di
                   [class.focused]="focusedIndex() === i"
                   [title]="dir.path"
                   role="option"
+                  [attr.aria-selected]="dir.path === currentPath()"
                   (click)="selectDirectory(dir)"
                   (contextmenu)="onContextMenu($event, dir)"
                   (mouseenter)="focusedIndex.set(i)"
@@ -86,6 +87,7 @@ import type { RecentDirectoryEntry } from '../../../../../shared/types/recent-di
                   [class.focused]="focusedIndex() === pinnedDirectories().length + i"
                   [title]="dir.path"
                   role="option"
+                  [attr.aria-selected]="dir.path === currentPath()"
                   (click)="selectDirectory(dir)"
                   (contextmenu)="onContextMenu($event, dir)"
                   (mouseenter)="focusedIndex.set(pinnedDirectories().length + i)"
@@ -465,8 +467,8 @@ export class RecentDirectoriesDropdownComponent implements OnInit {
     }
   }
 
-  @HostListener('document:click', ['$event'])
-  handleDocumentClick(event: MouseEvent): void {
+  @HostListener('document:click')
+  handleDocumentClick(): void {
     // Close context menu if clicking outside
     if (this.contextMenuDir()) {
       this.contextMenuDir.set(null);

@@ -15,6 +15,7 @@ import {
   type CliAdapter
 } from '../cli/adapters/adapter-factory';
 import type { CliType } from '../cli/cli-detection';
+import { getModelsForProvider } from '../../shared/types/provider.types';
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getHistoryManager } from '../history';
 import { getMemoryMonitor, getOutputStorageManager } from '../memory';
@@ -218,7 +219,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Create instance object
     const instance: Instance = {
       id: generateId(),
-      displayName: config.displayName || `Instance ${Date.now()}`,
+      displayName: config.displayName || path.basename(resolvedWorkingDir) || `Instance ${Date.now()}`,
       createdAt: Date.now(),
 
       parentId: config.parentId || null,
@@ -355,7 +356,26 @@ export class InstanceLifecycleManager extends EventEmitter {
 
     // Resolve model: explicit override > agent override > settings default
     const settingsModel = settingsAll.defaultModel;
-    const resolvedModel = config.modelOverride || resolvedAgent.modelOverride || settingsModel || undefined;
+    let resolvedModel = config.modelOverride || resolvedAgent.modelOverride || settingsModel || undefined;
+
+    // Validate model against the target provider's supported models.
+    // If the model isn't recognized (e.g., Claude "opus" passed to Gemini), drop it
+    // so the provider uses its own default rather than failing with ModelNotFound.
+    if (resolvedModel && resolvedCliType !== 'claude') {
+      const providerModels = getModelsForProvider(resolvedCliType);
+      if (providerModels.length > 0) {
+        const isValid = providerModels.some(m => m.id === resolvedModel);
+        if (!isValid) {
+          logger.warn('Model not valid for target provider, using provider default', {
+            model: resolvedModel,
+            provider: resolvedCliType,
+            validModels: providerModels.map(m => m.id)
+          });
+          resolvedModel = undefined;
+        }
+      }
+    }
+
     instance.currentModel = resolvedModel;
 
     logger.info('Resolved model for instance', {
@@ -953,11 +973,24 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
           : 'claude'
         : (instance.provider as CliType);
 
+    // Validate model against provider before passing it
+    let validatedModel: string | undefined = newModel;
+    if (cliType !== 'claude') {
+      const providerModels = getModelsForProvider(cliType);
+      if (providerModels.length > 0 && !providerModels.some(m => m.id === newModel)) {
+        logger.warn('Model not valid for target provider during changeModel, using provider default', {
+          model: newModel,
+          provider: cliType,
+        });
+        validatedModel = undefined;
+      }
+    }
+
     const spawnOptions: UnifiedSpawnOptions = {
       sessionId: instance.sessionId,
       workingDirectory: instance.workingDirectory,
       systemPrompt: agent.systemPrompt,
-      model: newModel,
+      model: validatedModel,
       yoloMode: instance.yoloMode,
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
@@ -972,11 +1005,11 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       const pid = await adapter.spawn();
       instance.processId = pid;
       instance.status = 'idle';
-      logger.info('Model changed successfully', { instanceId, pid, newModel });
+      logger.info('Model changed successfully', { instanceId, pid, newModel: validatedModel || 'provider-default' });
 
       // Notify the instance about the model change
       await adapter.sendInput(
-        `[System: Model changed from ${oldModel} to ${newModel}. Conversation context has been preserved.]`
+        `[System: Model changed from ${oldModel} to ${validatedModel || newModel}. Conversation context has been preserved.]`
       );
     } catch (error) {
       instance.status = 'error';
@@ -1019,15 +1052,6 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
 
     const success = adapter.interrupt();
     if (success) {
-      const message = {
-        id: generateId(),
-        type: 'system' as const,
-        content: 'Interrupted by user - resuming session...',
-        timestamp: Date.now()
-      };
-      this.deps.addToOutputBuffer(instance, message);
-      this.emit('output', { instanceId, message });
-
       // Use 'respawning' status to prevent further interrupts during recovery
       instance.status = 'respawning';
       instance.lastActivity = Date.now();
@@ -1101,7 +1125,7 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       const message = {
         id: generateId(),
         type: 'system' as const,
-        content: 'Session resumed - ready for input',
+        content: 'Interrupted — waiting for input',
         timestamp: Date.now()
       };
       this.deps.addToOutputBuffer(instance, message);

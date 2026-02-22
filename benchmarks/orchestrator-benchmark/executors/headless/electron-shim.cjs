@@ -183,12 +183,23 @@ function registerMock(moduleName, mockExports) {
 registerMock('electron', electronMock);
 registerMock('electron-store', ElectronStoreMock);
 
+/**
+ * Ensure all required directories exist.
+ * Called at startup and again before each run (since cleanup() deletes them).
+ */
+function ensureDirs() {
+  for (const dir of dirs) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
 // Export for direct use if needed
 module.exports = {
   electronMock,
   ElectronStoreMock,
   BASE_DIR,
   USER_DATA_DIR,
+  ensureDirs,
   cleanup() {
     try {
       fs.rmSync(BASE_DIR, { recursive: true, force: true });

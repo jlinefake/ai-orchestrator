@@ -48,9 +48,14 @@ export async function executeVanilla(
       fullPrompt = `Previous conversation context:\n${contextSection}\n\n---\n\nCurrent task:\n${task.prompt}`;
     }
 
+    // Remove CLAUDECODE env var to prevent "nested session" error
+    // when the benchmark runner itself is invoked from a Claude Code session
+    const cleanEnv = { ...process.env };
+    delete cleanEnv['CLAUDECODE'];
+
     const proc = spawn('claude', args, {
       cwd,
-      env: { ...process.env },
+      env: cleanEnv,
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -63,6 +68,14 @@ export async function executeVanilla(
 
     proc.stderr?.on('data', (data) => {
       stderr += data.toString();
+    });
+
+    // Handle stdin errors (EPIPE if process exits before write completes)
+    proc.stdin?.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') {
+        stderr += `stdin error: ${err.message}\n`;
+      }
+      // EPIPE is expected if process exits early — handled by close event
     });
 
     // Send the prompt to stdin

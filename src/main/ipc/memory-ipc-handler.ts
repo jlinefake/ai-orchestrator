@@ -8,28 +8,48 @@ import { IPC_CHANNELS } from '../../shared/types/ipc.types';
 import { getMemoryManager } from '../memory/r1-memory-manager';
 import { getUnifiedMemory } from '../memory/unified-controller';
 import { getDebateCoordinator } from '../orchestration/debate-coordinator';
+import {
+  validateIpcPayload,
+  DebateCancelPayloadSchema,
+  DebateGetResultPayloadSchema,
+  DebateStartPayloadSchema,
+  MemoryR1AddEntryPayloadSchema,
+  MemoryR1ConfigurePayloadSchema,
+  MemoryR1DecideOperationPayloadSchema,
+  MemoryR1DeleteEntryPayloadSchema,
+  MemoryR1ExecuteOperationPayloadSchema,
+  MemoryR1GetEntryPayloadSchema,
+  MemoryR1LoadPayloadSchema,
+  MemoryR1RecordOutcomePayloadSchema,
+  MemoryR1RetrievePayloadSchema,
+  UnifiedMemoryConfigurePayloadSchema,
+  UnifiedMemoryGetPatternsPayloadSchema,
+  UnifiedMemoryGetSessionsPayloadSchema,
+  UnifiedMemoryLoadPayloadSchema,
+  UnifiedMemoryProcessInputPayloadSchema,
+  UnifiedMemoryRecordOutcomePayloadSchema,
+  UnifiedMemoryRecordSessionEndPayloadSchema,
+  UnifiedMemoryRecordStrategyPayloadSchema,
+  UnifiedMemoryRecordWorkflowPayloadSchema,
+  UnifiedMemoryRetrievePayloadSchema
+} from '../../shared/validation/ipc-schemas';
 // Training handlers moved to training-ipc-handler.ts
 import type {
-  MemoryManagerConfig,
   MemoryManagerDecision,
   MemoryEntry,
   MemoryR1Stats,
-  MemoryR1Snapshot,
-  MemorySourceType,
+  MemoryR1Snapshot
 } from '../../shared/types/memory-r1.types';
 import type {
-  UnifiedMemoryConfig,
   UnifiedRetrievalResult,
   UnifiedMemoryStats,
   UnifiedMemorySnapshot,
   SessionMemory,
   LearnedPattern,
   WorkflowMemory,
-  StrategyMemory,
-  SessionOutcome,
-  MemoryType,
+  StrategyMemory
 } from '../../shared/types/unified-memory.types';
-import type { DebateConfig, DebateResult, ActiveDebate, DebateStats } from '../../shared/types/debate.types';
+import type { DebateResult, ActiveDebate, DebateStats } from '../../shared/types/debate.types';
 // Training types moved to training-ipc-handler.ts
 
 /**
@@ -50,64 +70,97 @@ function registerMemoryR1Handlers(): void {
   // Decide operation
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_DECIDE_OPERATION,
-    async (
-      _event,
-      payload: { context: string; candidateContent: string; taskId: string }
-    ): Promise<MemoryManagerDecision> => {
-      return memory.decideOperation(payload.context, payload.candidateContent, payload.taskId);
+    async (_event, payload: unknown): Promise<MemoryManagerDecision> => {
+      const validated = validateIpcPayload(
+        MemoryR1DecideOperationPayloadSchema,
+        payload,
+        'MEMORY_R1_DECIDE_OPERATION'
+      );
+      return memory.decideOperation(
+        validated.context,
+        validated.candidateContent,
+        validated.taskId
+      );
     }
   );
 
   // Execute operation
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_EXECUTE_OPERATION,
-    async (_event, decision: MemoryManagerDecision): Promise<MemoryEntry | null> => {
-      return memory.executeOperation(decision);
+    async (_event, decision: unknown): Promise<MemoryEntry | null> => {
+      const validated = validateIpcPayload(
+        MemoryR1ExecuteOperationPayloadSchema,
+        decision,
+        'MEMORY_R1_EXECUTE_OPERATION'
+      );
+      return memory.executeOperation(validated);
     }
   );
 
   // Add entry directly
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_ADD_ENTRY,
-    async (
-      _event,
-      payload: {
-        content: string;
-        reason: string;
-        sourceType?: MemorySourceType;
-        sourceSessionId?: string;
-      }
-    ): Promise<MemoryEntry> => {
-      return memory.addEntry(payload.content, payload.reason, payload.sourceType, payload.sourceSessionId);
+    async (_event, payload: unknown): Promise<MemoryEntry> => {
+      const validated = validateIpcPayload(
+        MemoryR1AddEntryPayloadSchema,
+        payload,
+        'MEMORY_R1_ADD_ENTRY'
+      );
+      return memory.addEntry(
+        validated.content,
+        validated.reason,
+        validated.sourceType,
+        validated.sourceSessionId
+      );
     }
   );
 
   // Delete entry
-  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_DELETE_ENTRY, (_event, entryId: string): void => {
-    memory.deleteEntry(entryId);
+  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_DELETE_ENTRY, (_event, entryId: unknown): void => {
+    const validated = validateIpcPayload(
+      MemoryR1DeleteEntryPayloadSchema,
+      entryId,
+      'MEMORY_R1_DELETE_ENTRY'
+    );
+    memory.deleteEntry(validated);
   });
 
   // Get entry
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_GET_ENTRY,
-    (_event, entryId: string): MemoryEntry | undefined => {
-      return memory.getEntry(entryId);
+    (_event, entryId: unknown): MemoryEntry | undefined => {
+      const validated = validateIpcPayload(
+        MemoryR1GetEntryPayloadSchema,
+        entryId,
+        'MEMORY_R1_GET_ENTRY'
+      );
+      return memory.getEntry(validated);
     }
   );
 
   // Retrieve memories
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_RETRIEVE,
-    async (_event, payload: { query: string; taskId: string }): Promise<MemoryEntry[]> => {
-      return memory.retrieve(payload.query, payload.taskId);
+    async (_event, payload: unknown): Promise<MemoryEntry[]> => {
+      const validated = validateIpcPayload(
+        MemoryR1RetrievePayloadSchema,
+        payload,
+        'MEMORY_R1_RETRIEVE'
+      );
+      return memory.retrieve(validated.query, validated.taskId);
     }
   );
 
   // Record task outcome
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_R1_RECORD_OUTCOME,
-    (_event, payload: { taskId: string; success: boolean; score: number }): void => {
-      memory.recordTaskOutcome(payload.taskId, payload.success, payload.score);
+    (_event, payload: unknown): void => {
+      const validated = validateIpcPayload(
+        MemoryR1RecordOutcomePayloadSchema,
+        payload,
+        'MEMORY_R1_RECORD_OUTCOME'
+      );
+      memory.recordTaskOutcome(validated.taskId, validated.success, validated.score);
     }
   );
 
@@ -122,13 +175,23 @@ function registerMemoryR1Handlers(): void {
   });
 
   // Load state
-  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_LOAD, async (_event, snapshot: MemoryR1Snapshot): Promise<void> => {
-    return memory.load(snapshot);
+  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_LOAD, async (_event, snapshot: unknown): Promise<void> => {
+    const validated = validateIpcPayload(
+      MemoryR1LoadPayloadSchema,
+      snapshot,
+      'MEMORY_R1_LOAD'
+    );
+    return memory.load(validated);
   });
 
   // Configure
-  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_CONFIGURE, (_event, config: Partial<MemoryManagerConfig>): void => {
-    memory.configure(config);
+  ipcMain.handle(IPC_CHANNELS.MEMORY_R1_CONFIGURE, (_event, config: unknown): void => {
+    const validated = validateIpcPayload(
+      MemoryR1ConfigurePayloadSchema,
+      config,
+      'MEMORY_R1_CONFIGURE'
+    );
+    memory.configure(validated);
   });
 }
 
@@ -140,61 +203,79 @@ function registerUnifiedMemoryHandlers(): void {
   // Process input
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_PROCESS_INPUT,
-    async (_event, payload: { input: string; sessionId: string; taskId: string }): Promise<void> => {
-      return unified.processInput(payload.input, payload.sessionId, payload.taskId);
+    async (_event, payload: unknown): Promise<void> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryProcessInputPayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_PROCESS_INPUT'
+      );
+      return unified.processInput(validated.input, validated.sessionId, validated.taskId);
     }
   );
 
   // Retrieve
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_RETRIEVE,
-    async (
-      _event,
-      payload: {
-        query: string;
-        taskId: string;
-        options?: { types?: MemoryType[]; maxTokens?: number; sessionId?: string; instanceId?: string };
-      }
-    ): Promise<UnifiedRetrievalResult> => {
-      return unified.retrieve(payload.query, payload.taskId, payload.options);
+    async (_event, payload: unknown): Promise<UnifiedRetrievalResult> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryRetrievePayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_RETRIEVE'
+      );
+      return unified.retrieve(validated.query, validated.taskId, validated.options);
     }
   );
 
   // Record session end
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_RECORD_SESSION_END,
-    async (
-      _event,
-      payload: { sessionId: string; outcome: SessionOutcome; summary: string; lessons: string[] }
-    ): Promise<void> => {
-      return unified.recordSessionEnd(payload.sessionId, payload.outcome, payload.summary, payload.lessons);
+    async (_event, payload: unknown): Promise<void> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryRecordSessionEndPayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_RECORD_SESSION_END'
+      );
+      return unified.recordSessionEnd(
+        validated.sessionId,
+        validated.outcome,
+        validated.summary,
+        validated.lessons
+      );
     }
   );
 
   // Record workflow
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_RECORD_WORKFLOW,
-    async (
-      _event,
-      payload: { name: string; steps: string[]; applicableContexts: string[] }
-    ): Promise<WorkflowMemory> => {
-      return unified.recordWorkflow(payload.name, payload.steps, payload.applicableContexts);
+    async (_event, payload: unknown): Promise<WorkflowMemory> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryRecordWorkflowPayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_RECORD_WORKFLOW'
+      );
+      return unified.recordWorkflow(
+        validated.name,
+        validated.steps,
+        validated.applicableContexts
+      );
     }
   );
 
   // Record strategy
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_RECORD_STRATEGY,
-    async (
-      _event,
-      payload: { strategy: string; conditions: string[]; taskId: string; success: boolean; score: number }
-    ): Promise<StrategyMemory> => {
+    async (_event, payload: unknown): Promise<StrategyMemory> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryRecordStrategyPayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_RECORD_STRATEGY'
+      );
       return unified.recordStrategy(
-        payload.strategy,
-        payload.conditions,
-        payload.taskId,
-        payload.success,
-        payload.score
+        validated.strategy,
+        validated.conditions,
+        validated.taskId,
+        validated.success,
+        validated.score
       );
     }
   );
@@ -202,8 +283,13 @@ function registerUnifiedMemoryHandlers(): void {
   // Record task outcome
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_RECORD_OUTCOME,
-    (_event, payload: { taskId: string; success: boolean; score: number }): void => {
-      unified.recordTaskOutcome(payload.taskId, payload.success, payload.score);
+    (_event, payload: unknown): void => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryRecordOutcomePayloadSchema,
+        payload,
+        'UNIFIED_MEMORY_RECORD_OUTCOME'
+      );
+      unified.recordTaskOutcome(validated.taskId, validated.success, validated.score);
     }
   );
 
@@ -213,15 +299,25 @@ function registerUnifiedMemoryHandlers(): void {
   });
 
   // Get sessions
-  ipcMain.handle(IPC_CHANNELS.UNIFIED_MEMORY_GET_SESSIONS, (_event, limit?: number): SessionMemory[] => {
-    return unified.getSessionHistory(limit);
+  ipcMain.handle(IPC_CHANNELS.UNIFIED_MEMORY_GET_SESSIONS, (_event, limit: unknown): SessionMemory[] => {
+    const validated = validateIpcPayload(
+      UnifiedMemoryGetSessionsPayloadSchema,
+      limit,
+      'UNIFIED_MEMORY_GET_SESSIONS'
+    );
+    return unified.getSessionHistory(validated);
   });
 
   // Get patterns
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_GET_PATTERNS,
-    (_event, minSuccessRate?: number): LearnedPattern[] => {
-      return unified.getPatterns(minSuccessRate);
+    (_event, minSuccessRate: unknown): LearnedPattern[] => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryGetPatternsPayloadSchema,
+        minSuccessRate,
+        'UNIFIED_MEMORY_GET_PATTERNS'
+      );
+      return unified.getPatterns(validated);
     }
   );
 
@@ -238,16 +334,26 @@ function registerUnifiedMemoryHandlers(): void {
   // Load state
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_LOAD,
-    async (_event, snapshot: UnifiedMemorySnapshot): Promise<void> => {
-      return unified.load(snapshot);
+    async (_event, snapshot: unknown): Promise<void> => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryLoadPayloadSchema,
+        snapshot,
+        'UNIFIED_MEMORY_LOAD'
+      );
+      return unified.load(validated);
     }
   );
 
   // Configure
   ipcMain.handle(
     IPC_CHANNELS.UNIFIED_MEMORY_CONFIGURE,
-    (_event, config: Partial<UnifiedMemoryConfig>): void => {
-      unified.configure(config);
+    (_event, config: unknown): void => {
+      const validated = validateIpcPayload(
+        UnifiedMemoryConfigurePayloadSchema,
+        config,
+        'UNIFIED_MEMORY_CONFIGURE'
+      );
+      unified.configure(validated);
     }
   );
 }
@@ -260,19 +366,26 @@ function registerDebateHandlers(): void {
   // Start debate
   ipcMain.handle(
     IPC_CHANNELS.DEBATE_START,
-    async (
-      _event,
-      payload: { query: string; context?: string; config?: Partial<DebateConfig> }
-    ): Promise<string> => {
-      return debate.startDebate(payload.query, payload.context, payload.config);
+    async (_event, payload: unknown): Promise<string> => {
+      const validated = validateIpcPayload(
+        DebateStartPayloadSchema,
+        payload,
+        'DEBATE_START'
+      );
+      return debate.startDebate(validated.query, validated.context, validated.config);
     }
   );
 
   // Get result
   ipcMain.handle(
     IPC_CHANNELS.DEBATE_GET_RESULT,
-    (_event, debateId: string): DebateResult | undefined => {
-      return debate.getResult(debateId);
+    (_event, debateId: unknown): DebateResult | undefined => {
+      const validated = validateIpcPayload(
+        DebateGetResultPayloadSchema,
+        debateId,
+        'DEBATE_GET_RESULT'
+      );
+      return debate.getResult(validated);
     }
   );
 
@@ -282,8 +395,13 @@ function registerDebateHandlers(): void {
   });
 
   // Cancel debate
-  ipcMain.handle(IPC_CHANNELS.DEBATE_CANCEL, async (_event, debateId: string): Promise<boolean> => {
-    return debate.cancelDebate(debateId);
+  ipcMain.handle(IPC_CHANNELS.DEBATE_CANCEL, async (_event, debateId: unknown): Promise<boolean> => {
+    const validated = validateIpcPayload(
+      DebateCancelPayloadSchema,
+      debateId,
+      'DEBATE_CANCEL'
+    );
+    return debate.cancelDebate(validated);
   });
 
   // Get stats

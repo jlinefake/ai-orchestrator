@@ -21,13 +21,14 @@ import { ElectronIpcService } from '../../core/services/ipc';
 import { RecentDirectoriesIpcService } from '../../core/services/ipc/recent-directories-ipc.service';
 import { SettingsStore } from '../../core/state/settings.store';
 import { IPC_CHANNELS } from '../../../../shared/types/ipc.types';
+import type { RecentDirectoriesOptions } from '../../../../shared/types/recent-directories.types';
 
 type EcosystemKind = 'command' | 'agent' | 'tool' | 'plugin';
 
 interface EcosystemListResponse {
   workingDirectory: string;
   commands: {
-    commands: Array<{
+    commands: {
       name: string;
       description: string;
       hint?: string;
@@ -35,28 +36,39 @@ interface EcosystemListResponse {
       model?: string;
       agent?: string;
       subtask?: boolean;
-    }>;
-    candidatesByName: Record<string, Array<{ filePath?: string; description?: string }>>;
+    }[];
+    candidatesByName: Record<string, { filePath?: string; description?: string }[]>;
     scanDirs: string[];
   };
   agents: {
-    agents: Array<
+    agents: (
       | { source: 'built-in'; profile: { id: string; name: string; description: string; mode: string } }
       | { source: 'file'; filePath: string; profile: { id: string; name: string; description: string; mode: string } }
-    >;
+    )[];
     scanDirs: string[];
   };
   tools: {
-    tools: Array<{ id: string; description: string; filePath: string }>;
-    candidatesById: Record<string, Array<{ id: string; description: string; filePath: string }>>;
+    tools: { id: string; description: string; filePath: string }[];
+    candidatesById: Record<string, { id: string; description: string; filePath: string }[]>;
     scanDirs: string[];
-    errors: Array<{ filePath: string; error: string }>;
+    errors: { filePath: string; error: string }[];
   };
   plugins: {
-    plugins: Array<{ filePath: string; hookKeys: string[] }>;
+    plugins: { filePath: string; hookKeys: string[] }[];
     scanDirs: string[];
-    errors: Array<{ filePath: string; error: string }>;
+    errors: { filePath: string; error: string }[];
   };
+}
+
+interface EcosystemChangedEventPayload {
+  workingDirectory?: string;
+}
+
+interface FileReadTextResponse {
+  path: string;
+  content: string;
+  truncated: boolean;
+  size: number;
 }
 
 @Component({
@@ -631,7 +643,7 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
   private recentDirsIpc = inject(RecentDirectoriesIpcService);
   private settingsStore = inject(SettingsStore);
 
-  recentDirectories = signal<Array<{ path: string }>>([]);
+  recentDirectories = signal<{ path: string }[]>([]);
   workingDirectory = signal<string>('');
 
   loading = signal(false);
@@ -648,7 +660,7 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
   fileTruncated = signal(false);
   private unsubscribeChanged: (() => void) | null = null;
   private watchWorkingDirectory: string | null = null;
-  private reloadTimer: any = null;
+  private reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   commands = computed(() => this.ecosystem()?.commands.commands ?? []);
   agents = computed(() => this.ecosystem()?.agents.agents ?? []);
@@ -665,8 +677,8 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
       void this.reload();
     });
 
-    this.unsubscribeChanged = this.ipc.on(IPC_CHANNELS.ECOSYSTEM_CHANGED, (payload: any) => {
-      const wd = payload?.workingDirectory;
+    this.unsubscribeChanged = this.ipc.on(IPC_CHANNELS.ECOSYSTEM_CHANGED, (payload: unknown) => {
+      const wd = (payload as EcosystemChangedEventPayload | undefined)?.workingDirectory;
       if (!wd || wd !== this.workingDirectory()) return;
       // Debounce reloads to avoid thrashing during saves.
       if (this.reloadTimer) clearTimeout(this.reloadTimer);
@@ -696,7 +708,8 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
   }
 
   private async loadRecentDirectories(): Promise<void> {
-    const dirs = await this.recentDirsIpc.getDirectories({ limit: 20 } as any);
+    const options: RecentDirectoriesOptions = { limit: 20 };
+    const dirs = await this.recentDirsIpc.getDirectories(options);
     this.recentDirectories.set(dirs);
 
     const defaultDir = this.settingsStore.defaultWorkingDirectory();
@@ -781,7 +794,7 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
     }
     if (kind === 'agent') {
       const a = this.agents().find((x) => x.profile.id === key);
-      this.selectedFilePath.set(a && (a as any).filePath ? (a as any).filePath : null);
+      this.selectedFilePath.set(a?.source === 'file' ? a.filePath : null);
       return;
     }
     if (kind === 'plugin') {
@@ -834,7 +847,7 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
     const p = this.selectedFilePath();
     if (!p) return;
     try {
-      const resp = await this.ipc.invoke<{ path: string; content: string; truncated: boolean; size: number }>(
+      const resp = await this.ipc.invoke<FileReadTextResponse>(
         IPC_CHANNELS.FILE_READ_TEXT,
         { path: p, maxBytes: 1024 * 1024 }
       );
@@ -842,8 +855,8 @@ export class EcosystemSettingsTabComponent implements OnDestroy {
         this.error.set(resp.error?.message || 'Failed to read file');
         return;
       }
-      this.fileContent.set((resp.data as any).content || '');
-      this.fileTruncated.set(Boolean((resp.data as any).truncated));
+      this.fileContent.set(resp.data.content || '');
+      this.fileTruncated.set(Boolean(resp.data.truncated));
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : String(e));
     }

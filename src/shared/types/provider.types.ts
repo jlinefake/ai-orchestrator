@@ -159,8 +159,11 @@ export const OPENAI_MODELS = {
  * Google model identifiers
  */
 export const GOOGLE_MODELS = {
-  GEMINI_3_PRO: 'gemini-3-pro',
-  GEMINI_3_FLASH: 'gemini-3-flash',
+  GEMINI_3_1_PRO: 'gemini-3.1-pro-preview',
+  GEMINI_3_PRO: 'gemini-3-pro-preview',
+  GEMINI_3_FLASH: 'gemini-3-flash-preview',
+  GEMINI_25_PRO: 'gemini-2.5-pro',
+  GEMINI_25_FLASH: 'gemini-2.5-flash',
 } as const;
 
 /**
@@ -172,12 +175,13 @@ export const COPILOT_MODELS = {
   // Flagship tier - latest and best
   CLAUDE_OPUS_45: 'claude-opus-4-5',
   O3: 'o3',
-  GEMINI_3_PRO: 'gemini-3-pro',
+  GEMINI_3_1_PRO: 'gemini-3.1-pro-preview',
+  GEMINI_3_PRO: 'gemini-3-pro-preview',
   GEMINI_25_PRO: 'gemini-2.5-pro',
   // High performance tier
   CLAUDE_SONNET_45: 'claude-sonnet-4-5',
   GPT4O: 'gpt-4o',
-  GEMINI_3_FLASH: 'gemini-3-flash',
+  GEMINI_3_FLASH: 'gemini-3-flash-preview',
   GEMINI_20_FLASH: 'gemini-2.0-flash',
   // Fast tier
   CLAUDE_HAIKU_45: 'claude-haiku-4-5',
@@ -194,7 +198,7 @@ export const DEFAULT_MODELS: Record<ProviderType, string> = {
   'openai': OPENAI_MODELS.GPT4O,
   'openai-compatible': OPENAI_MODELS.GPT4O,
   'ollama': 'llama3',
-  'google': GOOGLE_MODELS.GEMINI_3_PRO,
+  'google': GOOGLE_MODELS.GEMINI_3_1_PRO,
   'amazon-bedrock': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
   'azure': OPENAI_MODELS.GPT4O,
 };
@@ -221,9 +225,12 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   [OPENAI_MODELS.GPT4O]: { input: 2.5, output: 10.0 },
   [OPENAI_MODELS.GPT4O_MINI]: { input: 0.15, output: 0.6 },
   [OPENAI_MODELS.GPT4_TURBO]: { input: 10.0, output: 30.0 },
-  // Google models (Gemini 3 generation)
+  // Google models
+  [GOOGLE_MODELS.GEMINI_3_1_PRO]: { input: 1.25, output: 10.0 },
   [GOOGLE_MODELS.GEMINI_3_PRO]: { input: 1.25, output: 10.0 },
   [GOOGLE_MODELS.GEMINI_3_FLASH]: { input: 0.15, output: 0.60 },
+  [GOOGLE_MODELS.GEMINI_25_PRO]: { input: 1.25, output: 10.0 },
+  [GOOGLE_MODELS.GEMINI_25_FLASH]: { input: 0.15, output: 0.60 },
 };
 
 /**
@@ -253,13 +260,17 @@ export const PROVIDER_MODEL_LIST: Record<string, ModelDisplayInfo[]> = {
     { id: OPENAI_MODELS.GPT4_TURBO, name: 'GPT-4 Turbo', tier: 'balanced' },
   ],
   gemini: [
-    { id: GOOGLE_MODELS.GEMINI_3_PRO, name: 'Gemini 3 Pro', tier: 'powerful' },
-    { id: GOOGLE_MODELS.GEMINI_3_FLASH, name: 'Gemini 3 Flash', tier: 'fast' },
+    { id: GOOGLE_MODELS.GEMINI_3_1_PRO, name: 'Gemini 3.1 Pro (Preview)', tier: 'powerful' },
+    { id: GOOGLE_MODELS.GEMINI_3_PRO, name: 'Gemini 3 Pro (Preview)', tier: 'powerful' },
+    { id: GOOGLE_MODELS.GEMINI_3_FLASH, name: 'Gemini 3 Flash (Preview)', tier: 'balanced' },
+    { id: GOOGLE_MODELS.GEMINI_25_PRO, name: 'Gemini 2.5 Pro', tier: 'powerful' },
+    { id: GOOGLE_MODELS.GEMINI_25_FLASH, name: 'Gemini 2.5 Flash', tier: 'fast' },
   ],
   copilot: [
     { id: COPILOT_MODELS.CLAUDE_OPUS_45, name: 'Claude Opus 4.5', tier: 'powerful' },
     { id: COPILOT_MODELS.O3, name: 'OpenAI o3', tier: 'powerful' },
-    { id: COPILOT_MODELS.GEMINI_3_PRO, name: 'Gemini 3 Pro', tier: 'powerful' },
+    { id: COPILOT_MODELS.GEMINI_3_1_PRO, name: 'Gemini 3.1 Pro (Preview)', tier: 'powerful' },
+    { id: COPILOT_MODELS.GEMINI_3_PRO, name: 'Gemini 3 Pro (Preview)', tier: 'powerful' },
     { id: COPILOT_MODELS.GEMINI_25_PRO, name: 'Gemini 2.5 Pro', tier: 'powerful' },
     { id: COPILOT_MODELS.CLAUDE_SONNET_45, name: 'Claude Sonnet 4.5', tier: 'balanced' },
     { id: COPILOT_MODELS.GPT4O, name: 'GPT-4o', tier: 'balanced' },

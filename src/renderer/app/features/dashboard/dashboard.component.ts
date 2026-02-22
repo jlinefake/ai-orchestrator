@@ -240,9 +240,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const selectedAgent = this.agentStore.selectedAgent();
     const provider = this.selectedProvider();
     const model = this.selectedModel();
+    const workingDirectory = settings.defaultWorkingDirectory || undefined;
+    const folderName = workingDirectory?.split(/[/\\]/).filter(Boolean).pop();
     this.store.createInstance({
-      displayName: `${selectedAgent.name} Instance`,
-      workingDirectory: settings.defaultWorkingDirectory || undefined,
+      displayName: folderName || `${selectedAgent.name} Instance`,
+      workingDirectory,
       yoloMode: settings.defaultYoloMode,
       agentId: selectedAgent.id,
       provider: provider === 'auto' ? undefined : provider,

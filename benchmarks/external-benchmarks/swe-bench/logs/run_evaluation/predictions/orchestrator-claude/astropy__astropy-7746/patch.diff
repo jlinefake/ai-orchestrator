@@ -1,0 +1,61 @@
+diff --git a/astropy/wcs/wcs.py b/astropy/wcs/wcs.py
+index d3a06f2b3..dd38637f5 100644
+--- a/astropy/wcs/wcs.py
++++ b/astropy/wcs/wcs.py
+@@ -1220,6 +1220,9 @@ reduce these to 2 dimensions using the naxis kwarg.
+ 
+             xy = np.hstack([x.reshape((x.size, 1)) for x in axes])
+ 
++            if xy.size == 0:
++                return [np.array([]) for _ in range(self.naxis)]
++
+             if ra_dec_order and sky == 'input':
+                 xy = self._denormalize_sky(xy)
+             output = func(xy, origin)
+@@ -1235,6 +1238,8 @@ reduce these to 2 dimensions using the naxis kwarg.
+                 raise ValueError(
+                     "When providing two arguments, the array must be "
+                     "of shape (N, {0})".format(self.naxis))
++            if xy.size == 0:
++                return xy
+             if ra_dec_order and sky == 'input':
+                 xy = self._denormalize_sky(xy)
+             result = func(xy, origin)
+diff --git a/astropy/wcs/tests/test_wcs.py b/astropy/wcs/tests/test_wcs.py
+index 133e82033..3e4c0ce78 100644
+--- a/astropy/wcs/tests/test_wcs.py
++++ b/astropy/wcs/tests/test_wcs.py
+@@ -1095,3 +1095,30 @@ def test_keyedsip():
+     assert isinstance( w.sip, wcs.Sip )
+     assert w.sip.crpix[0] == 2048
+     assert w.sip.crpix[1] == 1026
++
++
++def test_empty_array_transformations():
++    """
++    Test that WCS transformation methods handle empty arrays gracefully.
++    Regression test for https://github.com/astropy/astropy/issues/7746
++    """
++    header = get_pkg_data_contents(
++        'maps/1904-66_TAN.hdr', encoding='binary')
++    w = wcs.WCS(header)
++
++    # List-of-arrays form should return list of empty arrays
++    result = w.wcs_pix2world([], [], 0)
++    assert len(result) == 2
++    assert_array_equal(result[0], [])
++    assert_array_equal(result[1], [])
++
++    result = w.wcs_world2pix([], [], 0)
++    assert len(result) == 2
++    assert_array_equal(result[0], [])
++    assert_array_equal(result[1], [])
++
++    result = w.all_pix2world([], [], 0)
++    assert len(result) == 2
++    assert_array_equal(result[0], [])
++    assert_array_equal(result[1], [])
++
++    # Single Nx2 array form should return empty Nx2 array
++    result = w.wcs_pix2world(np.empty((0, 2)), 0)
++    assert result.shape == (0, 2)

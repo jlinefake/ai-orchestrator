@@ -2,7 +2,14 @@
  * History Manager - Manages conversation history persistence
  *
  * Archives terminated instances to disk for later restoration.
- * Uses electron-store for the metadata index and gzipped JSON for conversation data.
+ * Uses a JSON index file and gzipped JSON for conversation data.
+ *
+ * KEY DESIGN DECISIONS:
+ * - archiveInstance() uses a Set-based lock to prevent concurrent archives of the same instance.
+ *   This is critical because the adapter exit handler and terminateInstance() can race.
+ * - saveIndex() uses a proper serializing queue (not just a single-promise mutex)
+ *   to handle 3+ concurrent callers safely.
+ * - On startup, orphaned .gz files (saved but not indexed) are recovered into the index.
  */
 
 import { app } from 'electron';
@@ -10,7 +17,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import type { Instance, OutputMessage } from '../../shared/types/instance.types';
+import { getLogger } from '../logging/logger';
+import type { Instance } from '../../shared/types/instance.types';
 import type {
   ConversationHistoryEntry,
   ConversationData,
@@ -22,6 +30,8 @@ import type {
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 
+const logger = getLogger('HistoryManager');
+
 const HISTORY_INDEX_VERSION = 1;
 const MAX_PREVIEW_LENGTH = 150;
 const MAX_HISTORY_ENTRIES = 100; // Keep last 100 conversations
@@ -30,72 +40,106 @@ export class HistoryManager {
   private storageDir: string;
   private indexPath: string;
   private index: HistoryIndex;
-  private savePromise: Promise<void> | null = null; // Mutex for index saves
+
+  // Serializing queue for index saves — properly handles 3+ concurrent callers
+  private saveQueue: Promise<void> = Promise.resolve();
+
+  // Lock to prevent concurrent archiveInstance() calls for the same instance
+  private archivingInstances = new Set<string>();
 
   constructor() {
     this.storageDir = path.join(app.getPath('userData'), 'conversation-history');
     this.indexPath = path.join(this.storageDir, 'index.json');
     this.index = this.loadIndex();
+
+    // Recover orphaned .gz files that were saved but never indexed
+    this.recoverOrphans().catch((err) => {
+      logger.error('Failed to recover orphaned history files', err instanceof Error ? err : undefined);
+    });
   }
 
   /**
-   * Archive an instance to history when it terminates
+   * Archive an instance to history when it terminates.
+   *
+   * Uses an instance-level lock to prevent the race condition where
+   * both the exit handler and terminateInstance() call this concurrently.
    */
   async archiveInstance(instance: Instance, status: ConversationEndStatus = 'completed'): Promise<void> {
     // Don't archive if no messages
     if (!instance.outputBuffer || instance.outputBuffer.length === 0) {
-      console.log(`History: Skipping archive for ${instance.id} - no messages`);
+      logger.info('Skipping archive - no messages', { instanceId: instance.id });
       return;
     }
 
-    // Prevent duplicate archives of the same instance
+    // Instance-level lock: prevent concurrent archive calls for the same instance
+    if (this.archivingInstances.has(instance.id)) {
+      logger.info('Skipping archive - already in progress', { instanceId: instance.id });
+      return;
+    }
+
+    // Prevent duplicate archives of the same instance (check persisted index)
     const alreadyArchived = this.index.entries.some(e => e.originalInstanceId === instance.id);
     if (alreadyArchived) {
-      console.log(`History: Skipping archive for ${instance.id} - already archived`);
+      logger.info('Skipping archive - already archived', { instanceId: instance.id });
       return;
     }
 
-    // Find first and last user messages for preview
-    const userMessages = instance.outputBuffer.filter(m => m.type === 'user');
-    const firstUserMessage = userMessages[0]?.content || '';
-    const lastUserMessage = userMessages[userMessages.length - 1]?.content || firstUserMessage;
+    // Acquire lock
+    this.archivingInstances.add(instance.id);
 
-    // Create history entry
-    const entry: ConversationHistoryEntry = {
-      id: crypto.randomUUID(),
-      displayName: instance.displayName,
-      createdAt: instance.createdAt,
-      endedAt: Date.now(),
-      workingDirectory: instance.workingDirectory,
-      messageCount: instance.outputBuffer.length,
-      firstUserMessage: this.truncatePreview(firstUserMessage),
-      lastUserMessage: this.truncatePreview(lastUserMessage),
-      status,
-      originalInstanceId: instance.id,
-      parentId: instance.parentId,
-      sessionId: instance.sessionId,
-    };
+    try {
+      // Snapshot the output buffer to avoid issues if it's modified during async operations
+      const messages = [...instance.outputBuffer];
 
-    // Create conversation data
-    const conversationData: ConversationData = {
-      entry,
-      messages: instance.outputBuffer,
-    };
+      // Find first and last user messages for preview
+      const userMessages = messages.filter(m => m.type === 'user');
+      const firstUserMessage = userMessages[0]?.content || '';
+      const lastUserMessage = userMessages[userMessages.length - 1]?.content || firstUserMessage;
 
-    // Save conversation to disk
-    await this.saveConversation(entry.id, conversationData);
+      // Create history entry
+      const entry: ConversationHistoryEntry = {
+        id: crypto.randomUUID(),
+        displayName: instance.displayName,
+        createdAt: instance.createdAt,
+        endedAt: Date.now(),
+        workingDirectory: instance.workingDirectory,
+        messageCount: messages.length,
+        firstUserMessage: this.truncatePreview(firstUserMessage),
+        lastUserMessage: this.truncatePreview(lastUserMessage),
+        status,
+        originalInstanceId: instance.id,
+        parentId: instance.parentId,
+        sessionId: instance.sessionId,
+      };
 
-    // Update index
-    this.index.entries.unshift(entry);
-    this.index.lastUpdated = Date.now();
+      // Create conversation data
+      const conversationData: ConversationData = {
+        entry,
+        messages,
+      };
 
-    // Enforce max entries limit
-    await this.enforceLimit();
+      // Save conversation to disk
+      await this.saveConversation(entry.id, conversationData);
 
-    // Save index
-    await this.saveIndex();
+      // Update index (synchronous — safe since JS is single-threaded)
+      this.index.entries.unshift(entry);
+      this.index.lastUpdated = Date.now();
 
-    console.log(`History: Archived instance ${instance.id} as ${entry.id} with ${entry.messageCount} messages`);
+      // Enforce max entries limit
+      await this.enforceLimit();
+
+      // Save index to disk
+      await this.saveIndex();
+
+      logger.info('Archived instance', {
+        instanceId: instance.id,
+        entryId: entry.id,
+        messageCount: entry.messageCount,
+      });
+    } finally {
+      // Release lock
+      this.archivingInstances.delete(instance.id);
+    }
   }
 
   /**
@@ -135,7 +179,7 @@ export class HistoryManager {
     const conversationPath = this.getConversationPath(entryId);
 
     if (!fs.existsSync(conversationPath)) {
-      console.error(`History: Conversation file not found for ${entryId}`);
+      logger.error('Conversation file not found', undefined, { entryId });
       return null;
     }
 
@@ -144,7 +188,7 @@ export class HistoryManager {
       const data = await gunzip(compressed);
       return JSON.parse(data.toString()) as ConversationData;
     } catch (error) {
-      console.error(`History: Failed to load conversation ${entryId}:`, error);
+      logger.error('Failed to load conversation', error instanceof Error ? error : undefined, { entryId });
       return null;
     }
   }
@@ -167,11 +211,11 @@ export class HistoryManager {
     const conversationPath = this.getConversationPath(entryId);
     try {
       await fs.promises.unlink(conversationPath);
-    } catch (error) {
+    } catch {
       // Ignore if file doesn't exist
     }
 
-    console.log(`History: Deleted entry ${entryId}`);
+    logger.info('Deleted history entry', { entryId });
     return true;
   }
 
@@ -184,7 +228,7 @@ export class HistoryManager {
       const conversationPath = this.getConversationPath(entry.id);
       try {
         await fs.promises.unlink(conversationPath);
-      } catch (error) {
+      } catch {
         // Ignore
       }
     }
@@ -197,7 +241,7 @@ export class HistoryManager {
     };
     await this.saveIndex();
 
-    console.log('History: Cleared all entries');
+    logger.info('Cleared all history entries');
   }
 
   /**
@@ -207,12 +251,30 @@ export class HistoryManager {
     return this.index.entries.length;
   }
 
+  /**
+   * Get the storage directory path
+   */
+  getStoragePath(): string {
+    return this.storageDir;
+  }
+
   // ============================================
   // Private Methods
   // ============================================
 
   private loadIndex(): HistoryIndex {
     this.ensureStorageDir();
+
+    // Clean up any leftover temp file from a previous failed save
+    const tempPath = `${this.indexPath}.tmp`;
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+        logger.info('Cleaned up leftover index temp file');
+      } catch {
+        // Ignore
+      }
+    }
 
     if (fs.existsSync(this.indexPath)) {
       try {
@@ -224,9 +286,26 @@ export class HistoryManager {
           return this.migrateIndex(index);
         }
 
+        // Deduplicate entries by originalInstanceId (clean up legacy duplicates)
+        const seen = new Set<string>();
+        const deduped: ConversationHistoryEntry[] = [];
+        for (const entry of index.entries) {
+          if (!seen.has(entry.originalInstanceId)) {
+            seen.add(entry.originalInstanceId);
+            deduped.push(entry);
+          }
+        }
+        if (deduped.length !== index.entries.length) {
+          logger.info('Deduplicated history index', {
+            before: index.entries.length,
+            after: deduped.length,
+          });
+          index.entries = deduped;
+        }
+
         return index;
       } catch (error) {
-        console.error('History: Failed to load index, creating new one:', error);
+        logger.error('Failed to load index, creating new one', error instanceof Error ? error : undefined);
       }
     }
 
@@ -237,35 +316,149 @@ export class HistoryManager {
     };
   }
 
+  /**
+   * Recover orphaned .gz files that were saved but never indexed.
+   * This happens when saveConversation succeeds but saveIndex fails.
+   */
+  private async recoverOrphans(): Promise<void> {
+    const indexedIds = new Set(this.index.entries.map(e => e.id));
+    const files = await fs.promises.readdir(this.storageDir);
+    const gzFiles = files.filter(f => f.endsWith('.json.gz'));
+
+    let recovered = 0;
+    for (const file of gzFiles) {
+      const entryId = file.replace('.json.gz', '');
+      if (indexedIds.has(entryId)) {
+        continue; // Already in index
+      }
+
+      // Check file has content
+      const filePath = path.join(this.storageDir, file);
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size === 0) {
+        // Remove empty orphaned files
+        try {
+          await fs.promises.unlink(filePath);
+          logger.info('Deleted empty orphaned file', { file });
+        } catch {
+          // Ignore
+        }
+        continue;
+      }
+
+      // Try to read the conversation data and extract the entry metadata
+      try {
+        const compressed = await fs.promises.readFile(filePath);
+        const data = await gunzip(compressed);
+        const conversationData = JSON.parse(data.toString()) as ConversationData;
+
+        if (conversationData.entry) {
+          // Check it's not a duplicate by originalInstanceId
+          const isDuplicate = this.index.entries.some(
+            e => e.originalInstanceId === conversationData.entry.originalInstanceId
+          );
+          if (!isDuplicate) {
+            this.index.entries.push(conversationData.entry);
+            recovered++;
+            logger.info('Recovered orphaned history entry', {
+              entryId,
+              displayName: conversationData.entry.displayName,
+              messageCount: conversationData.entry.messageCount,
+            });
+          } else {
+            // Already have this instance in the index — delete the orphan
+            await fs.promises.unlink(filePath);
+            logger.info('Deleted duplicate orphaned file', { file });
+          }
+        }
+      } catch (error) {
+        logger.warn('Could not recover orphaned file', {
+          file,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (recovered > 0) {
+      // Sort by endedAt descending
+      this.index.entries.sort((a, b) => b.endedAt - a.endedAt);
+      this.index.lastUpdated = Date.now();
+      await this.enforceLimit();
+      await this.saveIndex();
+      logger.info('Orphan recovery complete', { recovered });
+    }
+  }
+
   private migrateIndex(oldIndex: HistoryIndex): HistoryIndex {
     // For now, just update version - add migrations here as needed
-    console.log(`History: Migrating index from v${oldIndex.version} to v${HISTORY_INDEX_VERSION}`);
+    logger.info('Migrating index', { from: oldIndex.version, to: HISTORY_INDEX_VERSION });
     return {
       ...oldIndex,
       version: HISTORY_INDEX_VERSION,
     };
   }
 
+  /**
+   * Save the index to disk using a serializing queue.
+   *
+   * All callers chain onto the same queue, so even with 3+ concurrent callers
+   * they execute one at a time. This avoids the bug where the old single-promise
+   * mutex allowed concurrent writes when 3+ callers resolved simultaneously.
+   */
   private async saveIndex(): Promise<void> {
-    // Use a mutex pattern to prevent concurrent writes that could corrupt the file.
-    // Wait for any pending save to complete before starting a new one.
-    if (this.savePromise) {
-      await this.savePromise;
-    }
+    // Chain onto the queue — each save waits for ALL previous saves to complete
+    const previousQueue = this.saveQueue;
+    let resolve: () => void;
+    let reject: (err: Error) => void;
+    this.saveQueue = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
 
-    this.savePromise = this.doSaveIndex();
     try {
-      await this.savePromise;
-    } finally {
-      this.savePromise = null;
+      await previousQueue;
+      await this.doSaveIndex();
+      resolve!();
+    } catch (error) {
+      reject!(error instanceof Error ? error : new Error(String(error)));
+      throw error;
     }
   }
 
+  /**
+   * Write the index to disk.
+   * Uses temp file + rename for atomicity, with fallback to direct write.
+   */
   private async doSaveIndex(): Promise<void> {
-    // Write to a temp file first, then rename for atomic operation
+    const data = JSON.stringify(this.index, null, 2);
     const tempPath = `${this.indexPath}.tmp`;
-    await fs.promises.writeFile(tempPath, JSON.stringify(this.index, null, 2));
-    await fs.promises.rename(tempPath, this.indexPath);
+
+    try {
+      await fs.promises.writeFile(tempPath, data);
+
+      // Verify the temp file was written correctly (not 0 bytes)
+      const stat = await fs.promises.stat(tempPath);
+      if (stat.size === 0 && data.length > 0) {
+        throw new Error('Temp file written as 0 bytes — aborting rename to protect index');
+      }
+
+      await fs.promises.rename(tempPath, this.indexPath);
+    } catch (error) {
+      // Atomic save failed — fall back to direct write
+      logger.warn('Atomic save failed, falling back to direct write', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      // Clean up temp file
+      try {
+        await fs.promises.unlink(tempPath);
+      } catch {
+        // Ignore
+      }
+
+      // Direct write as fallback
+      await fs.promises.writeFile(this.indexPath, data);
+    }
   }
 
   private async saveConversation(entryId: string, data: ConversationData): Promise<void> {
@@ -273,6 +466,12 @@ export class HistoryManager {
     const jsonData = JSON.stringify(data);
     const compressed = await gzip(jsonData);
     await fs.promises.writeFile(conversationPath, compressed);
+
+    // Verify the file was written (catch 0-byte writes)
+    const stat = await fs.promises.stat(conversationPath);
+    if (stat.size === 0) {
+      throw new Error(`Conversation file written as 0 bytes for ${entryId}`);
+    }
   }
 
   private getConversationPath(entryId: string): string {
@@ -305,7 +504,7 @@ export class HistoryManager {
         const conversationPath = this.getConversationPath(oldest.id);
         try {
           await fs.promises.unlink(conversationPath);
-        } catch (error) {
+        } catch {
           // Ignore
         }
       }
@@ -313,10 +512,10 @@ export class HistoryManager {
   }
 
   /**
-   * Get the storage directory path
+   * Reset for testing
    */
-  getStoragePath(): string {
-    return this.storageDir;
+  static _resetForTesting(): void {
+    historyManager = null;
   }
 }
 

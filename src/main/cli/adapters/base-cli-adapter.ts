@@ -330,9 +330,14 @@ export abstract class BaseCliAdapter extends EventEmitter {
     const currentPath = process.env['PATH'] || '';
     const extendedPath = [...additionalPaths, currentPath].join(':');
 
+    // Build clean environment: remove CLAUDECODE to prevent "nested session" errors
+    // when the orchestrator itself is running inside a Claude Code session
+    const cleanEnv = { ...process.env };
+    delete cleanEnv['CLAUDECODE'];
+
     const proc = spawn(this.config.command, fullArgs, {
       cwd: this.config.cwd,
-      env: { ...process.env, ...this.config.env, PATH: extendedPath },
+      env: { ...cleanEnv, ...this.config.env, PATH: extendedPath },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

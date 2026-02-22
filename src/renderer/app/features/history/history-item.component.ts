@@ -31,14 +31,14 @@ import type { OutputMessage } from '../../core/state/instance/instance.types';
       >
         <span class="expand-icon">{{ isExpanded() ? '▼' : '▶' }}</span>
 
-        <div class="header-content">
-          <div class="header-top">
-            <span class="display-name">{{ entry().displayName }}</span>
-            <div class="header-actions" (click)="$event.stopPropagation()">
-              <button
-                class="btn-restore"
-                (click)="onRestore($event)"
-                title="Restore to new instance"
+          <div class="header-content">
+            <div class="header-top">
+              <span class="display-name">{{ entry().displayName }}</span>
+              <div class="header-actions">
+                <button
+                  class="btn-restore"
+                  (click)="onRestore($event)"
+                  title="Restore to new instance"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="23 4 23 10 17 10"></polyline>

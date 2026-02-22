@@ -32,7 +32,7 @@ const logger = getLogger('GeminiCliAdapter');
  * Gemini CLI specific configuration
  */
 export interface GeminiCliConfig {
-  /** Model to use (gemini-3-pro, gemini-3-flash, etc.) */
+  /** Model to use (gemini-3.1-pro-preview, gemini-3-pro-preview, gemini-3-flash-preview, gemini-2.5-pro, etc.) */
   model?: string;
   /** Run in sandbox mode */
   sandbox?: boolean;
@@ -101,7 +101,7 @@ export class GeminiCliAdapter extends BaseCliAdapter {
       multiTurn: true,
       vision: true, // Gemini supports images
       codeExecution: true,
-      contextWindow: 1000000, // Gemini 1.5 Pro has 1M+ context
+      contextWindow: 1000000, // Gemini Pro has 1M+ context
       outputFormats: ['text', 'json', 'markdown']
     };
   }
@@ -247,6 +247,21 @@ export class GeminiCliAdapter extends BaseCliAdapter {
 
       this.process.on('close', (code) => {
         const duration = Date.now() - startTime;
+
+        // Check for API error in stream-json output (e.g., ModelNotFoundError)
+        const apiError = this.extractApiError(this.outputBuffer);
+        if (apiError) {
+          this.emit('error', new Error(apiError));
+          this.emit('output', {
+            id: streamingMessageId,
+            timestamp: Date.now(),
+            type: 'error',
+            content: apiError,
+          } as OutputMessage);
+          this.process = null;
+          reject(new Error(apiError));
+          return;
+        }
 
         if (code === 0 || this.outputBuffer) {
           const response = this.parseOutput(this.outputBuffer);
@@ -419,6 +434,26 @@ export class GeminiCliAdapter extends BaseCliAdapter {
   }
 
   // ============ Private Helper Methods ============
+
+  /**
+   * Check stream-json output for an API error result event.
+   * Format: {"type":"result","status":"error","error":{"type":"Error","message":"..."}}
+   * Returns the error message string if found, null otherwise.
+   */
+  private extractApiError(raw: string): string | null {
+    const lines = raw.split('\n').filter((l) => l.trim());
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'result' && event.status === 'error' && event.error) {
+          return event.error.message || JSON.stringify(event.error);
+        }
+      } catch {
+        // Not JSON, skip
+      }
+    }
+    return null;
+  }
 
   private extractToolCalls(raw: string): CliToolCall[] {
     const toolCalls: CliToolCall[] = [];

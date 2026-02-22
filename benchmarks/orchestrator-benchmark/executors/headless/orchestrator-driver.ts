@@ -96,6 +96,9 @@ export class OrchestratorDriver {
     let instanceManager: any;
 
     try {
+      // Re-create temp directories (cleanup() from previous run deletes them)
+      electronShim.ensureDirs();
+
       // Initialize settings for benchmark mode
       const settings = getSettingsManager();
       settings.update({

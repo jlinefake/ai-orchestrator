@@ -19,7 +19,6 @@ import type {
   MemoryManagerState,
   MemoryManagerConfig,
   MemoryManagerDecision,
-  MemoryOperationLog,
   RetrievalLog,
   MemoryR1Stats,
   MemoryR1Snapshot,
@@ -51,9 +50,17 @@ export class MemoryManagerAgent extends EventEmitter {
     return this.instance;
   }
 
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.removeAllListeners();
+      (this as unknown as { instance?: MemoryManagerAgent }).instance = undefined;
+    }
+  }
+
   private constructor() {
     super();
     this.config = { ...this.defaultConfig };
+    this.normalizeConfig();
     this.state = {
       entries: new Map(),
       totalEntries: 0,
@@ -65,10 +72,34 @@ export class MemoryManagerAgent extends EventEmitter {
 
   configure(config: Partial<MemoryManagerConfig>): void {
     this.config = { ...this.config, ...config };
+    this.normalizeConfig();
   }
 
   getConfig(): MemoryManagerConfig {
     return { ...this.config };
+  }
+
+  private normalizeConfig(): void {
+    this.config.maxEntries = Math.max(1, Math.floor(this.config.maxEntries));
+    this.config.maxTokens = Math.max(100, Math.floor(this.config.maxTokens));
+    this.config.topK = Math.max(1, Math.floor(this.config.topK));
+    this.config.similarityThreshold = Math.min(
+      1,
+      Math.max(0, this.config.similarityThreshold)
+    );
+    this.config.learningRate = Math.min(
+      1,
+      Math.max(0.000001, this.config.learningRate)
+    );
+    this.config.rewardDiscount = Math.min(
+      1,
+      Math.max(0, this.config.rewardDiscount)
+    );
+    this.config.batchSize = Math.max(1, Math.floor(this.config.batchSize));
+    this.config.embeddingDimension = Math.max(
+      8,
+      Math.floor(this.config.embeddingDimension)
+    );
   }
 
   // ============ Memory Operations (RL-Trained) ============
@@ -135,7 +166,7 @@ Reasoning: <brief explanation>
 
       case 'UPDATE':
         if (!decision.entryId || !decision.content) return null;
-        return this.updateEntry(decision.entryId, decision.content, decision.reasoning);
+        return this.updateEntry(decision.entryId, decision.content);
 
       case 'DELETE':
         if (!decision.entryId) return null;
@@ -154,13 +185,27 @@ Reasoning: <brief explanation>
     content: string,
     reason: string,
     sourceType: MemorySourceType = 'derived',
-    sourceSessionId: string = ''
+    sourceSessionId = ''
   ): Promise<MemoryEntry> {
     const embedding = await this.computeEmbedding(content);
     const tokens = this.estimateTokens(content);
+    if (tokens > this.config.maxTokens) {
+      throw new Error(
+        `Entry exceeds maxTokens (${tokens} > ${this.config.maxTokens})`
+      );
+    }
+
+    const neededTokens = Math.max(
+      0,
+      this.state.totalTokens + tokens - this.config.maxTokens
+    );
+    const neededEntries = Math.max(
+      0,
+      this.state.totalEntries + 1 - this.config.maxEntries
+    );
 
     const entry: MemoryEntry = {
-      id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       content,
       embedding,
       createdAt: Date.now(),
@@ -176,9 +221,18 @@ Reasoning: <brief explanation>
       isArchived: false,
     };
 
-    // Check capacity
-    if (this.state.totalTokens + tokens > this.config.maxTokens) {
-      await this.evictLeastRelevant(tokens);
+    // Check capacity before insertion
+    if (neededTokens > 0 || neededEntries > 0) {
+      await this.evictLeastRelevant({
+        neededTokens,
+        neededEntries,
+      });
+    }
+
+    if (this.state.totalEntries >= this.config.maxEntries) {
+      throw new Error(
+        `Unable to add memory entry: maxEntries=${this.config.maxEntries} reached`
+      );
     }
 
     this.state.entries.set(entry.id, entry);
@@ -192,19 +246,37 @@ Reasoning: <brief explanation>
     return entry;
   }
 
-  private async updateEntry(entryId: string, newContent: string, reason: string): Promise<MemoryEntry> {
+  private async updateEntry(entryId: string, newContent: string): Promise<MemoryEntry> {
     const entry = this.state.entries.get(entryId);
     if (!entry) throw new Error(`Entry not found: ${entryId}`);
 
     const oldTokens = this.estimateTokens(entry.content);
     const newTokens = this.estimateTokens(newContent);
+    if (newTokens > this.config.maxTokens) {
+      throw new Error(
+        `Updated entry exceeds maxTokens (${newTokens} > ${this.config.maxTokens})`
+      );
+    }
+
+    const tokenDelta = newTokens - oldTokens;
+    const neededTokens = Math.max(
+      0,
+      this.state.totalTokens + tokenDelta - this.config.maxTokens
+    );
+    if (neededTokens > 0) {
+      await this.evictLeastRelevant({
+        neededTokens,
+        neededEntries: 0,
+        protectedEntryIds: new Set([entryId]),
+      });
+    }
 
     entry.content = newContent;
     entry.embedding = await this.computeEmbedding(newContent);
     entry.updatedAt = Date.now();
     entry.tags = this.extractTags(newContent);
 
-    this.state.totalTokens += newTokens - oldTokens;
+    this.state.totalTokens = Math.max(0, this.state.totalTokens + tokenDelta);
 
     // Re-check links
     await this.updateLinks(entry);
@@ -228,8 +300,8 @@ Reasoning: <brief explanation>
     }
 
     this.state.entries.delete(entryId);
-    this.state.totalEntries--;
-    this.state.totalTokens -= tokens;
+    this.state.totalEntries = Math.max(0, this.state.totalEntries - 1);
+    this.state.totalTokens = Math.max(0, this.state.totalTokens - tokens);
 
     this.emit('entry:deleted', entryId);
   }
@@ -240,7 +312,7 @@ Reasoning: <brief explanation>
     const queryEmbedding = await this.computeEmbedding(query);
 
     // Compute similarities
-    const scored: Array<{ entry: MemoryEntry; score: number }> = [];
+    const scored: { entry: MemoryEntry; score: number }[] = [];
 
     for (const entry of this.state.entries.values()) {
       if (entry.isArchived) continue;
@@ -270,6 +342,7 @@ Reasoning: <brief explanation>
       taskId,
     };
     this.state.retrievalHistory.push(logEntry);
+    this.trimRetrievalHistory();
 
     return retrieved;
   }
@@ -287,7 +360,7 @@ Reasoning: <brief explanation>
     if (!entry.embedding) return;
 
     // Find similar entries for linking
-    const candidates: Array<{ entry: MemoryEntry; similarity: number }> = [];
+    const candidates: { entry: MemoryEntry; similarity: number }[] = [];
 
     for (const other of this.state.entries.values()) {
       if (other.id === entry.id) continue;
@@ -375,9 +448,21 @@ Reasoning: <brief explanation>
 
   // ============ Memory Eviction ============
 
-  private async evictLeastRelevant(neededTokens: number): Promise<void> {
+  private async evictLeastRelevant(options: {
+    neededTokens: number;
+    neededEntries?: number;
+    protectedEntryIds?: Set<string>;
+  }): Promise<void> {
+    const neededTokens = Math.max(0, options.neededTokens);
+    const neededEntries = Math.max(0, options.neededEntries ?? 0);
+    const protectedEntryIds = options.protectedEntryIds ?? new Set<string>();
+    if (neededTokens === 0 && neededEntries === 0) {
+      return;
+    }
+
     const entries = Array.from(this.state.entries.values())
       .filter(e => !e.isArchived)
+      .filter((entry) => !protectedEntryIds.has(entry.id))
       .sort((a, b) => {
         // Score based on relevance, recency, and access count
         const scoreA =
@@ -392,12 +477,14 @@ Reasoning: <brief explanation>
       });
 
     let freedTokens = 0;
+    let removedEntries = 0;
     for (const entry of entries) {
-      if (freedTokens >= neededTokens) break;
+      if (freedTokens >= neededTokens && removedEntries >= neededEntries) break;
 
       const tokens = this.estimateTokens(entry.content);
       this.deleteEntry(entry.id);
       freedTokens += tokens;
+      removedEntries++;
     }
   }
 
@@ -451,7 +538,7 @@ Reasoning: <brief explanation>
 
   private async findRelevant(content: string): Promise<MemoryEntry[]> {
     const embedding = await this.computeEmbedding(content);
-    const results: Array<{ entry: MemoryEntry; score: number }> = [];
+    const results: { entry: MemoryEntry; score: number }[] = [];
 
     for (const entry of this.state.entries.values()) {
       if (!entry.embedding) continue;
@@ -502,10 +589,7 @@ Reasoning: <brief explanation>
       taskId,
     });
 
-    // Keep history bounded
-    if (this.state.operationHistory.length > 10000) {
-      this.state.operationHistory = this.state.operationHistory.slice(-5000);
-    }
+    this.trimOperationHistory();
   }
 
   // ============ Persistence ============
@@ -527,13 +611,46 @@ Reasoning: <brief explanation>
     this.state.entries = new Map(snapshot.entries);
     this.state.operationHistory = snapshot.operationHistory;
     this.state.retrievalHistory = snapshot.retrievalHistory;
+    this.trimOperationHistory();
+    this.trimRetrievalHistory();
     this.state.totalEntries = this.state.entries.size;
     this.state.totalTokens = Array.from(this.state.entries.values()).reduce(
       (sum, e) => sum + this.estimateTokens(e.content),
       0
     );
 
+    await this.enforceCapacityLimits();
+
     this.emit('state:loaded', snapshot);
+  }
+
+  private trimOperationHistory(): void {
+    if (this.state.operationHistory.length > 5000) {
+      this.state.operationHistory = this.state.operationHistory.slice(-5000);
+    }
+  }
+
+  private trimRetrievalHistory(): void {
+    if (this.state.retrievalHistory.length > 5000) {
+      this.state.retrievalHistory = this.state.retrievalHistory.slice(-5000);
+    }
+  }
+
+  private async enforceCapacityLimits(): Promise<void> {
+    const neededEntries = Math.max(
+      0,
+      this.state.totalEntries - this.config.maxEntries
+    );
+    const neededTokens = Math.max(
+      0,
+      this.state.totalTokens - this.config.maxTokens
+    );
+    if (neededEntries > 0 || neededTokens > 0) {
+      await this.evictLeastRelevant({
+        neededTokens,
+        neededEntries
+      });
+    }
   }
 
   // ============ Queries ============

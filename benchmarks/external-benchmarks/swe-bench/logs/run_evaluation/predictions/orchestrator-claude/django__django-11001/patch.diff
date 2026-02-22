@@ -1,0 +1,46 @@
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index 7649c39262..ee32393db3 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -32,7 +32,7 @@ class SQLCompiler:
+         self.select = None
+         self.annotation_col_map = None
+         self.klass_info = None
+-        self.ordering_parts = re.compile(r'(.*)\s(ASC|DESC)(.*)')
++        self.ordering_parts = re.compile(r'(.*)\s(ASC|DESC)(.*)', re.MULTILINE | re.DOTALL)
+         self._meta_ordering = None
+ 
+     def setup_query(self):
+diff --git a/tests/ordering/tests.py b/tests/ordering/tests.py
+index 2e97709c29..d89b83a8f6 100644
+--- a/tests/ordering/tests.py
++++ b/tests/ordering/tests.py
+@@ -412,3 +412,22 @@ class OrderingTests(TestCase):
+         )
+         with self.assertRaisesMessage(RemovedInDjango31Warning, msg):
+             list(Article.objects.values('author').annotate(Count('headline')))
++
++    def test_order_by_multiline_sql(self):
++        """
++        Multiline RawSQL expressions with different SQL but same params are
++        not incorrectly deduplicated (#11001).
++        """
++        from django.db.models.expressions import RawSQL
++        qs = Article.objects.order_by(
++            RawSQL('''
++                case when headline = %s
++                    then 0
++                    else 1
++                end
++            ''', ['Article 1']).asc(),
++            RawSQL('''
++                case when headline = %s
++                    then 1
++                    else 0
++                end
++            ''', ['Article 1']).asc(),
++        )
++        # Both ordering clauses should be preserved, not deduplicated.
++        self.assertEqual(str(qs.query).count('case when'), 2)
++        # Verify the query executes without error.
++        list(qs)

@@ -22,7 +22,7 @@ import type {
   RunnerOptions,
   SessionResults,
 } from './types.js';
-import { generatePatchVanilla, generatePatchOrchestrator, writePatch } from './adapter.js';
+import { generatePatchVanilla, generatePatchOrchestrator, writePatch, classifyDifficulty } from './adapter.js';
 
 const SCRIPT_DIR = resolve(import.meta.dirname ?? dirname(fileURLToPath(import.meta.url)));
 const DATA_DIR = join(SCRIPT_DIR, 'data');
@@ -143,8 +143,14 @@ async function runBenchmark(options: RunnerOptions): Promise<void> {
 
     // Run orchestrator
     if (needOrchestrator) {
-      console.log('\n🟣 Running orchestrator...');
-      const orchestratorResult = await generatePatchOrchestrator(task, taskWorkDir, taskTimeoutMs);
+      const difficulty = classifyDifficulty(task);
+      console.log(`\n🟣 Running orchestrator... (difficulty: ${difficulty})`);
+
+      // Easy tasks use vanilla fast-path to save tokens
+      const orchestratorResult = difficulty === 'easy'
+        ? await generatePatchVanilla({ ...task }, taskWorkDir, taskTimeoutMs)
+          .then(r => ({ ...r, system: 'orchestrator' as const }))
+        : await generatePatchOrchestrator(task, taskWorkDir, taskTimeoutMs);
 
       console.log(`   Tokens: ${orchestratorResult.tokensUsed.toLocaleString()}`);
       console.log(`   Duration: ${(orchestratorResult.durationMs / 1000).toFixed(1)}s`);
@@ -382,7 +388,10 @@ function runPythonEvaluation(
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
     const pythonScript = join(SCRIPT_DIR, 'evaluate.py');
-    const child = spawn('python3', [pythonScript, predictionsPath, outputPath]);
+    // Use the venv Python to ensure swebench is importable
+    const venvPython = join(SCRIPT_DIR, 'venv', 'bin', 'python3');
+    const pythonCmd = existsSync(venvPython) ? venvPython : 'python3';
+    const child = spawn(pythonCmd, [pythonScript, predictionsPath, outputPath]);
 
     let stdout = '';
     let stderr = '';

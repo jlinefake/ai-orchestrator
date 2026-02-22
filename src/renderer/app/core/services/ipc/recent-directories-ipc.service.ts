@@ -3,7 +3,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { ElectronIpcService, IpcResponse } from './electron-ipc.service';
+import { ElectronIpcService } from './electron-ipc.service';
 import type { RecentDirectoryEntry, RecentDirectoriesOptions } from '../../../../../shared/types/recent-directories.types';
 
 @Injectable({ providedIn: 'root' })
