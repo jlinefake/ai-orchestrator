@@ -46,6 +46,22 @@ export class SettingsIpcService {
   }
 
   /**
+   * Reset all settings to defaults
+   */
+  async resetSettings(): Promise<IpcResponse> {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.resetSettings();
+  }
+
+  /**
+   * Reset a single setting to its default
+   */
+  async resetSetting(key: string): Promise<IpcResponse> {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.resetSetting(key);
+  }
+
+  /**
    * Listen for settings changes
    */
   onSettingsChanged(callback: (data: unknown) => void): () => void {

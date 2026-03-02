@@ -68,8 +68,11 @@ import { TrainingIpcService } from './training-ipc.service';
  * This service aggregates all domain-specific IPC services and exposes their methods
  * at the top level for backwards compatibility. New code should inject domain services directly.
  *
+ * @deprecated Use domain-specific IPC service instead (e.g. InstanceIpcService, TodoIpcService,
+ * CommandIpcService, ProviderIpcService, etc.). This facade will be removed in a future release.
+ *
  * @example
- * // Legacy usage (still works)
+ * // Legacy usage (still works, but deprecated)
  * const ipc = inject(IpcFacadeService);
  * await ipc.createInstance(config);
  *
@@ -553,8 +556,11 @@ export class IpcFacadeService {
 /**
  * ElectronIpcService - Backwards compatibility alias for IpcFacadeService
  *
+ * @deprecated Use domain-specific IPC service instead. Import the appropriate service
+ * (e.g. InstanceIpcService, TodoIpcService, CommandIpcService, ProviderIpcService)
+ * directly from '@core/services/ipc'. This alias will be removed in a future release.
+ *
  * This alias allows existing code that imports ElectronIpcService to continue
- * working without changes. New code should use domain-specific services directly
- * or IpcFacadeService explicitly.
+ * working without changes. New code should use domain-specific services directly.
  */
 export { IpcFacadeService as ElectronIpcService };

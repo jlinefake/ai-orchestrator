@@ -2,25 +2,15 @@
  * Settings Store - Manages application settings state
  */
 
-import { Injectable, signal, computed, effect } from '@angular/core';
+import { Injectable, signal, computed, effect, inject } from '@angular/core';
 import type { AppSettings, ThemeMode } from '../../../../shared/types/settings.types';
 import { DEFAULT_SETTINGS, SETTINGS_METADATA } from '../../../../shared/types/settings.types';
-
-// Type for the settings API methods
-interface SettingsApi {
-  getSettings: () => Promise<{ success: boolean; data?: AppSettings }>;
-  onSettingsChanged: (callback: (data: unknown) => void) => () => void;
-  setSetting: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
-  updateSettings: (settings: Partial<AppSettings>) => Promise<{ success: boolean; error?: string }>;
-  resetSettings: () => Promise<{ success: boolean; data?: AppSettings; error?: string }>;
-  resetSetting: (key: string) => Promise<{ success: boolean; value?: unknown; error?: string }>;
-}
-
-// Helper to access settings API from preload
-const getApi = () => (window as unknown as { electronAPI: SettingsApi }).electronAPI;
+import { SettingsIpcService } from '../services/ipc/settings-ipc.service';
 
 @Injectable({ providedIn: 'root' })
 export class SettingsStore {
+  private settingsIpc = inject(SettingsIpcService);
+
   // Settings state
   private _settings = signal<AppSettings>(DEFAULT_SETTINGS);
   private _loading = signal(false);
@@ -85,18 +75,13 @@ export class SettingsStore {
     this._error.set(null);
 
     try {
-      const api = getApi();
-      if (!api) {
-        throw new Error('Electron API not available');
-      }
-
-      const response = await api.getSettings();
+      const response = await this.settingsIpc.getSettings();
       if (response.success && response.data) {
         this._settings.set(response.data as AppSettings);
       }
 
       // Listen for settings changes from main process
-      this.unsubscribe = api.onSettingsChanged((data: unknown) => {
+      this.unsubscribe = this.settingsIpc.onSettingsChanged((data: unknown) => {
         if (data && typeof data === 'object' && 'settings' in data) {
           this._settings.set((data as { settings: AppSettings }).settings);
         } else if (data && typeof data === 'object' && 'key' in data && 'value' in data) {
@@ -125,10 +110,7 @@ export class SettingsStore {
         [key]: value,
       }));
 
-      const api = getApi();
-      if (!api) return;
-
-      const response = await api.setSetting(key, value);
+      const response = await this.settingsIpc.setSetting(key, value);
       if (!response.success) {
         throw new Error('Failed to save setting');
       }
@@ -150,10 +132,7 @@ export class SettingsStore {
         ...settings,
       }));
 
-      const api = getApi();
-      if (!api) return;
-
-      const response = await api.updateSettings(settings);
+      const response = await this.settingsIpc.updateSettings(settings as Record<string, unknown>);
       if (!response.success) {
         throw new Error('Failed to save settings');
       }
@@ -168,10 +147,7 @@ export class SettingsStore {
    */
   async reset(): Promise<void> {
     try {
-      const api = getApi();
-      if (!api) return;
-
-      const response = await api.resetSettings();
+      const response = await this.settingsIpc.resetSettings();
       if (response.success && response.data) {
         this._settings.set(response.data as AppSettings);
       }
@@ -185,10 +161,7 @@ export class SettingsStore {
    */
   async resetOne<K extends keyof AppSettings>(key: K): Promise<void> {
     try {
-      const api = getApi();
-      if (!api) return;
-
-      const response = await api.resetSetting(key);
+      const response = await this.settingsIpc.resetSetting(key);
       if (response.success) {
         this._settings.update(current => ({
           ...current,

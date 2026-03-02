@@ -10,6 +10,8 @@ import {
   computed,
   inject,
   effect,
+  viewChild,
+  ElementRef,
   OnDestroy,
   ChangeDetectionStrategy,
 } from '@angular/core';
@@ -611,6 +613,7 @@ export class InputPanelComponent implements OnDestroy {
   private commandStore = inject(CommandStore);
   private draftService = inject(DraftService);
   private filePreviewUrls = new Map<File, string>();
+  private textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('textareaRef');
 
   instanceId = input.required<string>();
   disabled = input<boolean>(false);
@@ -818,7 +821,7 @@ export class InputPanelComponent implements OnDestroy {
     this.draftService.clearDraft(this.instanceId());
 
     // Reset textarea height
-    const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
+    const textarea = this.textareaRef()?.nativeElement;
     if (textarea) {
       textarea.style.height = 'auto';
     }
@@ -850,7 +853,7 @@ export class InputPanelComponent implements OnDestroy {
     this.draftService.clearDraft(this.instanceId());
 
     // Reset textarea height
-    const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
+    const textarea = this.textareaRef()?.nativeElement;
     if (textarea) {
       textarea.style.height = 'auto';
     }

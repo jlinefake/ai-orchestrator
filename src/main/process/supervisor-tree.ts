@@ -74,9 +74,9 @@ export class SupervisorTree extends EventEmitter {
    * Reset the singleton instance for testing.
    * This cleans up all state and allows a fresh instance to be created.
    */
-  static _resetForTesting(): void {
+  static async _resetForTesting(): Promise<void> {
     if (this.instance) {
-      this.instance.destroy();
+      await this.instance.destroy();
       this.instance = null;
     }
   }
@@ -470,8 +470,11 @@ export class SupervisorTree extends EventEmitter {
 
       // Calculate depth
       let depth = 0;
+      const visited = new Set<string>();
       let current = reg;
       while (current.parentId) {
+        if (visited.has(current.parentId)) break; // cycle detected
+        visited.add(current.parentId);
         depth++;
         const parent = this.instances.get(current.parentId);
         if (!parent) break;
@@ -563,16 +566,16 @@ export class SupervisorTree extends EventEmitter {
   /**
    * Reset the tree (for testing)
    */
-  reset(): void {
-    this.shutdown();
+  async reset(): Promise<void> {
+    await this.shutdown();
     this.config = { ...DEFAULT_TREE_CONFIG };
   }
 
   /**
    * Destroy the tree and clean up all resources
    */
-  destroy(): void {
-    this.shutdown();
+  async destroy(): Promise<void> {
+    await this.shutdown();
     this.removeAllListeners();
   }
 }

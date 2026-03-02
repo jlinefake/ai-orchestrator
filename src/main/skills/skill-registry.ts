@@ -16,14 +16,14 @@ import {
   calculateMatchConfidence,
 } from '../../shared/types/skill.types';
 import { getLogger } from '../logging/logger';
+import { getSkillLoader } from './skill-loader';
 
 const logger = getLogger('SkillRegistry');
 
 export class SkillRegistry extends EventEmitter {
   private static instance: SkillRegistry | null = null;
-  private skills: Map<string, SkillBundle> = new Map();
-  private loadedSkills: Map<string, LoadedSkill> = new Map();
-  private triggerIndex: Map<string, string[]> = new Map(); // trigger -> skill IDs
+  private skills = new Map<string, SkillBundle>();
+  private triggerIndex = new Map<string, string[]>(); // trigger -> skill IDs
 
   static getInstance(): SkillRegistry {
     if (!this.instance) {
@@ -202,13 +202,17 @@ export class SkillRegistry extends EventEmitter {
   // ============ Loading ============
 
   async loadSkill(skillId: string): Promise<LoadedSkill> {
-    // Check cache
-    if (this.loadedSkills.has(skillId)) {
-      return this.loadedSkills.get(skillId)!;
-    }
-
     const bundle = this.skills.get(skillId);
     if (!bundle) throw new Error(`Skill not found: ${skillId}`);
+
+    const loader = getSkillLoader();
+    const skillName = bundle.metadata.name;
+
+    // Check SkillLoader's cache first (avoids duplicate file reads)
+    const cached = loader.getLoadedSkill(skillName);
+    if (cached) {
+      return cached;
+    }
 
     const startTime = Date.now();
     const coreContent = await fs.readFile(bundle.corePath, 'utf-8');
@@ -225,13 +229,17 @@ export class SkillRegistry extends EventEmitter {
       tokenEstimate: estimateTokens(contentWithoutFrontmatter),
     };
 
-    this.loadedSkills.set(skillId, loaded);
+    // Delegate cache storage to SkillLoader (which enforces LRU eviction)
+    loader.cacheSkill(skillName, loaded);
     this.emit('skill:loaded', { skill: bundle, loaded });
     return loaded;
   }
 
   async loadReference(skillId: string, referencePath: string): Promise<string> {
-    const loaded = this.loadedSkills.get(skillId);
+    const bundle = this.skills.get(skillId);
+    if (!bundle) throw new Error(`Skill not found: ${skillId}`);
+
+    const loaded = getSkillLoader().getLoadedSkill(bundle.metadata.name);
     if (!loaded) throw new Error(`Skill not loaded: ${skillId}`);
 
     // Check if reference is valid for this skill
@@ -257,7 +265,10 @@ export class SkillRegistry extends EventEmitter {
   }
 
   async loadExample(skillId: string, examplePath: string): Promise<string> {
-    const loaded = this.loadedSkills.get(skillId);
+    const bundle = this.skills.get(skillId);
+    if (!bundle) throw new Error(`Skill not found: ${skillId}`);
+
+    const loaded = getSkillLoader().getLoadedSkill(bundle.metadata.name);
     if (!loaded) throw new Error(`Skill not loaded: ${skillId}`);
 
     // Check if example is valid for this skill
@@ -293,11 +304,15 @@ export class SkillRegistry extends EventEmitter {
   }
 
   getLoadedSkill(skillId: string): LoadedSkill | undefined {
-    return this.loadedSkills.get(skillId);
+    const bundle = this.skills.get(skillId);
+    if (!bundle) return undefined;
+    return getSkillLoader().getLoadedSkill(bundle.metadata.name);
   }
 
   isSkillLoaded(skillId: string): boolean {
-    return this.loadedSkills.has(skillId);
+    const bundle = this.skills.get(skillId);
+    if (!bundle) return false;
+    return getSkillLoader().hasSkill(bundle.metadata.name);
   }
 
   getSkillsByCategory(category: string): SkillBundle[] {
@@ -309,15 +324,19 @@ export class SkillRegistry extends EventEmitter {
   // ============ Memory Management ============
 
   unloadSkill(skillId: string): void {
-    const loaded = this.loadedSkills.get(skillId);
+    const bundle = this.skills.get(skillId);
+    if (!bundle) return;
+    const loader = getSkillLoader();
+    const skillName = bundle.metadata.name;
+    const loaded = loader.getLoadedSkill(skillName);
     if (loaded) {
-      this.loadedSkills.delete(skillId);
+      loader.unloadSkill(skillName);
       this.emit('skill:unloaded', { skill: loaded.bundle });
     }
   }
 
   unloadAllSkills(): void {
-    for (const skillId of this.loadedSkills.keys()) {
+    for (const skillId of this.skills.keys()) {
       this.unloadSkill(skillId);
     }
   }
@@ -327,14 +346,22 @@ export class SkillRegistry extends EventEmitter {
     loadedSkills: number;
     estimatedTokens: number;
   } {
+    const loader = getSkillLoader();
     let estimatedTokens = 0;
-    for (const loaded of this.loadedSkills.values()) {
-      estimatedTokens += loaded.tokenEstimate;
+    let loadedSkills = 0;
+
+    // Count only skills that belong to this registry
+    for (const bundle of this.skills.values()) {
+      const loaded = loader.getLoadedSkill(bundle.metadata.name);
+      if (loaded) {
+        loadedSkills++;
+        estimatedTokens += loaded.tokenEstimate;
+      }
     }
 
     return {
       totalSkills: this.skills.size,
-      loadedSkills: this.loadedSkills.size,
+      loadedSkills,
       estimatedTokens,
     };
   }
@@ -342,8 +369,9 @@ export class SkillRegistry extends EventEmitter {
   // ============ Cleanup ============
 
   clear(): void {
+    // Unload all registry-owned skills from SkillLoader's cache before clearing
+    this.unloadAllSkills();
     this.skills.clear();
-    this.loadedSkills.clear();
     this.triggerIndex.clear();
   }
 

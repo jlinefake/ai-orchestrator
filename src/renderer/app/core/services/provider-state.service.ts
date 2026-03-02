@@ -5,13 +5,15 @@
  */
 
 import { Injectable, signal, computed, inject, effect } from '@angular/core';
-import { ElectronIpcService } from './ipc';
+import { SettingsStore } from '../state/settings.store';
+import { SettingsIpcService } from './ipc/settings-ipc.service';
 
 export type ProviderType = 'claude' | 'openai' | 'gemini' | 'copilot' | 'auto';
 
 @Injectable({ providedIn: 'root' })
 export class ProviderStateService {
-  private ipc = inject(ElectronIpcService);
+  private settingsStore = inject(SettingsStore);
+  private settingsIpc = inject(SettingsIpcService);
   private initialized = false;
 
   /** Currently selected provider */
@@ -24,14 +26,27 @@ export class ProviderStateService {
   readonly isCopilot = computed(() => this.selectedProvider() === 'copilot');
 
   constructor() {
-    // Load initial values from settings
-    this.loadFromSettings();
+    // Load initial values from SettingsStore once settings are populated
+    effect(() => {
+      const settings = this.settingsStore.settings();
+      if (!this.initialized) {
+        if (settings.defaultCli) {
+          this.selectedProvider.set(settings.defaultCli as ProviderType);
+        }
+        if (settings.defaultModel) {
+          this.selectedModel.set(settings.defaultModel);
+        }
+        // Mark initialized once we've had a chance to read non-default settings
+        // (settings are loaded asynchronously; the store starts with DEFAULT_SETTINGS)
+        this.initialized = true;
+      }
+    });
 
     // Set up effect to save provider changes (after initialization)
     effect(() => {
       const provider = this.selectedProvider();
       if (this.initialized) {
-        this.ipc.setSetting('defaultCli', provider);
+        this.settingsIpc.setSetting('defaultCli', provider);
       }
     });
 
@@ -39,12 +54,12 @@ export class ProviderStateService {
     effect(() => {
       const model = this.selectedModel();
       if (this.initialized) {
-        this.ipc.setSetting('defaultModel', model);
+        this.settingsIpc.setSetting('defaultModel', model);
       }
     });
 
     // Listen for settings changes from other sources
-    this.ipc.onSettingsChanged((data: unknown) => {
+    this.settingsIpc.onSettingsChanged((data: unknown) => {
       const change = data as { key?: string; value?: unknown; settings?: Record<string, unknown> };
       if (change.key === 'defaultCli' && change.value) {
         this.selectedProvider.set(change.value as ProviderType);
@@ -60,29 +75,6 @@ export class ProviderStateService {
         }
       }
     });
-  }
-
-  /**
-   * Load initial values from settings
-   */
-  private async loadFromSettings(): Promise<void> {
-    try {
-      const response = await this.ipc.getSettings() as { success: boolean; data?: Record<string, unknown> };
-      if (response.success && response.data) {
-        const settings = response.data;
-        if (settings['defaultCli']) {
-          this.selectedProvider.set(settings['defaultCli'] as ProviderType);
-        }
-        if (settings['defaultModel']) {
-          this.selectedModel.set(settings['defaultModel'] as string);
-        }
-      }
-    } catch (error) {
-      console.error('[ProviderStateService] Failed to load settings:', error);
-    } finally {
-      // Mark as initialized so effects start saving
-      this.initialized = true;
-    }
   }
 
   /**

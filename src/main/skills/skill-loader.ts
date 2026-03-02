@@ -25,7 +25,7 @@ export interface SkillLoadOptions {
 
 export class SkillLoader extends EventEmitter {
   private static instance: SkillLoader | null = null;
-  private loadedSkills: Map<string, LoadedSkill> = new Map();
+  private loadedSkills = new Map<string, LoadedSkill>();
   private tokenEstimator: (text: string) => number;
 
   static getInstance(): SkillLoader {
@@ -303,6 +303,33 @@ export class SkillLoader extends EventEmitter {
 
   getLoadedSkill(skillName: string): LoadedSkill | undefined {
     return this.loadedSkills.get(skillName);
+  }
+
+  hasSkill(skillName: string): boolean {
+    return this.loadedSkills.has(skillName);
+  }
+
+  /**
+   * Store a pre-built LoadedSkill in the cache directly (used by SkillRegistry
+   * to delegate cache storage without going through the full load path).
+   * Applies the same LRU eviction as loadSkill().
+   */
+  cacheSkill(skillName: string, skill: LoadedSkill): void {
+    if (this.loadedSkills.size >= MAX_CACHED_SKILLS) {
+      const oldestKey = this.loadedSkills.keys().next().value;
+      if (oldestKey) {
+        this.loadedSkills.delete(oldestKey);
+      }
+    }
+    this.loadedSkills.set(skillName, skill);
+  }
+
+  getCachedSkillCount(): number {
+    return this.loadedSkills.size;
+  }
+
+  getAllCachedSkills(): IterableIterator<LoadedSkill> {
+    return this.loadedSkills.values();
   }
 
   getLoadedSkills(): LoadedSkill[] {

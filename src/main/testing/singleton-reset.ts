@@ -13,7 +13,7 @@ const logger = getLogger('SingletonReset');
  * Interface for resettable singletons
  */
 export interface ResettableSingleton {
-  _resetForTesting(): void;
+  _resetForTesting(): void | Promise<void>;
 }
 
 /**
@@ -39,10 +39,10 @@ export function unregisterResettable(singleton: ResettableSingleton): void {
  * Reset all registered singletons
  * Call this in beforeEach() in your test files
  */
-export function resetAllSingletons(): void {
+export async function resetAllSingletons(): Promise<void> {
   for (const singleton of resettableRegistry) {
     try {
-      singleton._resetForTesting();
+      await singleton._resetForTesting();
     } catch (error) {
       logger.warn('Failed to reset singleton', { error: String(error) });
     }
@@ -184,9 +184,9 @@ import { _resetLogManagerForTesting } from '../logging/logger';
  * Reset all known singletons by directly calling their _resetForTesting methods.
  * Grouped by subsystem for readability.
  */
-export function resetAllSingletonsForTesting(): void {
+export async function resetAllSingletonsForTesting(): Promise<void> {
   // Process
-  SupervisorTree._resetForTesting();
+  await SupervisorTree._resetForTesting();
   ProcessCircuitBreakerRegistry._resetForTesting();
 
   // Core

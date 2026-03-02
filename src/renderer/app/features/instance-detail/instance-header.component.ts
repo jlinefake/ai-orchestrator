@@ -8,6 +8,9 @@ import {
   output,
   computed,
   inject,
+  effect,
+  viewChild,
+  ElementRef,
   OnInit,
   ChangeDetectionStrategy
 } from '@angular/core';
@@ -639,6 +642,8 @@ export class InstanceHeaderComponent implements OnInit {
   private skillStore = inject(SkillStore);
   private hookStore = inject(HookStore);
 
+  private nameInput = viewChild<ElementRef<HTMLInputElement>>('nameInput');
+
   instance = input.required<Instance>();
   isEditingName = input(false);
   isChangingMode = input(false);
@@ -663,6 +668,19 @@ export class InstanceHeaderComponent implements OnInit {
     if (hooks.length === 0) return '';
     return 'Enabled hooks:\n' + hooks.map(h => `• ${h.name}`).join('\n');
   });
+
+  constructor() {
+    // Focus the name input whenever editing starts
+    effect(() => {
+      if (this.isEditingName()) {
+        const input = this.nameInput()?.nativeElement;
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }
+    });
+  }
 
   ngOnInit(): void {
     // Load skills and hooks on init

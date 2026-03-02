@@ -3,7 +3,7 @@
  */
 
 import { Injectable, inject, signal, computed } from '@angular/core';
-import { ElectronIpcService } from '../services/ipc';
+import { ProviderIpcService } from '../services/ipc';
 
 export interface CliInfo {
   name: string;
@@ -25,7 +25,7 @@ interface CliState {
 
 @Injectable({ providedIn: 'root' })
 export class CliStore {
-  private ipc = inject(ElectronIpcService);
+  private ipc = inject(ProviderIpcService);
 
   private state = signal<CliState>({
     clis: [],

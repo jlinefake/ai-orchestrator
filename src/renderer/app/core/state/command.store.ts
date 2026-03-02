@@ -4,7 +4,7 @@
  */
 
 import { Injectable, inject, signal, computed } from '@angular/core';
-import { ElectronIpcService } from '../services/ipc';
+import { CommandIpcService } from '../services/ipc';
 import { SkillStore } from './skill.store';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
 
@@ -17,7 +17,7 @@ export interface ExtendedCommand extends CommandTemplate {
 
 @Injectable({ providedIn: 'root' })
 export class CommandStore {
-  private ipcService = inject(ElectronIpcService);
+  private ipcService = inject(CommandIpcService);
   private skillStore = inject(SkillStore);
 
   // State

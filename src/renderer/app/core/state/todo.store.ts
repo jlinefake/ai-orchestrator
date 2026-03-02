@@ -6,12 +6,12 @@
  */
 
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
-import { ElectronIpcService } from '../services/ipc';
+import { TodoIpcService } from '../services/ipc';
 import type { TodoItem, TodoList, TodoStats, TodoStatus, TodoPriority } from '../../../../shared/types/todo.types';
 
 @Injectable({ providedIn: 'root' })
 export class TodoStore implements OnDestroy {
-  private ipcService = inject(ElectronIpcService);
+  private ipcService = inject(TodoIpcService);
   private unsubscribe: (() => void) | null = null;
 
   // State

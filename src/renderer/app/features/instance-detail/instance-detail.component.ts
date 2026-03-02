@@ -572,13 +572,6 @@ export class InstanceDetailComponent {
 
   onStartEditName(): void {
     this.isEditingName.set(true);
-    setTimeout(() => {
-      const input = document.querySelector('.name-input') as HTMLInputElement;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    });
   }
 
   onSaveName(newName: string): void {
