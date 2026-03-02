@@ -12,6 +12,7 @@ import { getHookManager } from './hooks/hook-manager';
 import { registerDefaultMultiVerifyInvoker, registerDefaultReviewInvoker, registerDefaultDebateInvoker } from './orchestration/default-invokers';
 import { getOrchestratorPluginManager } from './plugins/plugin-manager';
 import { getObservationIngestor, getObserverAgent, getReflectorAgent } from './observation';
+import { initializePathValidator } from './security/path-validator';
 import { getLogger } from './logging/logger';
 
 const logger = getLogger('App');
@@ -34,31 +35,38 @@ class AIOrchestratorApp {
   async initialize(): Promise<void> {
     logger.info('Initializing AI Orchestrator');
 
-    // Register IPC handlers BEFORE creating window
-    // (window might call handlers immediately on load)
-    // Only register once - handlers persist across window recreation
+    // Only register once — handlers persist across window recreation
     if (!this.handlersRegistered) {
-      this.ipcHandler.registerHandlers();
+      const criticalSteps = new Set(['IPC handlers', 'Event forwarding']);
+
+      const steps: Array<{ name: string; fn: () => Promise<void> | void }> = [
+        { name: 'IPC handlers', fn: () => this.ipcHandler.registerHandlers() },
+        { name: 'Hook approvals', fn: () => getHookManager().loadApprovals() },
+        { name: 'Event forwarding', fn: () => this.setupInstanceEventForwarding() },
+        { name: 'Verification invokers', fn: () => registerDefaultMultiVerifyInvoker(this.instanceManager) },
+        { name: 'Review invokers', fn: () => registerDefaultReviewInvoker(this.instanceManager) },
+        { name: 'Debate invokers', fn: () => registerDefaultDebateInvoker(this.instanceManager) },
+        { name: 'Plugin manager', fn: () => getOrchestratorPluginManager().initialize(this.instanceManager) },
+        { name: 'Observation ingestor', fn: () => getObservationIngestor().initialize(this.instanceManager) },
+        { name: 'Observer agent', fn: () => { getObserverAgent(); } },
+        { name: 'Reflector agent', fn: () => { getReflectorAgent(); } },
+        { name: 'Path validator', fn: () => initializePathValidator() },
+      ];
+
+      for (const step of steps) {
+        try {
+          logger.info(`Initializing: ${step.name}`);
+          await step.fn();
+          logger.info(`Initialized: ${step.name}`);
+        } catch (error) {
+          logger.error(`Failed to initialize: ${step.name}`, error instanceof Error ? error : undefined);
+          if (criticalSteps.has(step.name)) {
+            throw error;
+          }
+        }
+      }
+
       this.handlersRegistered = true;
-
-      // Load persisted hook approvals (only once)
-      await getHookManager().loadApprovals();
-
-      // Set up instance manager event forwarding to renderer (only once)
-      this.setupInstanceEventForwarding();
-
-      // Wire up default multi-agent invokers (only once)
-      registerDefaultMultiVerifyInvoker(this.instanceManager);
-      registerDefaultReviewInvoker(this.instanceManager);
-      registerDefaultDebateInvoker(this.instanceManager);
-
-      // Load/dispatch plugins (only once)
-      getOrchestratorPluginManager().initialize(this.instanceManager);
-
-      // Initialize observation memory subsystem (only once)
-      getObservationIngestor().initialize(this.instanceManager);
-      getObserverAgent();
-      getReflectorAgent();
     }
 
     // Create main window (this loads the renderer which may call IPC)
@@ -91,9 +99,7 @@ class AIOrchestratorApp {
 
     // Forward input-required events (permission prompts) to renderer
     this.instanceManager.on('instance:input-required', (payload) => {
-      logger.info('Forwarding input-required to renderer', { payload, windowManagerReady: !!this.windowManager });
       this.windowManager.sendToRenderer('instance:input-required', payload);
-      logger.info('Forward complete for instance:input-required');
     });
 
     // Forward user action requests from orchestrator to renderer
