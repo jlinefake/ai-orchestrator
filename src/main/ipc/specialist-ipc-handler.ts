@@ -5,20 +5,21 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../shared/types/ipc.types';
-import type {
-  SpecialistGetPayload,
-  SpecialistGetByCategoryPayload,
-  SpecialistAddCustomPayload,
-  SpecialistUpdateCustomPayload,
-  SpecialistRemoveCustomPayload,
-  SpecialistRecommendPayload,
-  SpecialistCreateInstancePayload,
-  SpecialistGetInstancePayload,
-  SpecialistUpdateStatusPayload,
-  SpecialistAddFindingPayload,
-  SpecialistUpdateMetricsPayload,
-  SpecialistGetPromptAdditionPayload,
-} from '../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  SpecialistGetPayloadSchema,
+  SpecialistGetByCategoryPayloadSchema,
+  SpecialistAddCustomPayloadSchema,
+  SpecialistUpdateCustomPayloadSchema,
+  SpecialistRemoveCustomPayloadSchema,
+  SpecialistRecommendPayloadSchema,
+  SpecialistCreateInstancePayloadSchema,
+  SpecialistGetInstancePayloadSchema,
+  SpecialistUpdateStatusPayloadSchema,
+  SpecialistAddFindingPayloadSchema,
+  SpecialistUpdateMetricsPayloadSchema,
+  SpecialistGetPromptAdditionPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 import { getSpecialistRegistry } from '../agents/specialists/specialist-registry';
 import type { SpecialistProfile, SpecialistStatus, SpecialistFinding, SpecialistCategory } from '../../shared/types/specialist.types';
 
@@ -91,17 +92,18 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_GET,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistGetPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const profile = getSpecialistRegistry().getProfile(payload.profileId);
+        const validated = validateIpcPayload(SpecialistGetPayloadSchema, payload, 'SPECIALIST_GET');
+        const profile = getSpecialistRegistry().getProfile(validated.profileId);
         if (!profile) {
           return {
             success: false,
             error: {
               code: 'SPECIALIST_NOT_FOUND',
-              message: `Specialist profile not found: ${payload.profileId}`,
+              message: `Specialist profile not found: ${validated.profileId}`,
               timestamp: Date.now(),
             },
           };
@@ -124,11 +126,12 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_GET_BY_CATEGORY,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistGetByCategoryPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const profiles = getSpecialistRegistry().getProfilesByCategory(payload.category);
+        const validated = validateIpcPayload(SpecialistGetByCategoryPayloadSchema, payload, 'SPECIALIST_GET_BY_CATEGORY');
+        const profiles = getSpecialistRegistry().getProfilesByCategory(validated.category);
         return { success: true, data: profiles };
       } catch (error) {
         return {
@@ -151,26 +154,27 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_ADD_CUSTOM,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistAddCustomPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SpecialistAddCustomPayloadSchema, payload, 'SPECIALIST_ADD_CUSTOM');
         const profile: SpecialistProfile = {
-          id: payload.profile.id,
-          name: payload.profile.name,
-          description: payload.profile.description,
-          category: payload.profile.category as SpecialistCategory,
-          icon: payload.profile.icon,
-          color: payload.profile.color,
-          systemPromptAddition: payload.profile.systemPromptAddition,
-          restrictedTools: payload.profile.restrictedTools,
+          id: validated.profile.id,
+          name: validated.profile.name,
+          description: validated.profile.description,
+          category: validated.profile.category as SpecialistCategory,
+          icon: validated.profile.icon,
+          color: validated.profile.color,
+          systemPromptAddition: validated.profile.systemPromptAddition,
+          restrictedTools: validated.profile.restrictedTools,
           defaultTools: [],
           suggestedCommands: [],
           relatedWorkflows: [],
-          constraints: payload.profile.constraints ? {
-            readOnlyMode: payload.profile.constraints.readOnlyMode,
-            maxTokensPerResponse: payload.profile.constraints.maxTokens,
-            requireApprovalFor: payload.profile.constraints.requireApprovalFor,
+          constraints: validated.profile.constraints ? {
+            readOnlyMode: validated.profile.constraints.readOnlyMode,
+            maxTokensPerResponse: validated.profile.constraints.maxTokens,
+            requireApprovalFor: validated.profile.constraints.requireApprovalFor,
           } : undefined,
         };
 
@@ -193,34 +197,35 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_UPDATE_CUSTOM,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistUpdateCustomPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SpecialistUpdateCustomPayloadSchema, payload, 'SPECIALIST_UPDATE_CUSTOM');
         const updates: Partial<SpecialistProfile> = {};
 
-        if (payload.updates.name) updates.name = payload.updates.name;
-        if (payload.updates.description) updates.description = payload.updates.description;
-        if (payload.updates.category) updates.category = payload.updates.category as SpecialistCategory;
-        if (payload.updates.icon) updates.icon = payload.updates.icon;
-        if (payload.updates.color) updates.color = payload.updates.color;
-        if (payload.updates.systemPromptAddition) updates.systemPromptAddition = payload.updates.systemPromptAddition;
-        if (payload.updates.restrictedTools) updates.restrictedTools = payload.updates.restrictedTools;
-        if (payload.updates.constraints) {
+        if (validated.updates.name) updates.name = validated.updates.name;
+        if (validated.updates.description) updates.description = validated.updates.description;
+        if (validated.updates.category) updates.category = validated.updates.category as SpecialistCategory;
+        if (validated.updates.icon) updates.icon = validated.updates.icon;
+        if (validated.updates.color) updates.color = validated.updates.color;
+        if (validated.updates.systemPromptAddition) updates.systemPromptAddition = validated.updates.systemPromptAddition;
+        if (validated.updates.restrictedTools) updates.restrictedTools = validated.updates.restrictedTools;
+        if (validated.updates.constraints) {
           updates.constraints = {
-            readOnlyMode: payload.updates.constraints.readOnlyMode,
-            maxTokensPerResponse: payload.updates.constraints.maxTokens,
-            requireApprovalFor: payload.updates.constraints.requireApprovalFor,
+            readOnlyMode: validated.updates.constraints.readOnlyMode,
+            maxTokensPerResponse: validated.updates.constraints.maxTokens,
+            requireApprovalFor: validated.updates.constraints.requireApprovalFor,
           };
         }
 
-        const profile = getSpecialistRegistry().updateCustomProfile(payload.profileId, updates);
+        const profile = getSpecialistRegistry().updateCustomProfile(validated.profileId, updates);
         if (!profile) {
           return {
             success: false,
             error: {
               code: 'SPECIALIST_NOT_FOUND',
-              message: `Custom specialist profile not found: ${payload.profileId}`,
+              message: `Custom specialist profile not found: ${validated.profileId}`,
               timestamp: Date.now(),
             },
           };
@@ -243,17 +248,18 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_REMOVE_CUSTOM,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistRemoveCustomPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const removed = getSpecialistRegistry().removeCustomProfile(payload.profileId);
+        const validated = validateIpcPayload(SpecialistRemoveCustomPayloadSchema, payload, 'SPECIALIST_REMOVE_CUSTOM');
+        const removed = getSpecialistRegistry().removeCustomProfile(validated.profileId);
         if (!removed) {
           return {
             success: false,
             error: {
               code: 'SPECIALIST_NOT_FOUND',
-              message: `Custom specialist profile not found: ${payload.profileId}`,
+              message: `Custom specialist profile not found: ${validated.profileId}`,
               timestamp: Date.now(),
             },
           };
@@ -280,11 +286,12 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_RECOMMEND,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistRecommendPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const recommendations = getSpecialistRegistry().recommendSpecialists(payload.context);
+        const validated = validateIpcPayload(SpecialistRecommendPayloadSchema, payload, 'SPECIALIST_RECOMMEND');
+        const recommendations = getSpecialistRegistry().recommendSpecialists(validated.context);
         return { success: true, data: recommendations };
       } catch (error) {
         return {
@@ -307,13 +314,14 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_CREATE_INSTANCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistCreateInstancePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SpecialistCreateInstancePayloadSchema, payload, 'SPECIALIST_CREATE_INSTANCE');
         const instance = getSpecialistRegistry().createInstance(
-          payload.profileId,
-          payload.orchestratorInstanceId
+          validated.profileId,
+          validated.orchestratorInstanceId
         );
         return { success: true, data: instance };
       } catch (error) {
@@ -333,17 +341,18 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_GET_INSTANCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistGetInstancePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const instance = getSpecialistRegistry().getInstance(payload.instanceId);
+        const validated = validateIpcPayload(SpecialistGetInstancePayloadSchema, payload, 'SPECIALIST_GET_INSTANCE');
+        const instance = getSpecialistRegistry().getInstance(validated.instanceId);
         if (!instance) {
           return {
             success: false,
             error: {
               code: 'SPECIALIST_INSTANCE_NOT_FOUND',
-              message: `Specialist instance not found: ${payload.instanceId}`,
+              message: `Specialist instance not found: ${validated.instanceId}`,
               timestamp: Date.now(),
             },
           };
@@ -386,13 +395,14 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_UPDATE_STATUS,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistUpdateStatusPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SpecialistUpdateStatusPayloadSchema, payload, 'SPECIALIST_UPDATE_STATUS');
         getSpecialistRegistry().updateInstanceStatus(
-          payload.instanceId,
-          payload.status as SpecialistStatus
+          validated.instanceId,
+          validated.status as SpecialistStatus
         );
         return { success: true, data: null };
       } catch (error) {
@@ -412,27 +422,28 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_ADD_FINDING,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistAddFindingPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SpecialistAddFindingPayloadSchema, payload, 'SPECIALIST_ADD_FINDING');
         const finding: SpecialistFinding = {
-          id: payload.finding.id,
-          type: payload.finding.type as SpecialistFinding['type'],
-          severity: payload.finding.severity,
-          title: payload.finding.title,
-          description: payload.finding.description,
-          file: payload.finding.filePath,
-          line: payload.finding.lineRange?.start,
-          endLine: payload.finding.lineRange?.end,
-          codeSnippet: payload.finding.codeSnippet,
-          suggestion: payload.finding.suggestion,
-          confidence: payload.finding.confidence,
-          tags: payload.finding.tags || [],
+          id: validated.finding.id,
+          type: validated.finding.type as SpecialistFinding['type'],
+          severity: validated.finding.severity,
+          title: validated.finding.title,
+          description: validated.finding.description,
+          file: validated.finding.filePath,
+          line: validated.finding.lineRange?.start,
+          endLine: validated.finding.lineRange?.end,
+          codeSnippet: validated.finding.codeSnippet,
+          suggestion: validated.finding.suggestion,
+          confidence: validated.finding.confidence,
+          tags: validated.finding.tags || [],
           timestamp: Date.now(),
         };
 
-        getSpecialistRegistry().addFinding(payload.instanceId, finding);
+        getSpecialistRegistry().addFinding(validated.instanceId, finding);
         return { success: true, data: finding };
       } catch (error) {
         return {
@@ -451,11 +462,12 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_UPDATE_METRICS,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistUpdateMetricsPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        getSpecialistRegistry().updateMetrics(payload.instanceId, payload.updates);
+        const validated = validateIpcPayload(SpecialistUpdateMetricsPayloadSchema, payload, 'SPECIALIST_UPDATE_METRICS');
+        getSpecialistRegistry().updateMetrics(validated.instanceId, validated.updates);
         return { success: true, data: null };
       } catch (error) {
         return {
@@ -474,11 +486,12 @@ export function registerSpecialistHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SPECIALIST_GET_PROMPT_ADDITION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SpecialistGetPromptAdditionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const prompt = getSpecialistRegistry().getSystemPromptAddition(payload.profileId);
+        const validated = validateIpcPayload(SpecialistGetPromptAdditionPayloadSchema, payload, 'SPECIALIST_GET_PROMPT_ADDITION');
+        const prompt = getSpecialistRegistry().getSystemPromptAddition(validated.profileId);
         return { success: true, data: prompt };
       } catch (error) {
         return {

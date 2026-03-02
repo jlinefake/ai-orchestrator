@@ -6,40 +6,41 @@
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../shared/types/ipc.types';
 import type { InstanceManager } from '../instance/instance-manager';
-import type {
-  WorkflowGetTemplatePayload,
-  WorkflowStartPayload,
-  WorkflowGetExecutionPayload,
-  WorkflowGetByInstancePayload,
-  WorkflowCompletePhasePayload,
-  WorkflowSatisfyGatePayload,
-  WorkflowSkipPhasePayload,
-  WorkflowCancelPayload,
-  WorkflowGetPromptAdditionPayload,
-  ReviewGetAgentPayload,
-  ReviewStartSessionPayload,
-  ReviewGetSessionPayload,
-  ReviewGetIssuesPayload,
-  ReviewAcknowledgeIssuePayload,
-  HooksListPayload,
-  HooksGetPayload,
-  HooksCreatePayload,
-  HooksUpdatePayload,
-  HooksDeletePayload,
-  HooksEvaluatePayload,
-  HooksImportPayload,
-  HooksExportPayload,
-  HookApprovalsListPayload,
-  HookApprovalsUpdatePayload,
-  HookApprovalsClearPayload,
-  SkillsDiscoverPayload,
-  SkillsGetPayload,
-  SkillsLoadPayload,
-  SkillsUnloadPayload,
-  SkillsLoadReferencePayload,
-  SkillsLoadExamplePayload,
-  SkillsMatchPayload
-} from '../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  WorkflowGetTemplatePayloadSchema,
+  WorkflowStartPayloadSchema,
+  WorkflowGetExecutionPayloadSchema,
+  WorkflowGetByInstancePayloadSchema,
+  WorkflowCompletePhasePayloadSchema,
+  WorkflowSatisfyGatePayloadSchema,
+  WorkflowSkipPhasePayloadSchema,
+  WorkflowCancelPayloadSchema,
+  WorkflowGetPromptAdditionPayloadSchema,
+  ReviewGetAgentPayloadSchema,
+  ReviewStartSessionPayloadSchema,
+  ReviewGetSessionPayloadSchema,
+  ReviewGetIssuesPayloadSchema,
+  ReviewAcknowledgeIssuePayloadSchema,
+  HooksListPayloadSchema,
+  HooksGetPayloadSchema,
+  HooksCreatePayloadSchema,
+  HooksUpdatePayloadSchema,
+  HooksDeletePayloadSchema,
+  HooksEvaluatePayloadSchema,
+  HooksImportPayloadSchema,
+  HooksExportPayloadSchema,
+  HookApprovalsListPayloadSchema,
+  HookApprovalsUpdatePayloadSchema,
+  HookApprovalsClearPayloadSchema,
+  SkillsDiscoverPayloadSchema,
+  SkillsGetPayloadSchema,
+  SkillsLoadPayloadSchema,
+  SkillsUnloadPayloadSchema,
+  SkillsLoadReferencePayloadSchema,
+  SkillsLoadExamplePayloadSchema,
+  SkillsMatchPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 import type { ReviewAgentConfig } from '../../shared/types/review-agent.types';
 import { getWorkflowManager } from '../workflows/workflow-manager';
 import { getHookEngine } from '../hooks/hook-engine';
@@ -86,17 +87,18 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_GET_TEMPLATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowGetTemplatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const template = getWorkflowManager().getTemplate(payload.templateId);
+        const validated = validateIpcPayload(WorkflowGetTemplatePayloadSchema, payload, 'WORKFLOW_GET_TEMPLATE');
+        const template = getWorkflowManager().getTemplate(validated.templateId);
         if (!template) {
           return {
             success: false,
             error: {
               code: 'WORKFLOW_TEMPLATE_NOT_FOUND',
-              message: `Template not found: ${payload.templateId}`,
+              message: `Template not found: ${validated.templateId}`,
               timestamp: Date.now()
             }
           };
@@ -119,13 +121,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_START,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowStartPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowStartPayloadSchema, payload, 'WORKFLOW_START');
         const execution = getWorkflowManager().startWorkflow(
-          payload.instanceId,
-          payload.templateId
+          validated.instanceId,
+          validated.templateId
         );
         return { success: true, data: execution };
       } catch (error) {
@@ -145,19 +148,20 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_GET_EXECUTION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowGetExecutionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowGetExecutionPayloadSchema, payload, 'WORKFLOW_GET_EXECUTION');
         const execution = getWorkflowManager().getExecution(
-          payload.executionId
+          validated.executionId
         );
         if (!execution) {
           return {
             success: false,
             error: {
               code: 'WORKFLOW_EXECUTION_NOT_FOUND',
-              message: `Execution not found: ${payload.executionId}`,
+              message: `Execution not found: ${validated.executionId}`,
               timestamp: Date.now()
             }
           };
@@ -180,12 +184,13 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_GET_BY_INSTANCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowGetByInstancePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowGetByInstancePayloadSchema, payload, 'WORKFLOW_GET_BY_INSTANCE');
         const execution = getWorkflowManager().getExecutionByInstance(
-          payload.instanceId
+          validated.instanceId
         );
         return { success: true, data: execution || null };
       } catch (error) {
@@ -205,13 +210,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_COMPLETE_PHASE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowCompletePhasePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowCompletePhasePayloadSchema, payload, 'WORKFLOW_COMPLETE_PHASE');
         const execution = await getWorkflowManager().completePhase(
-          payload.executionId,
-          payload.phaseData
+          validated.executionId,
+          validated.phaseData
         );
         return { success: true, data: execution };
       } catch (error) {
@@ -231,13 +237,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_SATISFY_GATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowSatisfyGatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowSatisfyGatePayloadSchema, payload, 'WORKFLOW_SATISFY_GATE');
         const execution = getWorkflowManager().satisfyGate(
-          payload.executionId,
-          payload.response
+          validated.executionId,
+          validated.response
         );
         return { success: true, data: execution };
       } catch (error) {
@@ -257,11 +264,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_SKIP_PHASE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowSkipPhasePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const execution = getWorkflowManager().skipPhase(payload.executionId);
+        const validated = validateIpcPayload(WorkflowSkipPhasePayloadSchema, payload, 'WORKFLOW_SKIP_PHASE');
+        const execution = getWorkflowManager().skipPhase(validated.executionId);
         return { success: true, data: execution };
       } catch (error) {
         return {
@@ -280,11 +288,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_CANCEL,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowCancelPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        getWorkflowManager().cancelWorkflow(payload.executionId);
+        const validated = validateIpcPayload(WorkflowCancelPayloadSchema, payload, 'WORKFLOW_CANCEL');
+        getWorkflowManager().cancelWorkflow(validated.executionId);
         return { success: true, data: null };
       } catch (error) {
         return {
@@ -303,12 +312,13 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.WORKFLOW_GET_PROMPT_ADDITION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: WorkflowGetPromptAdditionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(WorkflowGetPromptAdditionPayloadSchema, payload, 'WORKFLOW_GET_PROMPT_ADDITION');
         const addition = getWorkflowManager().getSystemPromptAddition(
-          payload.executionId
+          validated.executionId
         );
         return { success: true, data: addition };
       } catch (error) {
@@ -351,17 +361,18 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.REVIEW_GET_AGENT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: ReviewGetAgentPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const agent = getReviewAgentById(payload.agentId);
+        const validated = validateIpcPayload(ReviewGetAgentPayloadSchema, payload, 'REVIEW_GET_AGENT');
+        const agent = getReviewAgentById(validated.agentId);
         if (!agent) {
           return {
             success: false,
             error: {
               code: 'REVIEW_AGENT_NOT_FOUND',
-              message: `Agent not found: ${payload.agentId}`,
+              message: `Agent not found: ${validated.agentId}`,
               timestamp: Date.now()
             }
           };
@@ -385,26 +396,27 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
     IPC_CHANNELS.REVIEW_START_SESSION,
     async (
       _event: IpcMainInvokeEvent,
-      payload: ReviewStartSessionPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const instance = instanceManager.getInstance(payload.instanceId);
+        const validated = validateIpcPayload(ReviewStartSessionPayloadSchema, payload, 'REVIEW_START_SESSION');
+        const instance = instanceManager.getInstance(validated.instanceId);
         if (!instance) {
           return {
             success: false,
             error: {
               code: 'REVIEW_INSTANCE_NOT_FOUND',
-              message: `Instance not found: ${payload.instanceId}`,
+              message: `Instance not found: ${validated.instanceId}`,
               timestamp: Date.now()
             }
           };
         }
 
-        const agents = payload.agentIds
+        const agents = validated.agentIds
           .map((id) => getReviewAgentById(id))
           .filter(Boolean) as ReviewAgentConfig[];
-        if (agents.length !== payload.agentIds.length) {
-          const missing = payload.agentIds.filter((id) => !getReviewAgentById(id));
+        if (agents.length !== validated.agentIds.length) {
+          const missing = validated.agentIds.filter((id) => !getReviewAgentById(id));
           return {
             success: false,
             error: {
@@ -416,12 +428,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
         }
 
         const coordinator = getReviewCoordinator();
-        const sessionId = await coordinator.startReview(payload.files || [], agents, {
+        const sessionId = await coordinator.startReview(validated.files || [], agents, {
           parallel: true,
           confidenceThreshold: 0,
-          instanceId: payload.instanceId,
+          instanceId: validated.instanceId,
           workingDirectory: instance.workingDirectory,
-          diffOnly: Boolean(payload.diffOnly),
+          diffOnly: Boolean(validated.diffOnly),
         });
 
         return { success: true, data: { sessionId } };
@@ -443,16 +455,17 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
     IPC_CHANNELS.REVIEW_GET_SESSION,
     async (
       _event: IpcMainInvokeEvent,
-      payload: ReviewGetSessionPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const session = getReviewCoordinator().getReview(payload.sessionId);
+        const validated = validateIpcPayload(ReviewGetSessionPayloadSchema, payload, 'REVIEW_GET_SESSION');
+        const session = getReviewCoordinator().getReview(validated.sessionId);
         if (!session) {
           return {
             success: false,
             error: {
               code: 'REVIEW_SESSION_NOT_FOUND',
-              message: `Session not found: ${payload.sessionId}`,
+              message: `Session not found: ${validated.sessionId}`,
               timestamp: Date.now()
             }
           };
@@ -481,13 +494,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
     IPC_CHANNELS.REVIEW_GET_ISSUES,
     async (
       _event: IpcMainInvokeEvent,
-      payload: ReviewGetIssuesPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(ReviewGetIssuesPayloadSchema, payload, 'REVIEW_GET_ISSUES');
         const issues = getReviewCoordinator().getIssuesByAgent(
-          payload.sessionId,
-          payload.agentId,
-          payload.severity
+          validated.sessionId,
+          validated.agentId,
+          validated.severity
         );
         return { success: true, data: issues };
       } catch (error) {
@@ -508,20 +522,21 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
     IPC_CHANNELS.REVIEW_ACKNOWLEDGE_ISSUE,
     async (
       _event: IpcMainInvokeEvent,
-      payload: ReviewAcknowledgeIssuePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(ReviewAcknowledgeIssuePayloadSchema, payload, 'REVIEW_ACKNOWLEDGE_ISSUE');
         const updated = getReviewCoordinator().acknowledgeIssue(
-          payload.sessionId,
-          payload.issueId,
-          payload.acknowledged
+          validated.sessionId,
+          validated.issueId,
+          validated.acknowledged
         );
         if (!updated) {
           return {
             success: false,
             error: {
               code: 'REVIEW_ISSUE_NOT_FOUND',
-              message: `Issue not found: ${payload.issueId}`,
+              message: `Issue not found: ${validated.issueId}`,
               timestamp: Date.now()
             }
           };
@@ -548,23 +563,24 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_LIST,
     async (
-      event: IpcMainInvokeEvent,
-      payload?: HooksListPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HooksListPayloadSchema, payload, 'HOOKS_LIST');
         const hookEngine = getHookEngine();
         let rules = hookEngine.getAllRules();
 
         // Filter by event
-        if (payload?.event) {
+        if (validated?.event) {
           rules = rules.filter(
-            (r) => r.event === payload.event || r.event === 'all'
+            (r) => r.event === validated.event || r.event === 'all'
           );
         }
 
         // Filter by source
-        if (payload?.source) {
-          rules = rules.filter((r) => r.source === payload.source);
+        if (validated?.source) {
+          rules = rules.filter((r) => r.source === validated.source);
         }
 
         return { success: true, data: rules };
@@ -585,16 +601,17 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOK_APPROVALS_LIST,
     async (
-      event: IpcMainInvokeEvent,
-      payload?: HookApprovalsListPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HookApprovalsListPayloadSchema, payload, 'HOOK_APPROVALS_LIST');
         const hookManager = getHookManager();
         const hooks = hookManager.getAllHooks();
 
         const approvals = hooks
           .filter((hook) => hook.approvalRequired)
-          .filter((hook) => (payload?.pendingOnly ? !hook.approved : true))
+          .filter((hook) => (validated?.pendingOnly ? !hook.approved : true))
           .map((hook) => {
             const handlerType = hook.handler.type;
             let handlerSummary: string | undefined;
@@ -634,21 +651,22 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOK_APPROVALS_UPDATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HookApprovalsUpdatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HookApprovalsUpdatePayloadSchema, payload, 'HOOK_APPROVALS_UPDATE');
         const hookManager = getHookManager();
         const updated = hookManager.approveHook(
-          payload.hookId,
-          payload.approved
+          validated.hookId,
+          validated.approved
         );
         if (!updated) {
           return {
             success: false,
             error: {
               code: 'HOOK_APPROVAL_NOT_FOUND',
-              message: `Hook not found: ${payload.hookId}`,
+              message: `Hook not found: ${validated.hookId}`,
               timestamp: Date.now()
             }
           };
@@ -671,13 +689,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOK_APPROVALS_CLEAR,
     async (
-      event: IpcMainInvokeEvent,
-      payload?: HookApprovalsClearPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HookApprovalsClearPayloadSchema, payload, 'HOOK_APPROVALS_CLEAR');
         const hookManager = getHookManager();
-        const hookIds = payload?.hookIds
-          ? payload.hookIds
+        const hookIds = validated?.hookIds
+          ? validated.hookIds
           : hookManager
               .getAllHooks()
               .filter((hook) => hook.approvalRequired)
@@ -709,17 +728,18 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_GET,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksGetPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const rule = getHookEngine().getRule(payload.ruleId);
+        const validated = validateIpcPayload(HooksGetPayloadSchema, payload, 'HOOKS_GET');
+        const rule = getHookEngine().getRule(validated.ruleId);
         if (!rule) {
           return {
             success: false,
             error: {
               code: 'HOOK_NOT_FOUND',
-              message: `Hook not found: ${payload.ruleId}`,
+              message: `Hook not found: ${validated.ruleId}`,
               timestamp: Date.now()
             }
           };
@@ -742,15 +762,16 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_CREATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksCreatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HooksCreatePayloadSchema, payload, 'HOOKS_CREATE');
         const rule: HookRule = {
           id: `hook-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          ...payload.rule,
-          event: payload.rule.event as HookEvent | 'all',
-          conditions: payload.rule.conditions.map((c) => ({
+          ...validated.rule,
+          event: validated.rule.event as HookEvent | 'all',
+          conditions: validated.rule.conditions.map((c) => ({
             field: c.field,
             operator: c.operator as
               | 'regex_match'
@@ -784,14 +805,15 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_UPDATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksUpdatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HooksUpdatePayloadSchema, payload, 'HOOKS_UPDATE');
         // Transform the payload updates to match HookRule types
         const updates: Partial<HookRule> = {
-          ...payload.updates,
-          conditions: payload.updates.conditions?.map((c) => ({
+          ...validated.updates,
+          conditions: validated.updates.conditions?.map((c) => ({
             field: c.field,
             operator: c.operator as
               | 'regex_match'
@@ -803,13 +825,13 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
             pattern: c.pattern
           }))
         };
-        const updated = getHookEngine().updateRule(payload.ruleId, updates);
+        const updated = getHookEngine().updateRule(validated.ruleId, updates);
         if (!updated) {
           return {
             success: false,
             error: {
               code: 'HOOK_NOT_FOUND',
-              message: `Hook not found: ${payload.ruleId}`,
+              message: `Hook not found: ${validated.ruleId}`,
               timestamp: Date.now()
             }
           };
@@ -832,11 +854,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_DELETE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksDeletePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const deleted = getHookEngine().removeRule(payload.ruleId);
+        const validated = validateIpcPayload(HooksDeletePayloadSchema, payload, 'HOOKS_DELETE');
+        const deleted = getHookEngine().removeRule(validated.ruleId);
         return { success: true, data: deleted };
       } catch (error) {
         return {
@@ -855,13 +878,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_EVALUATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksEvaluatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HooksEvaluatePayloadSchema, payload, 'HOOKS_EVALUATE');
         const context: HookContext = {
-          ...payload.context,
-          event: payload.context.event as HookEvent
+          ...validated.context,
+          event: validated.context.event as HookEvent
         };
         const result = getHookEngine().evaluate(context);
         return { success: true, data: result };
@@ -882,13 +906,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_IMPORT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: HooksImportPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(HooksImportPayloadSchema, payload, 'HOOKS_IMPORT');
         const result = getHookEngine().importRules(
-          payload.rules as HookRule[],
-          payload.overwrite
+          validated.rules as HookRule[],
+          validated.overwrite
         );
         return { success: true, data: result };
       } catch (error) {
@@ -908,11 +933,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.HOOKS_EXPORT,
     async (
-      event: IpcMainInvokeEvent,
-      payload?: HooksExportPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const rules = getHookEngine().exportRules(payload?.source);
+        const validated = validateIpcPayload(HooksExportPayloadSchema, payload, 'HOOKS_EXPORT');
+        const rules = getHookEngine().exportRules(validated?.source);
         return { success: true, data: rules };
       } catch (error) {
         return {
@@ -935,12 +961,13 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_DISCOVER,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsDiscoverPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SkillsDiscoverPayloadSchema, payload, 'SKILLS_DISCOVER');
         const skills = await getSkillRegistry().discoverSkills(
-          payload.searchPaths
+          validated.searchPaths
         );
         return { success: true, data: skills };
       } catch (error) {
@@ -977,17 +1004,18 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_GET,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsGetPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const skill = getSkillRegistry().getSkill(payload.skillId);
+        const validated = validateIpcPayload(SkillsGetPayloadSchema, payload, 'SKILLS_GET');
+        const skill = getSkillRegistry().getSkill(validated.skillId);
         if (!skill) {
           return {
             success: false,
             error: {
               code: 'SKILL_NOT_FOUND',
-              message: `Skill not found: ${payload.skillId}`,
+              message: `Skill not found: ${validated.skillId}`,
               timestamp: Date.now()
             }
           };
@@ -1010,11 +1038,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_LOAD,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsLoadPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const loaded = await getSkillRegistry().loadSkill(payload.skillId);
+        const validated = validateIpcPayload(SkillsLoadPayloadSchema, payload, 'SKILLS_LOAD');
+        const loaded = await getSkillRegistry().loadSkill(validated.skillId);
         return { success: true, data: serializeLoadedSkill(loaded) };
       } catch (error) {
         return {
@@ -1033,11 +1062,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_UNLOAD,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsUnloadPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        getSkillRegistry().unloadSkill(payload.skillId);
+        const validated = validateIpcPayload(SkillsUnloadPayloadSchema, payload, 'SKILLS_UNLOAD');
+        getSkillRegistry().unloadSkill(validated.skillId);
         return { success: true, data: null };
       } catch (error) {
         return {
@@ -1056,13 +1086,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_LOAD_REFERENCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsLoadReferencePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SkillsLoadReferencePayloadSchema, payload, 'SKILLS_LOAD_REFERENCE');
         const content = await getSkillRegistry().loadReference(
-          payload.skillId,
-          payload.referencePath
+          validated.skillId,
+          validated.referencePath
         );
         return { success: true, data: content };
       } catch (error) {
@@ -1082,13 +1113,14 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_LOAD_EXAMPLE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsLoadExamplePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(SkillsLoadExamplePayloadSchema, payload, 'SKILLS_LOAD_EXAMPLE');
         const content = await getSkillRegistry().loadExample(
-          payload.skillId,
-          payload.examplePath
+          validated.skillId,
+          validated.examplePath
         );
         return { success: true, data: content };
       } catch (error) {
@@ -1108,11 +1140,12 @@ export function registerOrchestrationHandlers(instanceManager: InstanceManager):
   ipcMain.handle(
     IPC_CHANNELS.SKILLS_MATCH,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SkillsMatchPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const matches = getSkillRegistry().matchTrigger(payload.text);
+        const validated = validateIpcPayload(SkillsMatchPayloadSchema, payload, 'SKILLS_MATCH');
+        const matches = getSkillRegistry().matchTrigger(validated.text);
         return { success: true, data: matches };
       } catch (error) {
         return {

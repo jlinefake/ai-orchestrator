@@ -5,6 +5,24 @@
 
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  RlmAddSectionPayloadSchema,
+  RlmRemoveSectionPayloadSchema,
+  RlmStartSessionPayloadSchema,
+  RlmGetPatternsPayloadSchema,
+  RlmGetStrategySuggestionsPayloadSchema,
+  RlmTokenSavingsPayloadSchema,
+  RlmQueryStatsPayloadSchema,
+  LearningGetInsightsPayloadSchema,
+  LearningGetRecommendationPayloadSchema,
+  LearningEnhancePromptPayloadSchema,
+  LearningRateOutcomePayloadSchema,
+  AbUpdateExperimentPayloadSchema,
+  AbGetVariantPayloadSchema,
+  AbRecordOutcomePayloadSchema,
+  AbListExperimentsPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 import { RLMContextManager } from '../rlm/context-manager';
 import { OutcomeTracker } from '../learning/outcome-tracker';
 import { StrategyLearner } from '../learning/strategy-learner';
@@ -60,23 +78,19 @@ function registerRLMHandlers(): void {
     IPC_CHANNELS.RLM_ADD_SECTION,
     (
       _event,
-      payload: {
-        storeId: string;
-        type: ContextSection['type'];
-        name: string;
-        content: string;
-        metadata?: Partial<ContextSection>;
-      }
+      payload: unknown
     ): ContextSection => {
-      return rlm.addSection(payload.storeId, payload.type, payload.name, payload.content, payload.metadata);
+      const validated = validateIpcPayload(RlmAddSectionPayloadSchema, payload, 'RLM_ADD_SECTION');
+      return rlm.addSection(validated.storeId, validated.type as ContextSection['type'], validated.name, validated.content, validated.metadata as Partial<ContextSection> | undefined);
     }
   );
 
   // Remove section
   ipcMain.handle(
     IPC_CHANNELS.RLM_REMOVE_SECTION,
-    (_event, payload: { storeId: string; sectionId: string }): boolean => {
-      return rlm.removeSection(payload.storeId, payload.sectionId);
+    (_event, payload: unknown): boolean => {
+      const validated = validateIpcPayload(RlmRemoveSectionPayloadSchema, payload, 'RLM_REMOVE_SECTION');
+      return rlm.removeSection(validated.storeId, validated.sectionId);
     }
   );
 
@@ -108,8 +122,9 @@ function registerRLMHandlers(): void {
   // Start session
   ipcMain.handle(
     IPC_CHANNELS.RLM_START_SESSION,
-    async (_event, payload: { storeId: string; instanceId: string }): Promise<RLMSession> => {
-      return rlm.startSession(payload.storeId, payload.instanceId);
+    async (_event, payload: unknown): Promise<RLMSession> => {
+      const validated = validateIpcPayload(RlmStartSessionPayloadSchema, payload, 'RLM_START_SESSION');
+      return rlm.startSession(validated.storeId, validated.instanceId);
     }
   );
 
@@ -183,8 +198,9 @@ function registerRLMHandlers(): void {
   // Get patterns (RLM alias)
   ipcMain.handle(
     IPC_CHANNELS.RLM_GET_PATTERNS,
-    (_event, payload: { minSuccessRate?: number }): TaskPattern[] => {
-      const minSuccessRate = payload?.minSuccessRate ?? 0;
+    (_event, payload: unknown): TaskPattern[] => {
+      const validated = validateIpcPayload(RlmGetPatternsPayloadSchema, payload, 'RLM_GET_PATTERNS');
+      const minSuccessRate = validated?.minSuccessRate ?? 0;
       return tracker.getTopPatterns(50).filter(p => p.effectiveness >= minSuccessRate);
     }
   );
@@ -192,17 +208,19 @@ function registerRLMHandlers(): void {
   // Get strategy suggestions (RLM alias)
   ipcMain.handle(
     IPC_CHANNELS.RLM_GET_STRATEGY_SUGGESTIONS,
-    (_event, payload: { context: string; maxSuggestions?: number }): StrategyRecommendation => {
-      return strategist.getRecommendation('general', payload.context, payload.context);
+    (_event, payload: unknown): StrategyRecommendation => {
+      const validated = validateIpcPayload(RlmGetStrategySuggestionsPayloadSchema, payload, 'RLM_GET_STRATEGY_SUGGESTIONS');
+      return strategist.getRecommendation('general', validated.context, validated.context);
     }
   );
 
   // ============ RLM Analytics Handlers ============
 
   // Get token savings history
-  ipcMain.handle('rlm:get-token-savings-history', (_event, payload: { range: string }) => {
+  ipcMain.handle('rlm:get-token-savings-history', (_event, payload: unknown) => {
     try {
-      const days = payload.range === '7d' ? 7 : payload.range === '90d' ? 90 : 30;
+      const validated = validateIpcPayload(RlmTokenSavingsPayloadSchema, payload, 'rlm:get-token-savings-history');
+      const days = validated.range === '7d' ? 7 : validated.range === '90d' ? 90 : 30;
       const history = rlm.getTokenSavingsHistory(days);
       return { success: true, data: history };
     } catch (error) {
@@ -211,9 +229,10 @@ function registerRLMHandlers(): void {
   });
 
   // Get query statistics
-  ipcMain.handle('rlm:get-query-stats', (_event, payload: { range: string }) => {
+  ipcMain.handle('rlm:get-query-stats', (_event, payload: unknown) => {
     try {
-      const days = payload.range === '7d' ? 7 : payload.range === '90d' ? 90 : 30;
+      const validated = validateIpcPayload(RlmQueryStatsPayloadSchema, payload, 'rlm:get-query-stats');
+      const days = validated.range === '7d' ? 7 : validated.range === '90d' ? 90 : 30;
       const stats = rlm.getQueryStats(days);
       return { success: true, data: stats };
     } catch (error) {
@@ -326,8 +345,9 @@ function registerSelfImprovementHandlers(): void {
   // Get insights
   ipcMain.handle(
     IPC_CHANNELS.LEARNING_GET_INSIGHTS,
-    (_event, payload?: { taskType?: string; minConfidence?: number }): LearningInsight[] => {
-      return tracker.getInsights(payload?.taskType, payload?.minConfidence);
+    (_event, payload: unknown): LearningInsight[] => {
+      const validated = validateIpcPayload(LearningGetInsightsPayloadSchema, payload, 'LEARNING_GET_INSIGHTS');
+      return tracker.getInsights(validated?.taskType, validated?.minConfidence);
     }
   );
 
@@ -336,17 +356,19 @@ function registerSelfImprovementHandlers(): void {
     IPC_CHANNELS.LEARNING_GET_RECOMMENDATION,
     (
       _event,
-      payload: { taskType: string; taskDescription?: string; context?: string }
+      payload: unknown
     ): StrategyRecommendation => {
-      return strategist.getRecommendation(payload.taskType, payload.taskDescription, payload.context);
+      const validated = validateIpcPayload(LearningGetRecommendationPayloadSchema, payload, 'LEARNING_GET_RECOMMENDATION');
+      return strategist.getRecommendation(validated.taskType, validated.taskDescription, validated.context);
     }
   );
 
   // Enhance prompt
   ipcMain.handle(
     IPC_CHANNELS.LEARNING_ENHANCE_PROMPT,
-    (_event, payload: { prompt: string; taskType?: string; context?: string }): PromptEnhancement => {
-      return enhancer.enhance(payload.prompt, payload.taskType, payload.context);
+    (_event, payload: unknown): PromptEnhancement => {
+      const validated = validateIpcPayload(LearningEnhancePromptPayloadSchema, payload, 'LEARNING_ENHANCE_PROMPT');
+      return enhancer.enhance(validated.prompt, validated.taskType, validated.context);
     }
   );
 
@@ -366,8 +388,9 @@ function registerSelfImprovementHandlers(): void {
   // Rate outcome
   ipcMain.handle(
     IPC_CHANNELS.LEARNING_RATE_OUTCOME,
-    (_event, payload: { outcomeId: string; satisfaction: number }): boolean => {
-      return tracker.rateOutcome(payload.outcomeId, payload.satisfaction);
+    (_event, payload: unknown): boolean => {
+      const validated = validateIpcPayload(LearningRateOutcomePayloadSchema, payload, 'LEARNING_RATE_OUTCOME');
+      return tracker.rateOutcome(validated.outcomeId, validated.satisfaction);
     }
   );
 
@@ -498,13 +521,11 @@ function registerABTestingHandlers(): void {
     IPC_CHANNELS.AB_UPDATE_EXPERIMENT,
     (
       _event,
-      payload: {
-        experimentId: string;
-        updates: Partial<Pick<Experiment, 'name' | 'description' | 'minSamples' | 'confidenceThreshold'>>;
-      }
+      payload: unknown
     ) => {
       try {
-        const experiment = abEngine.updateExperiment(payload.experimentId, payload.updates);
+        const validated = validateIpcPayload(AbUpdateExperimentPayloadSchema, payload, 'AB_UPDATE_EXPERIMENT');
+        const experiment = abEngine.updateExperiment(validated.experimentId, validated.updates);
         if (!experiment) {
           return { success: false, error: 'Experiment not found or cannot be updated' };
         }
@@ -574,9 +595,10 @@ function registerABTestingHandlers(): void {
   // List experiments
   ipcMain.handle(
     IPC_CHANNELS.AB_LIST_EXPERIMENTS,
-    (_event, filter?: { status?: Experiment['status']; taskType?: string }) => {
+    (_event, filter: unknown) => {
       try {
-        const experiments = abEngine.listExperiments(filter);
+        const validated = validateIpcPayload(AbListExperimentsPayloadSchema, filter, 'AB_LIST_EXPERIMENTS');
+        const experiments = abEngine.listExperiments(validated as { status?: Experiment['status']; taskType?: string } | undefined);
         return { success: true, data: experiments };
       } catch (error) {
         return { success: false, error: (error as Error).message };
@@ -587,9 +609,10 @@ function registerABTestingHandlers(): void {
   // Get variant for task
   ipcMain.handle(
     IPC_CHANNELS.AB_GET_VARIANT,
-    (_event, payload: { taskType: string; sessionId?: string }) => {
+    (_event, payload: unknown) => {
       try {
-        const result = abEngine.getVariant(payload.taskType, payload.sessionId);
+        const validated = validateIpcPayload(AbGetVariantPayloadSchema, payload, 'AB_GET_VARIANT');
+        const result = abEngine.getVariant(validated.taskType, validated.sessionId);
         if (!result) {
           return { success: true, data: null }; // No experiment running for this task type
         }
@@ -605,14 +628,11 @@ function registerABTestingHandlers(): void {
     IPC_CHANNELS.AB_RECORD_OUTCOME,
     (
       _event,
-      payload: {
-        experimentId: string;
-        variantId: string;
-        outcome: { success: boolean; duration?: number; tokens?: number; metadata?: Record<string, unknown> };
-      }
+      payload: unknown
     ) => {
       try {
-        abEngine.recordOutcome(payload.experimentId, payload.variantId, payload.outcome);
+        const validated = validateIpcPayload(AbRecordOutcomePayloadSchema, payload, 'AB_RECORD_OUTCOME');
+        abEngine.recordOutcome(validated.experimentId, validated.variantId, validated.outcome);
         return { success: true };
       } catch (error) {
         return { success: false, error: (error as Error).message };
