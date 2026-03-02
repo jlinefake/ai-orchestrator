@@ -101,15 +101,30 @@ class AIOrchestratorApp {
       console.log('Forwarding user action request to renderer:', request.id);
       this.windowManager.sendToRenderer('user-action:request', request);
 
-      if (request.requestType === 'switch_mode') {
-        const modeLabel = request.targetMode
-          ? `${request.targetMode.charAt(0).toUpperCase()}${request.targetMode.slice(1)}`
-          : 'requested';
-        this.windowManager.notifyUserActionRequest(
-          `Approval Needed: Switch to ${modeLabel} Mode`,
-          request.message || 'A mode switch is waiting for your approval.'
-        );
+      // Notify the user for all request types so questions don't get lost
+      let title: string;
+      switch (request.requestType) {
+        case 'switch_mode': {
+          const modeLabel = request.targetMode
+            ? `${request.targetMode.charAt(0).toUpperCase()}${request.targetMode.slice(1)}`
+            : 'requested';
+          title = `Approval Needed: Switch to ${modeLabel} Mode`;
+          break;
+        }
+        case 'ask_questions':
+          title = 'Questions from AI Instance';
+          break;
+        case 'approve_action':
+          title = 'Approval Needed';
+          break;
+        default:
+          title = 'Input Needed';
+          break;
       }
+      this.windowManager.notifyUserActionRequest(
+        title,
+        request.message || 'An AI instance is waiting for your response.'
+      );
     });
   }
 

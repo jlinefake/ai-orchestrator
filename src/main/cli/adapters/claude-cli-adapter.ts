@@ -48,6 +48,7 @@ export interface ClaudeCliSpawnOptions {
   allowedTools?: string[];
   disallowedTools?: string[];
   systemPrompt?: string;
+  mcpConfig?: string[];  // MCP server config file paths or inline JSON strings
 }
 
 /**
@@ -416,27 +417,10 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       logger.debug('NON-YOLO mode: using --permission-mode acceptEdits');
       args.push('--permission-mode', 'acceptEdits');
 
-      // Add commonly-used safe tools to allowedTools to reduce permission prompts
-      // User-specified allowedTools will be added below
-      const defaultAllowedTools = [
-        'Read',
-        'Glob',
-        'Grep',
-        'Task',
-        'TaskOutput',
-        'TodoWrite',
-        'WebSearch',
-        'WebFetch'
-      ];
-
-      // Merge default allowed tools with user-specified ones
-      const allAllowedTools = new Set([
-        ...defaultAllowedTools,
-        ...(this.spawnOptions.allowedTools || [])
-      ]);
-
-      if (allAllowedTools.size > 0) {
-        args.push('--allowedTools', Array.from(allAllowedTools).join(','));
+      // Only pass --allowedTools if explicitly configured (e.g., by agent profiles).
+      // By default, allow all tools — restrictions are handled via --disallowedTools.
+      if (this.spawnOptions.allowedTools && this.spawnOptions.allowedTools.length > 0) {
+        args.push('--allowedTools', this.spawnOptions.allowedTools.join(','));
       }
     }
 
@@ -481,6 +465,11 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     // and Claude CLI doesn't support changing it mid-session
     if (this.spawnOptions.systemPrompt && !this.spawnOptions.resume) {
       args.push('--system-prompt', this.spawnOptions.systemPrompt);
+    }
+
+    // MCP server configurations (file paths or inline JSON strings)
+    if (this.spawnOptions.mcpConfig && this.spawnOptions.mcpConfig.length > 0) {
+      args.push('--mcp-config', ...this.spawnOptions.mcpConfig);
     }
 
     logger.debug('buildArgs complete', {

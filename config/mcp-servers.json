@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lsp": {
+      "command": "node",
+      "args": ["/Users/suas/work/mcp/lsp-mcp-server/dist/index.js"]
+    }
+  }
+}

@@ -1,4 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+
+// Mock the logger before any imports that transitively pull in Electron's app.getPath
+vi.mock('../logging/logger', () => ({
+  getLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 import { OrchestrationHandler } from './orchestration-handler';
 
 describe('OrchestrationHandler.processOutput (streaming markers)', () => {

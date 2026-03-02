@@ -293,9 +293,21 @@ export class InstanceCommunicationManager extends EventEmitter {
           instance.sessionId = cliSessionId;
         }
 
+        // Reset circuit breaker counter on tool activity — tool-use sequences
+        // naturally produce empty assistant text between calls and shouldn't trip it
+        if (message.type === 'tool_use' || message.type === 'tool_result') {
+          const state = this.getCircuitBreaker(instanceId);
+          if (state.consecutiveEmptyResponses > 0) {
+            state.consecutiveEmptyResponses = 0;
+          }
+        }
+
         // Check circuit breaker for assistant messages
         if (message.type === 'assistant') {
-          const hasContent = !!(message.content && message.content.trim());
+          const hasContent = !!(
+            (message.content && message.content.trim()) ||
+            (message.thinking && message.thinking.length > 0)
+          );
           // Successful response means overflow retry worked — allow future retries
           if (hasContent) {
             this.contextOverflowRetried.delete(instanceId);

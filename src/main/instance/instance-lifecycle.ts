@@ -70,12 +70,28 @@ export interface LifecycleDependencies {
   markFirstMessageReceived: (instanceId: string) => void;
 }
 
+// MCP config file for spawned Claude CLI instances (LSP server, etc.)
+const MCP_CONFIG_PATH = path.resolve(__dirname, '../../../config/mcp-servers.json');
+
 export class InstanceLifecycleManager extends EventEmitter {
   private settings = getSettingsManager();
   private memoryMonitor = getMemoryMonitor();
   private outputStorage = getOutputStorageManager();
   private idleCheckTimer: NodeJS.Timeout | null = null;
   private deps: LifecycleDependencies;
+
+  /** Returns MCP config paths to pass to spawned Claude CLI instances. */
+  private getMcpConfig(): string[] {
+    try {
+      // Only include if the config file exists
+      if (require('fs').existsSync(MCP_CONFIG_PATH)) {
+        return [MCP_CONFIG_PATH];
+      }
+    } catch {
+      // Silently skip if file doesn't exist
+    }
+    return [];
+  }
 
   constructor(deps: LifecycleDependencies) {
     super();
@@ -385,16 +401,9 @@ export class InstanceLifecycleManager extends EventEmitter {
       resolved: resolvedModel,
     });
 
-    // Default allowed tools for non-YOLO mode
-    const defaultAllowedTools = instance.yoloMode ? undefined : [
-      'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-      'Task', 'TaskOutput', 'TodoWrite', 'WebFetch', 'WebSearch',
-      'NotebookEdit', 'AskUserQuestion', 'Skill', 'EnterPlanMode', 'ExitPlanMode'
-    ];
-
-    if (!instance.yoloMode && defaultAllowedTools) {
-      logger.debug('Non-YOLO mode: Pre-allowing tools', { tools: defaultAllowedTools });
-    }
+    // Allow all tools by default — don't pass --allowedTools unless explicitly configured.
+    // Tool restrictions are handled via --disallowedTools from agent permission profiles.
+    const defaultAllowedTools = undefined;
 
     // Create CLI adapter - use resolved model
     const modelOverride = resolvedModel;
@@ -406,7 +415,8 @@ export class InstanceLifecycleManager extends EventEmitter {
       yoloMode: instance.yoloMode,
       allowedTools: defaultAllowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      resume: config.resume
+      resume: config.resume,
+      mcpConfig: this.getMcpConfig(),
     };
 
     const adapter = createCliAdapter(resolvedCliType, spawnOptions);
@@ -636,7 +646,8 @@ export class InstanceLifecycleManager extends EventEmitter {
       sessionId: newSessionId,
       workingDirectory: instance.workingDirectory,
       yoloMode: instance.yoloMode,
-      model: instance.currentModel
+      model: instance.currentModel,
+      mcpConfig: this.getMcpConfig(),
     };
 
     const adapter = createCliAdapter(cliType, spawnOptions);
@@ -736,7 +747,8 @@ export class InstanceLifecycleManager extends EventEmitter {
       model: instance.currentModel,
       allowedTools: defaultAllowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      resume: true
+      resume: true,
+      mcpConfig: this.getMcpConfig(),
     };
 
     const adapter = createCliAdapter(cliType, spawnOptions);
@@ -863,7 +875,8 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       // Only resume if there's actually a conversation to continue
-      resume: hasConversation
+      resume: hasConversation,
+      mcpConfig: this.getMcpConfig(),
     };
     logger.debug('Spawn options configured', {
       instanceId,
@@ -994,7 +1007,8 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       yoloMode: instance.yoloMode,
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      resume: hasConversation
+      resume: hasConversation,
+      mcpConfig: this.getMcpConfig(),
     };
 
     const adapter = createCliAdapter(cliType, spawnOptions);
@@ -1099,14 +1113,16 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
         yoloMode: instance.yoloMode,
         model: instance.currentModel,
         resume: true,
-        forkSession: true
+        forkSession: true,
+        mcpConfig: this.getMcpConfig(),
       });
     } else {
       const spawnOptions: UnifiedSpawnOptions = {
         sessionId: newSessionId,
         workingDirectory: instance.workingDirectory,
         yoloMode: instance.yoloMode,
-        model: instance.currentModel
+        model: instance.currentModel,
+        mcpConfig: this.getMcpConfig(),
       };
       adapter = createCliAdapter(cliType, spawnOptions);
     }

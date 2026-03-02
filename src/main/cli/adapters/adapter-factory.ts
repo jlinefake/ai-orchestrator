@@ -31,6 +31,7 @@ export interface UnifiedSpawnOptions {
   allowedTools?: string[];
   disallowedTools?: string[];
   resume?: boolean;  // Resume an existing session (requires sessionId)
+  mcpConfig?: string[];  // MCP server config file paths or inline JSON strings
 }
 
 /**
@@ -128,6 +129,7 @@ export function createClaudeAdapter(options: UnifiedSpawnOptions): ClaudeCliAdap
     allowedTools: options.allowedTools,
     disallowedTools: options.disallowedTools,
     resume: options.resume,
+    mcpConfig: options.mcpConfig,
   };
   return new ClaudeCliAdapter(claudeOptions);
 }

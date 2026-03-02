@@ -20,13 +20,13 @@ import {
   ORCHESTRATION_MARKER_START,
   ORCHESTRATION_MARKER_END,
   formatCommandResponse,
-  generateOrchestrationPrompt
+  generateOrchestrationPrompt,
+  type OrchestratorAction
 } from './orchestration-protocol';
 import { getConsensusCoordinator } from './consensus-coordinator';
 import type { ConsensusProviderSpec } from '../../shared/types/consensus.types';
 import { getToolRegistry } from '../tools/tool-registry';
 import { getTaskManager } from './task-manager';
-import { getChildResultStorage } from './child-result-storage';
 import { getPermissionManager, type PermissionRequest } from '../security/permission-manager';
 import type {
   TaskExecution,
@@ -62,11 +62,11 @@ export interface UserActionRequest {
   title: string;
   message: string;
   targetMode?: 'build' | 'plan' | 'review';
-  options?: Array<{
+  options?: {
     id: string;
     label: string;
     description?: string;
-  }>;
+  }[];
   /** For ask_questions: list of questions to present with text inputs */
   questions?: string[];
   context?: Record<string, unknown>;
@@ -142,8 +142,8 @@ export interface CompletedChildSummary {
 }
 
 export class OrchestrationHandler extends EventEmitter {
-  private contexts: Map<string, OrchestrationContext> = new Map();
-  private pendingUserActions: Map<string, UserActionRequest> = new Map();
+  private contexts = new Map<string, OrchestrationContext>();
+  private pendingUserActions = new Map<string, UserActionRequest>();
   private userActionWaiters = new Map<string, (approved: boolean, selectedOption?: string) => void>();
   /** Tracks completed children per parent: parentId → Set<childId> */
   private completedChildrenIds = new Map<string, Set<string>>();
@@ -383,7 +383,7 @@ export class OrchestrationHandler extends EventEmitter {
     instanceId: string;
     title: string;
     message: string;
-    options: Array<{ id: string; label: string; description?: string }>;
+    options: { id: string; label: string; description?: string }[];
     context?: Record<string, unknown>;
     timeoutMs?: number;
   }): Promise<{ selectedOption?: string }> {
@@ -765,15 +765,9 @@ export class OrchestrationHandler extends EventEmitter {
     // Emit event for UI to display the request
     this.emit('user-action-request', request);
 
-    // Send acknowledgment back to Claude that the request was sent
-    this.injectResponse(instanceId, 'request_user_action', true, {
-      requestId,
-      requestType: command.requestType,
-      title: command.title,
-      message: command.message,
-      questions: command.questions,
-      status: 'pending',
-    });
+    // Do NOT inject a "pending" acknowledgment here. Leaving the CLI waiting for
+    // input keeps the LLM blocked until the user actually responds. The real
+    // response is injected by respondToUserAction() once the user answers.
 
     console.log(`Orchestrator: User action request ${requestId} created for instance ${instanceId}`);
   }
@@ -806,7 +800,7 @@ export class OrchestrationHandler extends EventEmitter {
     // Remove from pending
     this.pendingUserActions.delete(requestId);
 
-    const suppressInject = Boolean(request.context && (request.context as any)['suppressInjectResponse']);
+    const suppressInject = Boolean(request.context && (request.context as Record<string, unknown>)['suppressInjectResponse']);
     if (!suppressInject) {
       // Send response back to the instance
       this.injectResponse(request.instanceId, 'user_action_response', true, {
@@ -846,7 +840,7 @@ export class OrchestrationHandler extends EventEmitter {
     success: boolean,
     data: unknown
   ): void {
-    const response = formatCommandResponse(action as any, success, data);
+    const response = formatCommandResponse(action as OrchestratorAction, success, data);
     this.emit('inject-response', instanceId, response);
   }
 

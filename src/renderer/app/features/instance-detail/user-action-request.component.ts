@@ -428,13 +428,18 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
 
   constructor() {
     // Reload pending requests when instanceId changes.
-    // Filter (don't clear) to avoid losing events that arrive during async reload.
+    // Only filter input_required (permission prompts) by instance — orchestrator
+    // user-action requests (ask_questions, switch_mode, etc.) are shown globally
+    // so questions from child instances are visible regardless of which instance
+    // the user is viewing.
     effect(() => {
       const id = this.instanceId();
       if (id) {
-        // Keep only requests matching the new instanceId; reload will merge server-side state
+        // Keep orchestrator requests (global) + instance-scoped input_required
         this.pendingRequests.update((requests) =>
-          requests.filter((r) => r.instanceId === id)
+          requests.filter(
+            (r) => r.requestType !== 'input_required' || r.instanceId === id
+          )
         );
         this.loadPendingRequests();
       } else {
@@ -461,19 +466,17 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
     // Initial load of pending requests (for cases where instanceId is already set)
     this.loadPendingRequests();
 
-    // Subscribe to user action requests (orchestrator commands)
+    // Subscribe to user action requests (orchestrator commands).
+    // Show ALL orchestrator requests globally so questions from child instances
+    // are visible regardless of which instance the user is viewing.
     this.unsubscribeUserAction = this.ipc.onUserActionRequest((request) => {
       const req = request as UserActionRequest;
-      const currentInstanceId = this.instanceId();
 
-      // Only show requests for this instance (or all if no instanceId specified)
-      if (!currentInstanceId || req.instanceId === currentInstanceId) {
-        // Deduplicate: skip if we already have this request ID
-        this.pendingRequests.update((requests) => {
-          if (requests.some((r) => r.id === req.id)) return requests;
-          return [...requests, req];
-        });
-      }
+      // Deduplicate: skip if we already have this request ID
+      this.pendingRequests.update((requests) => {
+        if (requests.some((r) => r.id === req.id)) return requests;
+        return [...requests, req];
+      });
     });
 
     // Subscribe to input required events (CLI permission prompts)
@@ -537,18 +540,24 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
     const currentInstanceId = this.instanceId();
 
     try {
-      const response = currentInstanceId
-        ? await this.ipc.listUserActionRequestsForInstance(currentInstanceId)
-        : await this.ipc.listUserActionRequests();
+      // Load ALL pending orchestrator requests (shown globally) so child
+      // instance questions are visible from any instance view.
+      const response = await this.ipc.listUserActionRequests();
 
       if (response.success && 'data' in response && response.data) {
         const serverRequests = response.data as UserActionRequest[];
         // Merge: use server list as base, but keep any locally-tracked requests
-        // that the server doesn't know about yet (e.g., input_required from IPC events)
+        // that the server doesn't know about yet (e.g., input_required from IPC events).
+        // Filter input_required to the current instance only.
         this.pendingRequests.update((existing) => {
           const serverIds = new Set(serverRequests.map((r) => r.id));
-          const localOnly = existing.filter((r) => !serverIds.has(r.id));
-          return [...serverRequests, ...localOnly];
+          const localOnly = existing.filter(
+            (r) => !serverIds.has(r.id) && (r.requestType !== 'input_required' || r.instanceId === currentInstanceId)
+          );
+          const filteredServer = serverRequests.filter(
+            (r) => r.requestType !== 'input_required' || r.instanceId === currentInstanceId
+          );
+          return [...filteredServer, ...localOnly];
         });
       }
     } catch (error) {
