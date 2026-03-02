@@ -55,7 +55,7 @@ export interface InstanceRegistration {
 }
 
 export class SupervisorTree extends EventEmitter {
-  private static instance: SupervisorTree;
+  private static instance: SupervisorTree | null = null;
   private rootSupervisor: SupervisorNodeManager | null = null;
   private config: SupervisorTreeConfig;
   private instances: Map<string, InstanceRegistration> = new Map();
@@ -77,7 +77,7 @@ export class SupervisorTree extends EventEmitter {
   static _resetForTesting(): void {
     if (this.instance) {
       this.instance.destroy();
-      (this.instance as any) = undefined;
+      this.instance = null;
     }
   }
 

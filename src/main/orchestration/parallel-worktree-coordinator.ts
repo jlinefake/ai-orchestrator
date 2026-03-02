@@ -40,7 +40,7 @@ export interface CoordinatorConfig {
 }
 
 export class ParallelWorktreeCoordinator extends EventEmitter {
-  private static instance: ParallelWorktreeCoordinator;
+  private static instance: ParallelWorktreeCoordinator | null = null;
   private worktreeManager: WorktreeManager;
   private executions: Map<string, ParallelExecution> = new Map();
   private config: CoordinatorConfig;
@@ -57,6 +57,10 @@ export class ParallelWorktreeCoordinator extends EventEmitter {
       this.instance = new ParallelWorktreeCoordinator();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

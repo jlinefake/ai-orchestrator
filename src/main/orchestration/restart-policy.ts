@@ -44,7 +44,7 @@ export interface RestartPolicyConfig {
 }
 
 export class RestartPolicy extends EventEmitter {
-  private static instance: RestartPolicy;
+  private static instance: RestartPolicy | null = null;
   private workers: Map<string, WorkerState> = new Map();
   private config: RestartPolicyConfig;
 
@@ -62,6 +62,10 @@ export class RestartPolicy extends EventEmitter {
       this.instance = new RestartPolicy();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

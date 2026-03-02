@@ -171,6 +171,10 @@ export class CheckpointManager extends EventEmitter {
     return CheckpointManager.instance;
   }
 
+  static _resetForTesting(): void {
+    CheckpointManager.instance = null;
+  }
+
   /**
    * Configure the checkpoint manager
    */
@@ -717,6 +721,10 @@ export class CheckpointManager extends EventEmitter {
     this.removeAllListeners();
     CheckpointManager.instance = null;
   }
+}
+
+export function getCheckpointManager(): CheckpointManager {
+  return CheckpointManager.getInstance();
 }
 
 export default CheckpointManager;

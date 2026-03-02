@@ -43,7 +43,7 @@ export interface EpisodicStats {
 }
 
 export class EpisodicStore extends EventEmitter {
-  private static instance: EpisodicStore;
+  private static instance: EpisodicStore | null = null;
   private config: EpisodicStoreConfig;
   private sessions: SessionMemory[] = [];
   private patterns: LearnedPattern[] = [];
@@ -61,6 +61,10 @@ export class EpisodicStore extends EventEmitter {
       this.instance = new EpisodicStore();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

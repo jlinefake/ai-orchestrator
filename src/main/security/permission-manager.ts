@@ -330,6 +330,10 @@ export class PermissionManager extends EventEmitter {
     return PermissionManager.instance;
   }
 
+  static _resetForTesting(): void {
+    PermissionManager.instance = null;
+  }
+
   /**
    * Configure the permission manager
    */

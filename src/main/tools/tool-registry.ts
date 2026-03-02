@@ -65,6 +65,12 @@ export class ToolRegistry {
     return ToolRegistry.instance;
   }
 
+  static _resetForTesting(): void {
+    ToolRegistry.instance = null;
+  }
+
+  private constructor() {}
+
   private getHomeDir(): string | null {
     try {
       return app.getPath('home');
@@ -346,4 +352,9 @@ let toolRegistry: ToolRegistry | null = null;
 export function getToolRegistry(): ToolRegistry {
   if (!toolRegistry) toolRegistry = ToolRegistry.getInstance();
   return toolRegistry;
+}
+
+export function _resetToolRegistryForTesting(): void {
+  toolRegistry = null;
+  ToolRegistry._resetForTesting();
 }

@@ -70,7 +70,7 @@ export interface StrategyRecommendation {
 }
 
 export class ProceduralStore extends EventEmitter {
-  private static instance: ProceduralStore;
+  private static instance: ProceduralStore | null = null;
   private config: ProceduralStoreConfig;
   private workflows: WorkflowMemory[] = [];
   private strategies: StrategyMemory[] = [];
@@ -102,6 +102,10 @@ export class ProceduralStore extends EventEmitter {
    */
   static resetInstance(): void {
     this.instance = undefined as unknown as ProceduralStore;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

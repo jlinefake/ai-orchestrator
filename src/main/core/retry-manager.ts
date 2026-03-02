@@ -75,6 +75,10 @@ export class RetryManager extends EventEmitter {
     return RetryManager.instance;
   }
 
+  static _resetForTesting(): void {
+    RetryManager.instance = null;
+  }
+
   /**
    * Configure default retry settings
    */
@@ -460,6 +464,10 @@ export function withRetry(config?: Partial<RetryConfig>) {
 
     return descriptor;
   };
+}
+
+export function getRetryManager(): RetryManager {
+  return RetryManager.getInstance();
 }
 
 export default RetryManager;

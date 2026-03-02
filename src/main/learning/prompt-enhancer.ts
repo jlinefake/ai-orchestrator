@@ -47,7 +47,7 @@ interface EnhancementResult {
 }
 
 export class PromptEnhancer extends EventEmitter {
-  private static instance: PromptEnhancer;
+  private static instance: PromptEnhancer | null = null;
   private outcomeTracker: OutcomeTracker;
   private strategyLearner: StrategyLearner;
   private rules: EnhancementRule[] = [];
@@ -58,6 +58,10 @@ export class PromptEnhancer extends EventEmitter {
       this.instance = new PromptEnhancer();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -453,4 +457,8 @@ export class PromptEnhancer extends EventEmitter {
       suggestions,
     };
   }
+}
+
+export function getPromptEnhancer(): PromptEnhancer {
+  return PromptEnhancer.getInstance();
 }

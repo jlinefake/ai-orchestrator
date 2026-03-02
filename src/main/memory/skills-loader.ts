@@ -51,7 +51,7 @@ const DEFAULT_CONFIG: SkillsLoaderConfig = {
 // ============ Skills Loader Class ============
 
 export class SkillsLoader extends EventEmitter {
-  private static instance: SkillsLoader;
+  private static instance: SkillsLoader | null = null;
   private config: SkillsLoaderConfig;
   private embeddingService: EmbeddingService;
   private skillRegistry: SkillRegistry;
@@ -423,6 +423,10 @@ export class SkillsLoader extends EventEmitter {
    */
   static resetInstance(): void {
     SkillsLoader.instance = undefined as unknown as SkillsLoader;
+  }
+
+  static _resetForTesting(): void {
+    SkillsLoader.instance = null;
   }
 }
 

@@ -157,3 +157,7 @@ export function getMemoryMonitor(): MemoryMonitor {
   }
   return memoryMonitor;
 }
+
+export function _resetMemoryMonitorForTesting(): void {
+  memoryMonitor = null;
+}

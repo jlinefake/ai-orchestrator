@@ -106,7 +106,7 @@ export interface VotingStats {
 // ============ Voting System Class ============
 
 export class VotingSystem extends EventEmitter {
-  private static instance: VotingSystem;
+  private static instance: VotingSystem | null = null;
   private config: VotingSystemConfig;
 
   private defaultConfig: VotingSystemConfig = {
@@ -128,6 +128,10 @@ export class VotingSystem extends EventEmitter {
       this.instance = new VotingSystem();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

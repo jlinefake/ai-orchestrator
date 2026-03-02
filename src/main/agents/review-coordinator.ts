@@ -56,7 +56,7 @@ export interface CoordinatedReview {
 }
 
 export class ReviewCoordinator extends EventEmitter {
-  private static instance: ReviewCoordinator;
+  private static instance: ReviewCoordinator | null = null;
   private activeReviews: Map<string, CoordinatedReview> = new Map();
   private completedReviews: Map<string, CoordinatedReview> = new Map();
 
@@ -65,6 +65,10 @@ export class ReviewCoordinator extends EventEmitter {
       this.instance = new ReviewCoordinator();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    ReviewCoordinator.instance = null;
   }
 
   private constructor() {

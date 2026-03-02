@@ -80,7 +80,7 @@ interface ActiveSession {
 const logger = getLogger('CliVerification');
 
 export class CliVerificationCoordinator extends EventEmitter {
-  private static instance: CliVerificationCoordinator;
+  private static instance: CliVerificationCoordinator | null = null;
   private cliDetection = CliDetectionService.getInstance();
   private registry = getProviderRegistry();
   private activeVerifications: Map<string, VerificationRequest> = new Map();
@@ -96,6 +96,10 @@ export class CliVerificationCoordinator extends EventEmitter {
       this.instance = new CliVerificationCoordinator();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

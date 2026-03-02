@@ -12,7 +12,7 @@
  */
 
 // Main coordinator
-export { InstanceManager, getInstanceManager } from './instance-manager';
+export { InstanceManager } from './instance-manager';
 
 // Sub-managers (exported for advanced use cases and testing)
 export { InstanceStateManager } from './instance-state';

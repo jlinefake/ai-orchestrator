@@ -55,6 +55,12 @@ export class MarkdownCommandRegistry {
     return MarkdownCommandRegistry.instance;
   }
 
+  static _resetForTesting(): void {
+    MarkdownCommandRegistry.instance = null;
+  }
+
+  private constructor() {}
+
   private getHomeDir(): string | null {
     // `app.getPath('home')` is safe after app is ready; fall back to env for tests.
     try {
@@ -289,4 +295,9 @@ export function getMarkdownCommandRegistry(): MarkdownCommandRegistry {
     markdownCommandRegistry = MarkdownCommandRegistry.getInstance();
   }
   return markdownCommandRegistry;
+}
+
+export function _resetMarkdownCommandRegistryForTesting(): void {
+  markdownCommandRegistry = null;
+  MarkdownCommandRegistry._resetForTesting();
 }

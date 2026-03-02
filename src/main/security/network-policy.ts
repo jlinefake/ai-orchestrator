@@ -161,6 +161,10 @@ export class NetworkPolicy extends EventEmitter {
     return NetworkPolicy.instance;
   }
 
+  static _resetForTesting(): void {
+    NetworkPolicy.instance = null;
+  }
+
   /**
    * Configure the network policy
    */

@@ -137,6 +137,10 @@ export class BackgroundTaskManager extends EventEmitter {
     return BackgroundTaskManager.instance;
   }
 
+  static _resetForTesting(): void {
+    BackgroundTaskManager.instance = null;
+  }
+
   /**
    * Update configuration
    */
@@ -620,6 +624,10 @@ export class BackgroundTaskManager extends EventEmitter {
       }
     });
   }
+}
+
+export function getBackgroundTaskManager(): BackgroundTaskManager {
+  return BackgroundTaskManager.getInstance();
 }
 
 export default BackgroundTaskManager;

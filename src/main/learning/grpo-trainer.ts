@@ -61,7 +61,7 @@ export interface StrategyUpdate {
 // ============ GRPO Trainer ============
 
 export class GRPOTrainer extends EventEmitter {
-  private static instance: GRPOTrainer;
+  private static instance: GRPOTrainer | null = null;
   private config: GRPOConfig;
   private outcomes: TrainingOutcome[] = [];
   private batches: GRPOBatch[] = [];
@@ -82,6 +82,10 @@ export class GRPOTrainer extends EventEmitter {
       this.instance = new GRPOTrainer();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

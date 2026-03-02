@@ -43,7 +43,7 @@ import { RLMContextManager } from '../rlm/context-manager';
 import { SkillsLoader, getSkillsLoader } from './skills-loader';
 
 export class UnifiedMemoryController extends EventEmitter {
-  private static instance: UnifiedMemoryController;
+  private static instance: UnifiedMemoryController | null = null;
   private config: UnifiedMemoryConfig;
   private state!: UnifiedMemoryState; // Initialized in initializeState()
   private memoryR1: MemoryManagerAgent;

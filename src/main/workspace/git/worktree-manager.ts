@@ -28,7 +28,7 @@ const logger = getLogger('WorktreeManager');
 const execAsync = promisify(exec);
 
 export class WorktreeManager extends EventEmitter {
-  private static instance: WorktreeManager;
+  private static instance: WorktreeManager | null = null;
   private sessions: Map<string, WorktreeSession> = new Map();
   private config: WorktreeConfig;
   private healthCheckInterval?: NodeJS.Timeout;
@@ -38,6 +38,10 @@ export class WorktreeManager extends EventEmitter {
       this.instance = new WorktreeManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    WorktreeManager.instance = null;
   }
 
   private constructor() {
@@ -728,4 +732,9 @@ export function getWorktreeManager(): WorktreeManager {
     worktreeManagerInstance = WorktreeManager.getInstance();
   }
   return worktreeManagerInstance;
+}
+
+export function _resetWorktreeManagerForTesting(): void {
+  worktreeManagerInstance = null;
+  WorktreeManager._resetForTesting();
 }

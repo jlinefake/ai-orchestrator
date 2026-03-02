@@ -154,6 +154,10 @@ export class ClaudeMdLoader extends EventEmitter {
     return ClaudeMdLoader.instance;
   }
 
+  static _resetForTesting(): void {
+    ClaudeMdLoader.instance = null;
+  }
+
   /**
    * Initialize with project root
    */
@@ -809,6 +813,10 @@ export class ClaudeMdLoader extends EventEmitter {
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(value);
   }
+}
+
+export function getClaudeMdLoader(): ClaudeMdLoader {
+  return ClaudeMdLoader.getInstance();
 }
 
 export default ClaudeMdLoader;

@@ -87,7 +87,7 @@ export interface ReflectionResult {
 }
 
 export class CritiqueAgent extends EventEmitter {
-  private static instance: CritiqueAgent;
+  private static instance: CritiqueAgent | null = null;
   private config: CritiqueConfig;
   private critiqueHistory: CritiqueResult[] = [];
   private maxHistorySize = 500;
@@ -105,6 +105,10 @@ export class CritiqueAgent extends EventEmitter {
       this.instance = new CritiqueAgent();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

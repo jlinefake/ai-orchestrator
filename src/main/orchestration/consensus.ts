@@ -106,7 +106,7 @@ interface ProposalData {
 }
 
 export class ConsensusManager extends EventEmitter {
-  private static instance: ConsensusManager;
+  private static instance: ConsensusManager | null = null;
   private config: ConsensusConfig;
   private proposals: Map<string, ProposalData> = new Map();
   private stats: ConsensusStats;
@@ -127,6 +127,10 @@ export class ConsensusManager extends EventEmitter {
       this.instance = new ConsensusManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

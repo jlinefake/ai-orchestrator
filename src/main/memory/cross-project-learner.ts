@@ -54,7 +54,7 @@ const DEFAULT_CONFIG: CrossProjectLearnerConfig = {
 };
 
 export class CrossProjectLearner extends EventEmitter {
-  private static instance: CrossProjectLearner;
+  private static instance: CrossProjectLearner | null = null;
   private config: CrossProjectLearnerConfig;
   private globalPatterns: Map<string, GlobalPattern> = new Map();
   private embeddingService: EmbeddingService;
@@ -82,6 +82,10 @@ export class CrossProjectLearner extends EventEmitter {
    */
   static resetInstance(): void {
     this.instance = undefined as unknown as CrossProjectLearner;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

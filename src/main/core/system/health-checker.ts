@@ -105,6 +105,10 @@ export class HealthChecker extends EventEmitter {
     return HealthChecker.instance;
   }
 
+  static _resetForTesting(): void {
+    HealthChecker.instance = null;
+  }
+
   /**
    * Initialize with API key
    */
@@ -568,6 +572,10 @@ export class HealthChecker extends EventEmitter {
     this.componentHealth.clear();
     this.removeAllListeners();
   }
+}
+
+export function getHealthChecker(): HealthChecker {
+  return HealthChecker.getInstance();
 }
 
 export default HealthChecker;

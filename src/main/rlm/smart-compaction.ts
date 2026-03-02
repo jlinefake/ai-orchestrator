@@ -223,6 +223,10 @@ export class SmartCompactionManager extends EventEmitter {
     return SmartCompactionManager.instance;
   }
 
+  static _resetForTesting(): void {
+    SmartCompactionManager.instance = null;
+  }
+
   /**
    * Initialize the manager
    */
@@ -868,3 +872,7 @@ export class SmartCompactionManager extends EventEmitter {
 }
 
 export default SmartCompactionManager;
+
+export function getSmartCompactionManager(): SmartCompactionManager {
+  return SmartCompactionManager.getInstance();
+}

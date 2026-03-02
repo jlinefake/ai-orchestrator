@@ -85,7 +85,7 @@ import {
 const logger = getLogger('RLMContextManager');
 
 export class RLMContextManager extends EventEmitter {
-  private static instance: RLMContextManager;
+  private static instance: RLMContextManager | null = null;
   private stores = new Map<string, ContextStore>();
   private sessions = new Map<string, RLMSession>();
   private config: RLMConfig;
@@ -111,6 +111,10 @@ export class RLMContextManager extends EventEmitter {
       this.instance = new RLMContextManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -686,6 +690,10 @@ export class RLMContextManager extends EventEmitter {
     }
     return defaultEstimateTokens(text);
   }
+}
+
+export function getRLMContextManager(): RLMContextManager {
+  return RLMContextManager.getInstance();
 }
 
 // Re-export types for backwards compatibility

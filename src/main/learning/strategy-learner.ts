@@ -31,7 +31,7 @@ interface StrategyScore {
 }
 
 export class StrategyLearner extends EventEmitter {
-  private static instance: StrategyLearner;
+  private static instance: StrategyLearner | null = null;
   private outcomeTracker: OutcomeTracker;
 
   // Cache for quick lookups
@@ -44,6 +44,10 @@ export class StrategyLearner extends EventEmitter {
       this.instance = new StrategyLearner();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -432,4 +436,8 @@ export class StrategyLearner extends EventEmitter {
         .slice(0, 5),
     };
   }
+}
+
+export function getStrategyLearner(): StrategyLearner {
+  return StrategyLearner.getInstance();
 }

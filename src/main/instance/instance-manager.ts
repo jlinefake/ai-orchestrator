@@ -42,9 +42,6 @@ import type { UserActionRequest } from '../orchestration/orchestration-handler';
 
 const logger = getLogger('InstanceManager');
 
-// Singleton instance
-let instanceManager: InstanceManager | null = null;
-
 export class InstanceManager extends EventEmitter {
   // Sub-managers
   private state: InstanceStateManager;
@@ -951,15 +948,4 @@ export class InstanceManager extends EventEmitter {
     this.lifecycle.destroy();
     this.terminateAll();
   }
-}
-
-// ============================================
-// Singleton Accessor
-// ============================================
-
-export function getInstanceManager(): InstanceManager {
-  if (!instanceManager) {
-    instanceManager = new InstanceManager();
-  }
-  return instanceManager;
 }

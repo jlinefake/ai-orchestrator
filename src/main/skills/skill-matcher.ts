@@ -129,6 +129,10 @@ export class SkillMatcher extends EventEmitter {
     return SkillMatcher.instance;
   }
 
+  static _resetForTesting(): void {
+    SkillMatcher.instance = null;
+  }
+
   /**
    * Initialize with project root
    */
@@ -570,6 +574,10 @@ export class SkillMatcher extends EventEmitter {
   getRegisteredSkills(): SkillBundle[] {
     return this.triggerMatcher.getRegisteredSkills();
   }
+}
+
+export function getSkillMatcher(): SkillMatcher {
+  return SkillMatcher.getInstance();
 }
 
 export default SkillMatcher;

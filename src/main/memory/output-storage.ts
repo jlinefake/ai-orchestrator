@@ -377,3 +377,7 @@ export function getOutputStorageManager(): OutputStorageManager {
   }
   return outputStorageManager;
 }
+
+export function _resetOutputStorageManagerForTesting(): void {
+  outputStorageManager = null;
+}

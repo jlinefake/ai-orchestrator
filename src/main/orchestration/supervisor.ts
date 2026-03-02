@@ -27,7 +27,7 @@ import {
 const logger = getLogger('Supervisor');
 
 export class Supervisor extends EventEmitter {
-  private static instance: Supervisor;
+  private static instance: Supervisor | null = null;
   private trees: Map<string, SupervisionTree> = new Map();
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
   private healthCheckIntervals: Map<string, NodeJS.Timeout> = new Map();
@@ -37,6 +37,10 @@ export class Supervisor extends EventEmitter {
       this.instance = new Supervisor();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

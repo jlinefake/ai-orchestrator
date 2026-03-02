@@ -163,7 +163,7 @@ const CLI_REGISTRY: Record<CliType, CliRegistryEntry> = {
  * CLI Detection Service - Singleton that detects and caches available CLI tools
  */
 export class CliDetectionService {
-  private static instance: CliDetectionService;
+  private static instance: CliDetectionService | null = null;
   private cache: DetectionResult | null = null;
   private cacheTimeout = 60000; // 1 minute cache
   private cacheTime: number = 0;
@@ -178,6 +178,10 @@ export class CliDetectionService {
       this.instance = new CliDetectionService();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    CliDetectionService.instance = null;
   }
 
   /**
@@ -453,6 +457,10 @@ export class CliDetectionService {
       outputFormats: ['text']
     };
   }
+}
+
+export function getCliDetectionService(): CliDetectionService {
+  return CliDetectionService.getInstance();
 }
 
 // Convenience functions for backward compatibility

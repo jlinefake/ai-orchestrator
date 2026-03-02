@@ -114,7 +114,7 @@ import { getLogger } from '../logging/logger';
 const logger = getLogger('HyDEService');
 
 export class HyDEService extends EventEmitter {
-  private static instance: HyDEService;
+  private static instance: HyDEService | null = null;
   private config: HyDEConfig;
   private llmService: LLMService;
   private embeddingService: EmbeddingService;
@@ -132,6 +132,10 @@ export class HyDEService extends EventEmitter {
       this.instance = new HyDEService(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

@@ -15,7 +15,7 @@ import { DEFAULT_OBSERVATION_CONFIG } from '../../shared/types/observation.types
  * 5. Recording injection events for feedback tracking
  */
 export class PolicyAdapter {
-  private static instance: PolicyAdapter;
+  private static instance: PolicyAdapter | null = null;
 
   private logger = getLogger('PolicyAdapter');
   private config = { ...DEFAULT_OBSERVATION_CONFIG };
@@ -28,7 +28,7 @@ export class PolicyAdapter {
   }
 
   static _resetForTesting(): void {
-    this.instance = undefined as unknown as PolicyAdapter;
+    this.instance = null;
   }
 
   private constructor() {

@@ -102,7 +102,7 @@ const DEFAULT_CONFIG: ABTestingConfig = {
 // ============================================
 
 export class ABTestingEngine extends EventEmitter {
-  private static instance: ABTestingEngine;
+  private static instance: ABTestingEngine | null = null;
   private config: ABTestingConfig;
   private experiments: Map<string, Experiment> = new Map();
   private results: Map<string, Map<string, ExperimentResult>> = new Map();
@@ -128,6 +128,10 @@ export class ABTestingEngine extends EventEmitter {
    */
   static resetInstance(): void {
     this.instance = undefined as unknown as ABTestingEngine;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   // ============================================

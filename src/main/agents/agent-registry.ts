@@ -86,6 +86,12 @@ export class AgentRegistry {
     return AgentRegistry.instance;
   }
 
+  static _resetForTesting(): void {
+    AgentRegistry.instance = null;
+  }
+
+  private constructor() {}
+
   private getHomeDir(): string | null {
     try {
       return app.getPath('home');
@@ -334,6 +340,11 @@ export function getAgentRegistry(): AgentRegistry {
     agentRegistry = AgentRegistry.getInstance();
   }
   return agentRegistry;
+}
+
+export function _resetAgentRegistryForTesting(): void {
+  agentRegistry = null;
+  AgentRegistry._resetForTesting();
 }
 
 export type AgentListingItem =

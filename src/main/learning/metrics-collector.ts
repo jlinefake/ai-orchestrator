@@ -48,7 +48,7 @@ const DEFAULT_CONFIG: MetricsCollectorConfig = {
 // ============================================
 
 export class MetricsCollector extends EventEmitter {
-  private static instance: MetricsCollector;
+  private static instance: MetricsCollector | null = null;
   private config: MetricsCollectorConfig;
   private sessions: SessionMetrics[] = [];
   private baselines: Map<string, BaselineSnapshot> = new Map();
@@ -72,6 +72,10 @@ export class MetricsCollector extends EventEmitter {
 
   static resetInstance(): void {
     this.instance = undefined as unknown as MetricsCollector;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   // ============================================
@@ -724,12 +728,3 @@ export function getMetricsCollector(config?: Partial<MetricsCollectorConfig>): M
   return MetricsCollector.getInstance(config);
 }
 
-// ============================================
-// Convenience: Get Outcome Tracker Integration Helper
-// ============================================
-
-export function getOutcomeTracker() {
-  // Lazy import to avoid circular dependencies
-  const { OutcomeTracker } = require('./outcome-tracker');
-  return OutcomeTracker.getInstance();
-}

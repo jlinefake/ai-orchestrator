@@ -468,6 +468,10 @@ export class CircuitBreakerRegistry {
     return CircuitBreakerRegistry.instance;
   }
 
+  static _resetForTesting(): void {
+    CircuitBreakerRegistry.instance = null;
+  }
+
   /**
    * Set default configuration for new circuit breakers
    */
@@ -537,6 +541,10 @@ export class CircuitBreakerRegistry {
     this.breakers.clear();
     CircuitBreakerRegistry.instance = null;
   }
+}
+
+export function getCircuitBreakerRegistry(): CircuitBreakerRegistry {
+  return CircuitBreakerRegistry.getInstance();
 }
 
 export default CircuitBreaker;

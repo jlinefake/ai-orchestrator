@@ -136,6 +136,10 @@ export class ContextEditingFallback extends EventEmitter {
     ContextEditingFallback.instance = null;
   }
 
+  static _resetForTesting(): void {
+    this.instance = null;
+  }
+
   // ============================================
   // Configuration
   // ============================================

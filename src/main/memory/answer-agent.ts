@@ -49,7 +49,7 @@ export interface SelectionFeedback {
 }
 
 export class AnswerAgent extends EventEmitter {
-  private static instance: AnswerAgent;
+  private static instance: AnswerAgent | null = null;
   private config: AnswerConfig;
   private selectionHistory: Map<string, SelectionFeedback[]> = new Map();
 
@@ -66,6 +66,10 @@ export class AnswerAgent extends EventEmitter {
       this.instance = new AnswerAgent();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

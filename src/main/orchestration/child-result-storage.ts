@@ -44,7 +44,7 @@ const DEFAULT_CONFIG: Required<ChildResultStorageConfig> = {
 };
 
 export class ChildResultStorage {
-  private static instance: ChildResultStorage;
+  private static instance: ChildResultStorage | null = null;
   private config: Required<ChildResultStorageConfig>;
   private results: Map<string, ChildResult> = new Map();
   private childToResult: Map<string, string> = new Map(); // childId -> resultId
@@ -62,6 +62,10 @@ export class ChildResultStorage {
       this.instance = new ChildResultStorage(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

@@ -144,6 +144,10 @@ export class JITContextLoader extends EventEmitter {
     return JITContextLoader.instance;
   }
 
+  static _resetForTesting(): void {
+    JITContextLoader.instance = null;
+  }
+
   /**
    * Configure the loader
    */

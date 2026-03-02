@@ -22,7 +22,7 @@ const STOP_WORDS = new Set([
  * to compress raw events into structured observations with themes, findings, and signals.
  */
 export class ObserverAgent extends EventEmitter {
-  private static instance: ObserverAgent;
+  private static instance: ObserverAgent | null = null;
 
   private logger = getLogger('ObserverAgent');
   private config = { ...DEFAULT_OBSERVATION_CONFIG };
@@ -38,7 +38,7 @@ export class ObserverAgent extends EventEmitter {
   static _resetForTesting(): void {
     if (this.instance) {
       this.instance.removeAllListeners();
-      this.instance = undefined as unknown as ObserverAgent;
+      this.instance = null;
     }
   }
 

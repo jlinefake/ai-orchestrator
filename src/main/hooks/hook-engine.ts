@@ -15,7 +15,7 @@ import {
 import { builtInHookRules } from './built-in-rules';
 
 export class HookEngine extends EventEmitter {
-  private static instance: HookEngine;
+  private static instance: HookEngine | null = null;
   private rules: Map<string, HookRule> = new Map();
   private regexCache: Map<string, RegExp> = new Map();
 
@@ -24,6 +24,10 @@ export class HookEngine extends EventEmitter {
       this.instance = new HookEngine();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -257,4 +261,9 @@ export function getHookEngine(): HookEngine {
     hookEngineInstance = HookEngine.getInstance();
   }
   return hookEngineInstance;
+}
+
+export function _resetHookEngineForTesting(): void {
+  hookEngineInstance = null;
+  HookEngine._resetForTesting();
 }

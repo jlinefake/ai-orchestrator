@@ -85,7 +85,7 @@ const SESSION_TYPE = 'episode';
 const PATTERN_TYPE = 'pattern';
 
 export class EpisodicRLMStore extends EventEmitter {
-  private static instance: EpisodicRLMStore;
+  private static instance: EpisodicRLMStore | null = null;
   private config: EpisodicRLMStoreConfig;
   private db: RLMDatabase;
   private vectorStore: VectorStore;
@@ -108,6 +108,10 @@ export class EpisodicRLMStore extends EventEmitter {
       this.instance = new EpisodicRLMStore(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   configure(config: Partial<EpisodicRLMStoreConfig>): void {

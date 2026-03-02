@@ -32,7 +32,7 @@ import { estimateTokens } from '@shared/utils/token-counter';
 const logger = getLogger('DebateCoordinator');
 
 export class DebateCoordinator extends EventEmitter {
-  private static instance: DebateCoordinator;
+  private static instance: DebateCoordinator | null = null;
   private activeDebates: Map<string, ActiveDebate> = new Map();
   private completedDebates: Map<string, DebateResult> = new Map();
   private stats: DebateStats;
@@ -62,7 +62,7 @@ export class DebateCoordinator extends EventEmitter {
       this.instance.activeDebates.clear();
       this.instance.completedDebates.clear();
       this.instance.removeAllListeners();
-      (this.instance as any) = undefined;
+      this.instance = null;
     }
   }
 

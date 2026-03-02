@@ -759,3 +759,7 @@ export function getAstChunker(config?: Partial<ChunkConfig>): AstChunker {
   }
   return instance;
 }
+
+export function _resetAstChunkerForTesting(): void {
+  instance = null;
+}

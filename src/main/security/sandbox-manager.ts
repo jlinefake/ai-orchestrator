@@ -191,6 +191,10 @@ export class SandboxManager extends EventEmitter {
     return SandboxManager.instance;
   }
 
+  static _resetForTesting(): void {
+    SandboxManager.instance = null;
+  }
+
   /**
    * Configure the sandbox manager
    */

@@ -100,7 +100,7 @@ export function getModelFamily(model?: string): ModelFamily {
  * TokenCounter - Utility class for accurate token counting
  */
 export class TokenCounter {
-  private static instance: TokenCounter;
+  private static instance: TokenCounter | null = null;
   private modelFamily: ModelFamily = 'unknown';
 
   // Private constructor for singleton pattern
@@ -116,6 +116,10 @@ export class TokenCounter {
       this.instance = new TokenCounter();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

@@ -66,7 +66,7 @@ interface Store<T> {
 const logger = getLogger('VerificationCache');
 
 export class VerificationCache {
-  private static instance: VerificationCache;
+  private static instance: VerificationCache | null = null;
   private config: Required<VerificationCacheConfig>;
   private store: Store<CacheStoreSchema>;
   private pruneTimer?: NodeJS.Timeout;
@@ -99,6 +99,13 @@ export class VerificationCache {
       this.instance = new VerificationCache(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.dispose();
+      this.instance = null;
+    }
   }
 
   /**

@@ -91,7 +91,7 @@ export interface HabitStats {
 // ============ HabitTracker Class ============
 
 export class HabitTracker extends EventEmitter {
-  private static instance: HabitTracker;
+  private static instance: HabitTracker | null = null;
   private actions: UserAction[] = [];
   private habits: Map<string, UserHabit> = new Map();
   private config: HabitTrackerConfig;
@@ -112,6 +112,10 @@ export class HabitTracker extends EventEmitter {
       this.instance = new HabitTracker();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

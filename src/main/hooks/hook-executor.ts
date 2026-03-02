@@ -61,7 +61,7 @@ export interface HookExecutorConfig {
 }
 
 export class HookExecutor extends EventEmitter {
-  private static instance: HookExecutor;
+  private static instance: HookExecutor | null = null;
   private config: HookExecutorConfig;
 
   private defaultConfig: HookExecutorConfig = {
@@ -75,6 +75,10 @@ export class HookExecutor extends EventEmitter {
       this.instance = new HookExecutor();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

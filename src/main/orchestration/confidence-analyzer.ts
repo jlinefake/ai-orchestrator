@@ -64,7 +64,7 @@ const EVIDENCE_INDICATORS = [
 ];
 
 export class ConfidenceAnalyzer {
-  private static instance: ConfidenceAnalyzer;
+  private static instance: ConfidenceAnalyzer | null = null;
   private config: ConfidenceAnalyzerConfig;
 
   private defaultConfig: ConfidenceAnalyzerConfig = {
@@ -79,6 +79,10 @@ export class ConfidenceAnalyzer {
       this.instance = new ConfidenceAnalyzer();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

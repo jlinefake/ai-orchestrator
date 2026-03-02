@@ -20,7 +20,7 @@ export interface TriggerMatchOptions {
 }
 
 export class TriggerMatcher {
-  private static instance: TriggerMatcher;
+  private static instance: TriggerMatcher | null = null;
   private skillBundles: Map<string, SkillBundle> = new Map();
 
   static getInstance(): TriggerMatcher {
@@ -28,6 +28,10 @@ export class TriggerMatcher {
       this.instance = new TriggerMatcher();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {}

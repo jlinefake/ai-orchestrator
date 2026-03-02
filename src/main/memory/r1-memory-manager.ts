@@ -26,7 +26,7 @@ import type {
 } from '../../shared/types/memory-r1.types';
 
 export class MemoryManagerAgent extends EventEmitter {
-  private static instance: MemoryManagerAgent;
+  private static instance: MemoryManagerAgent | null = null;
   private state: MemoryManagerState;
   private config: MemoryManagerConfig;
 

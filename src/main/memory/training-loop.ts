@@ -70,7 +70,7 @@ export interface RewardSignal {
 // ============ Training Loop ============
 
 export class TrainingLoop extends EventEmitter {
-  private static instance: TrainingLoop;
+  private static instance: TrainingLoop | null = null;
   private config: TrainingConfig;
   private currentStage: TrainingStage = 1;
   private trainingBuffer: TrainingExample[] = [];
@@ -96,6 +96,10 @@ export class TrainingLoop extends EventEmitter {
       this.instance = new TrainingLoop();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

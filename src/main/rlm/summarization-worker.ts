@@ -98,7 +98,7 @@ const DEFAULT_CONFIG: SummarizationWorkerConfig = {
 };
 
 export class SummarizationWorker extends EventEmitter {
-  private static instance: SummarizationWorker;
+  private static instance: SummarizationWorker | null = null;
   private config: SummarizationWorkerConfig;
   private db: RLMDatabase | null = null;
   private llmService: LLMService | null = null;
@@ -128,6 +128,10 @@ export class SummarizationWorker extends EventEmitter {
       this.instance = new SummarizationWorker(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**
@@ -562,4 +566,9 @@ export function initializeSummarizationWorker(
   const worker = getSummarizationWorker(config);
   worker.initialize();
   worker.start();
+}
+
+export function _resetSummarizationWorkerForTesting(): void {
+  instance = null;
+  SummarizationWorker._resetForTesting();
 }

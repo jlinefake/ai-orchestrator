@@ -40,7 +40,7 @@ const DEFAULT_CONFIG: VectorStoreConfig = {
 };
 
 export class VectorStore extends EventEmitter {
-  private static instance: VectorStore;
+  private static instance: VectorStore | null = null;
   private db: RLMDatabase;
   private embeddingService: EmbeddingService;
   private config: VectorStoreConfig;
@@ -62,6 +62,10 @@ export class VectorStore extends EventEmitter {
       this.instance = new VectorStore(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

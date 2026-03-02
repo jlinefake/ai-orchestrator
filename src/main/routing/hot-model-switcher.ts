@@ -208,6 +208,10 @@ export class HotModelSwitcher extends EventEmitter {
     return HotModelSwitcher.instance;
   }
 
+  static _resetForTesting(): void {
+    HotModelSwitcher.instance = null;
+  }
+
   /**
    * Configure the switcher
    */

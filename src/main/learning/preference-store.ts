@@ -90,7 +90,7 @@ export interface PreferenceStats {
 // ============================================
 
 export class PreferenceStore extends EventEmitter {
-  private static instance: PreferenceStore;
+  private static instance: PreferenceStore | null = null;
   private preferences: Map<string, Preference> = new Map();
   private config: PreferenceStoreConfig;
   private db: RLMDatabase | null = null;
@@ -155,6 +155,10 @@ export class PreferenceStore extends EventEmitter {
       this.instance = new PreferenceStore();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

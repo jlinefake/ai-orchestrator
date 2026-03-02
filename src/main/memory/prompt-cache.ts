@@ -143,6 +143,10 @@ export class PromptCacheManager extends EventEmitter {
     PromptCacheManager.instance = null;
   }
 
+  static _resetForTesting(): void {
+    PromptCacheManager.instance = null;
+  }
+
   // ============================================
   // Configuration
   // ============================================

@@ -115,6 +115,10 @@ export class ContextCompactor extends EventEmitter {
     return ContextCompactor.instance;
   }
 
+  static _resetForTesting(): void {
+    ContextCompactor.instance = null;
+  }
+
   /**
    * Initialize with API key
    */
@@ -497,6 +501,10 @@ ${[...topics].slice(0, 5).map(t => `- ${t}`).join('\n')}`;
   private generateId(): string {
     return `ctx_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
+}
+
+export function getContextCompactor(): ContextCompactor {
+  return ContextCompactor.getInstance();
 }
 
 export default ContextCompactor;

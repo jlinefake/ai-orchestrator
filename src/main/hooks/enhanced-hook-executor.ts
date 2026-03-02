@@ -92,6 +92,10 @@ export class EnhancedHookExecutor extends EventEmitter {
     return EnhancedHookExecutor.instance;
   }
 
+  static _resetForTesting(): void {
+    EnhancedHookExecutor.instance = null;
+  }
+
   /**
    * Initialize with API key for prompt hooks
    */
@@ -305,6 +309,10 @@ export class EnhancedHookExecutor extends EventEmitter {
     }
     this.activeProcesses.clear();
   }
+}
+
+export function getEnhancedHookExecutor(): EnhancedHookExecutor {
+  return EnhancedHookExecutor.getInstance();
 }
 
 export default EnhancedHookExecutor;

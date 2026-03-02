@@ -132,6 +132,10 @@ export class FailoverManager extends EventEmitter {
     return FailoverManager.instance;
   }
 
+  static _resetForTesting(): void {
+    FailoverManager.instance = null;
+  }
+
   /**
    * Configure the failover manager
    */
@@ -538,6 +542,10 @@ export class FailoverManager extends EventEmitter {
     this.removeAllListeners();
     FailoverManager.instance = null;
   }
+}
+
+export function getFailoverManager(): FailoverManager {
+  return FailoverManager.getInstance();
 }
 
 export default FailoverManager;

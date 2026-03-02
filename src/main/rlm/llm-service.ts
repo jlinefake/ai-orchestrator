@@ -90,7 +90,7 @@ If the context doesn't contain enough information, say so clearly.
 Be concise but thorough.`;
 
 export class LLMService extends EventEmitter {
-  private static instance: LLMService;
+  private static instance: LLMService | null = null;
   private config: LLMServiceConfig;
   private anthropicAvailable: boolean | null = null;
   private ollamaAvailable: boolean | null = null;
@@ -110,6 +110,10 @@ export class LLMService extends EventEmitter {
       this.instance = new LLMService(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   configure(config: Partial<LLMServiceConfig>): void {

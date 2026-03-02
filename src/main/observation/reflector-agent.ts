@@ -20,7 +20,7 @@ import { DEFAULT_OBSERVATION_CONFIG } from '../../shared/types/observation.types
  * - Promotion gates to procedural memory
  */
 export class ReflectorAgent extends EventEmitter {
-  private static instance: ReflectorAgent;
+  private static instance: ReflectorAgent | null = null;
 
   static getInstance(): ReflectorAgent {
     if (!this.instance) {
@@ -32,7 +32,7 @@ export class ReflectorAgent extends EventEmitter {
   static _resetForTesting(): void {
     if (this.instance) {
       this.instance.removeAllListeners();
-      this.instance = undefined as unknown as ReflectorAgent;
+      this.instance = null;
     }
   }
 

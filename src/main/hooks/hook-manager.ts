@@ -44,7 +44,7 @@ export interface HookManagerConfig {
 const logger = getLogger('HookManager');
 
 export class HookManager extends EventEmitter {
-  private static instance: HookManager;
+  private static instance: HookManager | null = null;
   private hooks = new Map<string, ManagedHookConfig>();
   private executor: HookExecutor;
   private config: HookManagerConfig;
@@ -64,6 +64,10 @@ export class HookManager extends EventEmitter {
       this.instance = new HookManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

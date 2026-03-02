@@ -41,7 +41,7 @@ export class InsufficientAgentsError extends Error {
 }
 
 export class MultiVerifyCoordinator extends EventEmitter {
-  private static instance: MultiVerifyCoordinator;
+  private static instance: MultiVerifyCoordinator | null = null;
   private activeVerifications: Map<string, VerificationRequest> = new Map();
   private results: Map<string, VerificationResult> = new Map();
   private defaultConfig: Partial<VerificationConfig> = {};
@@ -71,7 +71,7 @@ export class MultiVerifyCoordinator extends EventEmitter {
       this.instance.agentRetryCount.clear();
       this.instance.failedAgents.clear();
       this.instance.removeAllListeners();
-      (this.instance as any) = undefined;
+      this.instance = null;
     }
   }
 
@@ -1099,11 +1099,6 @@ Provide your synthesized response:`;
 }
 
 // Singleton accessor
-let multiVerifyCoordinatorInstance: MultiVerifyCoordinator | null = null;
-
 export function getMultiVerifyCoordinator(): MultiVerifyCoordinator {
-  if (!multiVerifyCoordinatorInstance) {
-    multiVerifyCoordinatorInstance = MultiVerifyCoordinator.getInstance();
-  }
-  return multiVerifyCoordinatorInstance;
+  return MultiVerifyCoordinator.getInstance();
 }

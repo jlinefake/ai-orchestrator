@@ -71,7 +71,7 @@ function buildConsensusPrompt(question: string, context?: string): string {
 }
 
 export class ConsensusCoordinator extends EventEmitter {
-  private static instance: ConsensusCoordinator;
+  private static instance: ConsensusCoordinator | null = null;
   private activeQueries = new Map<string, { abort: () => void }>();
 
   static getInstance(): ConsensusCoordinator {
@@ -84,7 +84,7 @@ export class ConsensusCoordinator extends EventEmitter {
   static _resetForTesting(): void {
     if (this.instance) {
       this.instance.cleanup();
-      (this.instance as any) = undefined;
+      this.instance = null;
     }
   }
 

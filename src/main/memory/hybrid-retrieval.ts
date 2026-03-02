@@ -127,6 +127,10 @@ export class HybridRetrievalManager extends EventEmitter {
     return HybridRetrievalManager.instance;
   }
 
+  static _resetForTesting(): void {
+    HybridRetrievalManager.instance = null;
+  }
+
   /**
    * Configure the retrieval manager
    */
@@ -541,3 +545,7 @@ export class HybridRetrievalManager extends EventEmitter {
 }
 
 export default HybridRetrievalManager;
+
+export function getHybridRetrievalManager(): HybridRetrievalManager {
+  return HybridRetrievalManager.getInstance();
+}

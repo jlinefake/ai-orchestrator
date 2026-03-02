@@ -64,6 +64,10 @@ export class OrchestratorPluginManager {
     return OrchestratorPluginManager.instance;
   }
 
+  static _resetForTesting(): void {
+    OrchestratorPluginManager.instance = null;
+  }
+
   private getHomeDir(): string | null {
     try {
       return app.getPath('home');
@@ -236,4 +240,9 @@ let pluginManager: OrchestratorPluginManager | null = null;
 export function getOrchestratorPluginManager(): OrchestratorPluginManager {
   if (!pluginManager) pluginManager = OrchestratorPluginManager.getInstance();
   return pluginManager;
+}
+
+export function _resetOrchestratorPluginManagerForTesting(): void {
+  pluginManager = null;
+  OrchestratorPluginManager._resetForTesting();
 }

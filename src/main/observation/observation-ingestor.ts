@@ -15,7 +15,7 @@ import type { InstanceManager } from '../instance/instance-manager';
  * before flushing to the observer agent. Uses ring buffer to prevent memory leaks.
  */
 export class ObservationIngestor extends EventEmitter {
-  private static instance: ObservationIngestor;
+  private static instance: ObservationIngestor | null = null;
 
   static getInstance(): ObservationIngestor {
     if (!this.instance) {
@@ -27,7 +27,7 @@ export class ObservationIngestor extends EventEmitter {
   static _resetForTesting(): void {
     if (this.instance) {
       this.instance.cleanup();
-      this.instance = undefined as unknown as ObservationIngestor;
+      this.instance = null;
     }
   }
 

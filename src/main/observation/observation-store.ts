@@ -20,7 +20,7 @@ import {
 import type { ObservationRow, ReflectionRow } from '../persistence/rlm-database.types';
 
 export class ObservationStore extends EventEmitter {
-  private static instance: ObservationStore;
+  private static instance: ObservationStore | null = null;
   private logger = getLogger('ObservationStore');
   private config: ObservationConfig = DEFAULT_OBSERVATION_CONFIG;
   private observationCache = new Map<string, Observation>();
@@ -46,7 +46,7 @@ export class ObservationStore extends EventEmitter {
     if (this.instance) {
       this.instance.cleanup();
       this.instance.removeAllListeners();
-      this.instance = undefined as unknown as ObservationStore;
+      this.instance = null;
     }
   }
 

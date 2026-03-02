@@ -47,7 +47,7 @@ const DEFAULT_CONFIG: EmbeddingConfig = {
 };
 
 export class EmbeddingService extends EventEmitter {
-  private static instance: EmbeddingService;
+  private static instance: EmbeddingService | null = null;
   private config: EmbeddingConfig;
   private cache = new Map<string, CacheEntry>();
   private ollamaAvailable: boolean | null = null;
@@ -64,6 +64,10 @@ export class EmbeddingService extends EventEmitter {
       this.instance = new EmbeddingService(config);
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   /**

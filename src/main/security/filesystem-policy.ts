@@ -193,6 +193,10 @@ export class FilesystemPolicy extends EventEmitter {
     return FilesystemPolicy.instance;
   }
 
+  static _resetForTesting(): void {
+    FilesystemPolicy.instance = null;
+  }
+
   /**
    * Configure the filesystem policy
    */

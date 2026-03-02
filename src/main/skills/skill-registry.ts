@@ -20,7 +20,7 @@ import { getLogger } from '../logging/logger';
 const logger = getLogger('SkillRegistry');
 
 export class SkillRegistry extends EventEmitter {
-  private static instance: SkillRegistry;
+  private static instance: SkillRegistry | null = null;
   private skills: Map<string, SkillBundle> = new Map();
   private loadedSkills: Map<string, LoadedSkill> = new Map();
   private triggerIndex: Map<string, string[]> = new Map(); // trigger -> skill IDs
@@ -30,6 +30,10 @@ export class SkillRegistry extends EventEmitter {
       this.instance = new SkillRegistry();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -371,4 +375,9 @@ export function getSkillRegistry(): SkillRegistry {
     skillRegistryInstance = SkillRegistry.getInstance();
   }
   return skillRegistryInstance;
+}
+
+export function _resetSkillRegistryForTesting(): void {
+  skillRegistryInstance = null;
+  SkillRegistry._resetForTesting();
 }

@@ -20,7 +20,7 @@ import { builtInTemplates } from './templates';
 const logger = getLogger('WorkflowManager');
 
 export class WorkflowManager extends EventEmitter {
-  private static instance: WorkflowManager;
+  private static instance: WorkflowManager | null = null;
   private templates: Map<string, WorkflowTemplate> = new Map();
   private executions: Map<string, WorkflowExecution> = new Map();
   private instanceExecutions: Map<string, string> = new Map(); // instanceId -> executionId
@@ -30,6 +30,10 @@ export class WorkflowManager extends EventEmitter {
       this.instance = new WorkflowManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    WorkflowManager.instance = null;
   }
 
   private constructor() {
@@ -444,4 +448,9 @@ export function getWorkflowManager(): WorkflowManager {
     workflowManagerInstance = WorkflowManager.getInstance();
   }
   return workflowManagerInstance;
+}
+
+export function _resetWorkflowManagerForTesting(): void {
+  workflowManagerInstance = null;
+  WorkflowManager._resetForTesting();
 }

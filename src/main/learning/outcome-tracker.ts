@@ -30,7 +30,7 @@ import { getLogger } from '../logging/logger';
 const logger = getLogger('OutcomeTracker');
 
 export class OutcomeTracker extends EventEmitter {
-  private static instance: OutcomeTracker;
+  private static instance: OutcomeTracker | null = null;
   private outcomes: TaskOutcome[] = [];
   private patterns: Map<string, TaskPattern> = new Map();
   private experiences: Map<string, Experience> = new Map();
@@ -56,6 +56,10 @@ export class OutcomeTracker extends EventEmitter {
       this.instance = new OutcomeTracker();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {
@@ -731,4 +735,8 @@ export class OutcomeTracker extends EventEmitter {
     const alpha = 1 / insight.appliedCount;
     insight.successRate = (1 - alpha) * insight.successRate + alpha * (success ? 1 : 0);
   }
+}
+
+export function getOutcomeTracker(): OutcomeTracker {
+  return OutcomeTracker.getInstance();
 }

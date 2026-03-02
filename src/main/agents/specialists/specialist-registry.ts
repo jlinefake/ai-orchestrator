@@ -28,7 +28,7 @@ import { uxSpecialist } from './profiles/ux-specialist';
 import { visualTestingSpecialist } from './profiles/visual-testing-specialist';
 
 export class SpecialistRegistryManager extends EventEmitter {
-  private static instance: SpecialistRegistryManager;
+  private static instance: SpecialistRegistryManager | null = null;
   private registry: SpecialistRegistry;
   private activeInstances: Map<string, SpecialistInstance> = new Map();
 
@@ -37,6 +37,10 @@ export class SpecialistRegistryManager extends EventEmitter {
       this.instance = new SpecialistRegistryManager();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    SpecialistRegistryManager.instance = null;
   }
 
   private constructor() {

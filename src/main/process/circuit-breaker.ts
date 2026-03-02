@@ -256,7 +256,7 @@ export class CircuitBreaker extends EventEmitter {
  * Circuit Breaker Registry - Manages circuit breakers for multiple workers
  */
 export class CircuitBreakerRegistry extends EventEmitter {
-  private static instance: CircuitBreakerRegistry;
+  private static instance: CircuitBreakerRegistry | null = null;
   private breakers: Map<string, CircuitBreaker> = new Map();
   private defaultConfig: CircuitBreakerConfig = DEFAULT_CIRCUIT_BREAKER_CONFIG;
 
@@ -265,6 +265,13 @@ export class CircuitBreakerRegistry extends EventEmitter {
       this.instance = new CircuitBreakerRegistry();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    if (this.instance) {
+      this.instance.destroy();
+      this.instance = null;
+    }
   }
 
   private constructor() {

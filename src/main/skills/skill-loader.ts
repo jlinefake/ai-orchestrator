@@ -24,7 +24,7 @@ export interface SkillLoadOptions {
 }
 
 export class SkillLoader extends EventEmitter {
-  private static instance: SkillLoader;
+  private static instance: SkillLoader | null = null;
   private loadedSkills: Map<string, LoadedSkill> = new Map();
   private tokenEstimator: (text: string) => number;
 
@@ -33,6 +33,10 @@ export class SkillLoader extends EventEmitter {
       this.instance = new SkillLoader();
     }
     return this.instance;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 
   private constructor() {

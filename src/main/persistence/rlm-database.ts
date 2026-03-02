@@ -47,7 +47,7 @@ import * as backup from './rlm/rlm-backup';
 export type { RLMDatabaseConfig };
 
 export class RLMDatabase extends EventEmitter {
-  private static instance: RLMDatabase;
+  private static instance: RLMDatabase | null = null;
   private db: Database.Database;
   private contentDir: string;
   private config: RLMDatabaseConfig;
@@ -80,8 +80,12 @@ export class RLMDatabase extends EventEmitter {
   static resetInstance(): void {
     if (this.instance) {
       this.instance.close();
-      this.instance = undefined as unknown as RLMDatabase;
+      this.instance = null;
     }
+  }
+
+  static _resetForTesting(): void {
+    this.resetInstance();
   }
 
   isInitialized(): boolean {

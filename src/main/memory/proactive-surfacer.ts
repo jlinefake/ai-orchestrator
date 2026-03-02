@@ -169,7 +169,7 @@ interface FileContext {
 // ============ Proactive Surfacer Class ============
 
 export class ProactiveSurfacer extends EventEmitter {
-  private static instance: ProactiveSurfacer;
+  private static instance: ProactiveSurfacer | null = null;
   private config: ProactiveSurfacerConfig;
   private memoryController: MemoryController | null = null;
 
@@ -686,6 +686,10 @@ export class ProactiveSurfacer extends EventEmitter {
    */
   static resetInstance(): void {
     ProactiveSurfacer.instance = undefined as unknown as ProactiveSurfacer;
+  }
+
+  static _resetForTesting(): void {
+    this.instance = null;
   }
 }
 

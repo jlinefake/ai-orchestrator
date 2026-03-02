@@ -28,7 +28,7 @@ export interface EmbeddingCacheEntry {
 }
 
 export class EmbeddingService extends EventEmitter {
-  private static instance: EmbeddingService;
+  private static instance: EmbeddingService | null = null;
   private logger = getLogger('EmbeddingService');
   private cache = new Map<string, EmbeddingCacheEntry>();
   private vocabulary = new Map<string, number>();
@@ -54,7 +54,7 @@ export class EmbeddingService extends EventEmitter {
     if (this.instance) {
       this.instance.clearCache();
       this.instance.removeAllListeners();
-      (this.instance as any) = undefined;
+      this.instance = null;
     }
   }
 
