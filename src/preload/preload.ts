@@ -456,6 +456,9 @@ const IPC_CHANNELS = {
   VERIFICATION_GET_RESULT: 'verification:get-result'
 } as const;
 
+// Build whitelist of all known channel values for runtime validation
+const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC_CHANNELS));
+
 // Response type
 interface IpcResponse {
   success: boolean;
@@ -4158,32 +4161,51 @@ const electronAPI = {
   },
 
   // ============================================
-  // Generic IPC Methods (for dynamic channels)
+  // Channel-Restricted IPC Methods
   // ============================================
 
+  // Whitelist of known channels — only these are reachable from the renderer.
+  // Prevents arbitrary IPC channel invocation from compromised renderer code.
+
   /**
-   * Generic invoke - call any IPC channel
-   * Use when specific method is not available
+   * Restricted invoke - only allows known IPC channels
    */
   invoke: (channel: string, payload?: unknown): Promise<IpcResponse> => {
+    if (!ALLOWED_CHANNELS.has(channel)) {
+      return Promise.resolve({
+        success: false,
+        error: {
+          code: 'IPC_CHANNEL_DENIED',
+          message: `Unknown IPC channel: ${channel}`,
+          timestamp: Date.now()
+        }
+      });
+    }
     return ipcRenderer.invoke(channel, payload);
   },
 
   /**
-   * Generic event listener - subscribe to any IPC channel
-   * Use when specific onXxx method is not available
+   * Restricted event listener - only allows known IPC channels
    * Returns an unsubscribe function
    */
   on: (channel: string, callback: (data: unknown) => void): (() => void) => {
+    if (!ALLOWED_CHANNELS.has(channel)) {
+      console.warn(`Blocked subscription to unknown IPC channel: ${channel}`);
+      return () => { /* noop */ };
+    }
     const handler = (_event: IpcRendererEvent, data: unknown) => callback(data);
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);
   },
 
   /**
-   * One-time event listener - fires once then auto-removes
+   * Restricted one-time event listener - only allows known IPC channels
    */
   once: (channel: string, callback: (data: unknown) => void): void => {
+    if (!ALLOWED_CHANNELS.has(channel)) {
+      console.warn(`Blocked one-time subscription to unknown IPC channel: ${channel}`);
+      return;
+    }
     ipcRenderer.once(channel, (_event: IpcRendererEvent, data: unknown) =>
       callback(data)
     );
