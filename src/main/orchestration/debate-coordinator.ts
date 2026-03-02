@@ -169,12 +169,14 @@ export class DebateCoordinator extends EventEmitter {
     const roundStart = Date.now();
     const contributions: DebateContribution[] = [];
 
-    // Generate diverse responses from each agent
-    for (let i = 0; i < debate.config.agents; i++) {
-      const temperature = this.getAgentTemperature(i, debate.config);
-      const contribution = await this.generateInitialResponse(debate, i, temperature);
-      contributions.push(contribution);
-    }
+    // Generate diverse responses from each agent in parallel
+    const results = await Promise.all(
+      Array.from({ length: debate.config.agents }, (_, i) => {
+        const temperature = this.getAgentTemperature(i, debate.config);
+        return this.generateInitialResponse(debate, i, temperature);
+      })
+    );
+    contributions.push(...results);
 
     const round: DebateSessionRound = {
       roundNumber: 1,
@@ -196,18 +198,20 @@ export class DebateCoordinator extends EventEmitter {
     const previousRound = debate.rounds[debate.rounds.length - 1];
     const contributions: DebateContribution[] = [];
 
-    // Each agent critiques the others
-    for (let i = 0; i < debate.config.agents; i++) {
-      const critiques = await this.generateCritiques(debate, i, previousRound.contributions);
-      const contribution: DebateContribution = {
-        agentId: `agent-${i}`,
-        content: previousRound.contributions[i].content, // Keep original content
-        critiques,
-        confidence: previousRound.contributions[i].confidence,
-        reasoning: 'Cross-critique of other positions',
-      };
-      contributions.push(contribution);
-    }
+    // Each agent critiques the others in parallel
+    const critiqueResults = await Promise.all(
+      Array.from({ length: debate.config.agents }, async (_, i) => {
+        const critiques = await this.generateCritiques(debate, i, previousRound.contributions);
+        return {
+          agentId: `agent-${i}`,
+          content: previousRound.contributions[i].content,
+          critiques,
+          confidence: previousRound.contributions[i].confidence,
+          reasoning: 'Cross-critique of other positions',
+        } as DebateContribution;
+      })
+    );
+    contributions.push(...critiqueResults);
 
     const round: DebateSessionRound = {
       roundNumber: debate.currentRound + 1,
@@ -229,16 +233,16 @@ export class DebateCoordinator extends EventEmitter {
     const critiqueRound = debate.rounds[debate.rounds.length - 1];
     const contributions: DebateContribution[] = [];
 
-    // Each agent defends their position and potentially revises
-    for (let i = 0; i < debate.config.agents; i++) {
-      // Collect critiques directed at this agent
-      const critiquesReceived = critiqueRound.contributions
-        .flatMap(c => c.critiques || [])
-        .filter(crit => crit.targetAgentId === `agent-${i}`);
-
-      const contribution = await this.generateDefense(debate, i, critiquesReceived);
-      contributions.push(contribution);
-    }
+    // Each agent defends their position and potentially revises in parallel
+    const defenseResults = await Promise.all(
+      Array.from({ length: debate.config.agents }, (_, i) => {
+        const critiquesReceived = critiqueRound.contributions
+          .flatMap(c => c.critiques || [])
+          .filter(crit => crit.targetAgentId === `agent-${i}`);
+        return this.generateDefense(debate, i, critiquesReceived);
+      })
+    );
+    contributions.push(...defenseResults);
 
     const round: DebateSessionRound = {
       roundNumber: debate.currentRound + 1,
