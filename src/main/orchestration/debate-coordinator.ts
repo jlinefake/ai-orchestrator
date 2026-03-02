@@ -27,7 +27,7 @@ import type {
   CritiqueSeverity,
 } from '../../shared/types/debate.types';
 import { getLogger } from '../logging/logger';
-import { estimateTokens } from '@shared/utils/token-counter';
+import { estimateTokens } from '../rlm/token-counter';
 
 const logger = getLogger('DebateCoordinator');
 

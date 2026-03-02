@@ -19,11 +19,13 @@ import {
   InputRequiredResponsePayloadSchema,
   UserActionRespondRawPayloadSchema,
   UserActionResponsePayloadSchema,
+  InstanceCompactPayloadSchema,
   validateIpcPayload
 } from '../../../shared/validation/ipc-schemas';
 import { InstanceManager } from '../../instance/instance-manager';
 import { WindowManager } from '../../window-manager';
 import { getSettingsManager } from '../../core/config/settings-manager';
+import { getCompactionCoordinator } from '../../context/compaction-coordinator';
 
 const logger = getLogger('InstanceHandlers');
 
@@ -460,6 +462,36 @@ export function registerInstanceHandlers(deps: {
           success: false,
           error: {
             code: 'LIST_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // ============================================
+  // Context Compaction Handlers
+  // ============================================
+
+  // Manual compact trigger
+  ipcMain.handle(
+    IPC_CHANNELS.INSTANCE_COMPACT,
+    async (event: IpcMainInvokeEvent, payload: unknown): Promise<IpcResponse> => {
+      try {
+        const validated = validateIpcPayload(
+          InstanceCompactPayloadSchema,
+          payload,
+          'INSTANCE_COMPACT'
+        );
+        const coordinator = getCompactionCoordinator();
+        const result = await coordinator.compactInstance(validated.instanceId);
+        return { success: true, data: result };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'COMPACT_FAILED',
             message: (error as Error).message,
             timestamp: Date.now()
           }

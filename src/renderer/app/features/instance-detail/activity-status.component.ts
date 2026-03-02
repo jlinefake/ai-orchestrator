@@ -1,18 +1,32 @@
 /**
  * Activity Status Component
  *
- * Displays the current activity status with a processing spinner.
- * Shows tool-aware messages like "Gathering context" or "Making edits".
+ * Displays the current activity status with a processing spinner and elapsed time.
+ * Shows tool-aware messages like "Gathering context" or "Making edits",
+ * orchestration activity like "Spawning child: reviewer", and elapsed time.
  */
 
 import {
   Component,
   input,
   computed,
+  signal,
   ChangeDetectionStrategy,
+  OnDestroy,
+  effect,
 } from '@angular/core';
 import { ProcessingSpinnerComponent } from './processing-spinner.component';
 import { InstanceStatus } from '../../core/state/instance.store';
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
 
 @Component({
   selector: 'app-activity-status',
@@ -23,6 +37,9 @@ import { InstanceStatus } from '../../core/state/instance.store';
       <div class="activity-status">
         <app-processing-spinner />
         <span class="activity-text">{{ displayText() }}</span>
+        @if (elapsedText()) {
+          <span class="elapsed-time">{{ elapsedText() }}</span>
+        }
       </div>
     }
   `,
@@ -46,15 +63,25 @@ import { InstanceStatus } from '../../core/state/instance.store';
       text-overflow: ellipsis;
       line-height: 18px;
     }
+
+    .elapsed-time {
+      font-size: 12px;
+      color: var(--text-tertiary, #666);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ActivityStatusComponent {
+export class ActivityStatusComponent implements OnDestroy {
   /** Current instance status */
   status = input.required<InstanceStatus>();
 
   /** Debounced activity text from store */
   activity = input<string>('');
+
+  /** Timestamp when the instance became busy (for elapsed time) */
+  busySince = input<number | undefined>(undefined);
 
   /** Whether to show the activity status */
   isActive = computed(() => {
@@ -80,4 +107,44 @@ export class ActivityStatusComponent {
         return '';
     }
   });
+
+  /** Elapsed time display text */
+  elapsedText = computed(() => {
+    const since = this.busySince();
+    const tick = this._tick();
+    if (!since || !this.isActive() || tick < 0) return '';
+
+    const elapsed = Date.now() - since;
+    // Only show after 3 seconds to avoid flashing for quick operations
+    if (elapsed < 3000) return '';
+    return formatElapsed(elapsed);
+  });
+
+  // Internal tick signal that forces re-computation every second
+  private _tick = signal(0);
+  private _timerHandle: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Start/stop the timer based on active state
+    effect(() => {
+      const active = this.isActive();
+      if (active && !this._timerHandle) {
+        this._tick.set(Date.now());
+        this._timerHandle = setInterval(() => {
+          this._tick.set(Date.now());
+        }, 1000);
+      } else if (!active && this._timerHandle) {
+        clearInterval(this._timerHandle);
+        this._timerHandle = null;
+        this._tick.set(-1);
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this._timerHandle) {
+      clearInterval(this._timerHandle);
+      this._timerHandle = null;
+    }
+  }
 }

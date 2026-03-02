@@ -228,10 +228,10 @@ describe('ErrorRecoveryManager', () => {
 
       // Spy on setTimeout to capture delays used
       const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(
-        (fn: TimerHandler, delay?: number) => {
+        ((fn: (...args: unknown[]) => void, delay?: number) => {
           delays.push(delay ?? 0);
-          return originalSetTimeout(fn as () => void, 0);
-        }
+          return originalSetTimeout(fn, 0);
+        }) as typeof setTimeout
       );
 
       const fn = vi.fn()

@@ -1924,6 +1924,14 @@ export const SettingsSetPayloadSchema = z.object({
   value: z.unknown(),
 });
 
+// ============ Context Compaction ============
+
+export const InstanceCompactPayloadSchema = z.object({
+  instanceId: InstanceIdSchema,
+});
+
+export type ValidatedInstanceCompactPayload = z.infer<typeof InstanceCompactPayloadSchema>;
+
 // ============ Validation Helper ============
 
 /**

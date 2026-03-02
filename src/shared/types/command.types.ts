@@ -122,6 +122,13 @@ $ARGUMENTS`,
     builtIn: true,
   },
   {
+    name: 'compact',
+    description: 'Compact context to free up space',
+    template: '',
+    hint: 'Compact the current conversation context',
+    builtIn: true,
+  },
+  {
     name: 'rlm',
     description: 'Open the RLM context manager',
     template: '',

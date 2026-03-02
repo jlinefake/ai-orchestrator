@@ -33,6 +33,14 @@ export const IPC_CHANNELS = {
   INSTANCE_REMOVED: 'instance:removed',
   INSTANCE_LIST: 'instance:list',
 
+  // Context compaction
+  INSTANCE_COMPACT: 'instance:compact',
+  INSTANCE_COMPACT_STATUS: 'instance:compact-status',
+  CONTEXT_WARNING: 'context:warning',
+
+  // Orchestration activity (real-time status updates)
+  ORCHESTRATION_ACTIVITY: 'orchestration:activity',
+
   // Cross-instance communication
   COMM_REQUEST_TOKEN: 'comm:request-token',
   COMM_SEND_MESSAGE: 'comm:send-message',
@@ -681,6 +689,19 @@ export interface IpcMessage<T = unknown> {
   timestamp: number;
   payload: T;
   replyChannel?: string;
+}
+
+// ============================================
+// Orchestration Activity Payloads
+// ============================================
+
+export type OrchestrationActivityCategory = 'orchestration' | 'debate' | 'verification' | 'task';
+
+export interface OrchestrationActivityPayload {
+  instanceId: string;
+  activity: string;
+  category: OrchestrationActivityCategory;
+  progress?: { current: number; total: number };
 }
 
 // ============================================
@@ -1645,6 +1666,30 @@ export interface StatsRecordToolUsagePayload {
 export interface StatsExportPayload {
   filePath: string;
   period?: 'day' | 'week' | 'month' | 'year' | 'all';
+}
+
+// ============================================
+// Context Compaction Payloads
+// ============================================
+
+export interface InstanceCompactPayload {
+  instanceId: string;
+}
+
+export interface InstanceCompactResultPayload {
+  instanceId: string;
+  success: boolean;
+  method: 'native' | 'restart-with-summary';
+  previousUsage?: ContextUsage;
+  newUsage?: ContextUsage;
+  summary?: string;
+  error?: string;
+}
+
+export interface ContextWarningPayload {
+  instanceId: string;
+  percentage: number;
+  level: 'warning' | 'critical' | 'emergency';
 }
 
 // ============================================

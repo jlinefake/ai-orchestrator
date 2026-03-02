@@ -287,6 +287,14 @@ export class InstanceCommunicationManager extends EventEmitter {
         return;
       }
 
+      // Skip user messages echoed back by the CLI — we add them explicitly
+      // in InstanceManager.sendInput() and InstanceLifecycle.createInstance().
+      // Without this filter, every user message appears twice (our emit + CLI echo),
+      // and during --resume replays, historical user messages are re-added.
+      if (message.type === 'user') {
+        return;
+      }
+
       const instance = this.deps.getInstance(instanceId);
       if (instance) {
         // Sync CLI-assigned session ID back to instance for accurate history archiving.

@@ -235,6 +235,48 @@ export class InstanceIpcService {
   }
 
   // ============================================
+  // Context Compaction
+  // ============================================
+
+  /**
+   * Compact context for an instance (manual trigger)
+   */
+  async compactInstance(instanceId: string): Promise<IpcResponse> {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.compactInstance({ instanceId });
+  }
+
+  /**
+   * Subscribe to compaction status updates
+   */
+  onCompactStatus(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
+    return this.api.onCompactStatus((data) => {
+      this.ngZone.run(() => callback(data));
+    });
+  }
+
+  /**
+   * Subscribe to context warning events
+   */
+  onContextWarning(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
+    return this.api.onContextWarning((data) => {
+      this.ngZone.run(() => callback(data));
+    });
+  }
+
+  /**
+   * Subscribe to orchestration activity updates (child spawn, debate, verification progress)
+   */
+  onOrchestrationActivity(callback: (data: unknown) => void): () => void {
+    if (!this.api) return () => { /* noop */ };
+    return this.api.onOrchestrationActivity((data: unknown) => {
+      this.ngZone.run(() => callback(data));
+    });
+  }
+
+  // ============================================
   // Input Required (CLI Permission Prompts)
   // ============================================
 

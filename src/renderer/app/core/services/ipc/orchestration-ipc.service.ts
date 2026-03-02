@@ -5,6 +5,8 @@
 import { Injectable, inject } from '@angular/core';
 import { ElectronIpcService, IpcResponse } from './electron-ipc.service';
 
+const DEFAULT_SKILL_SEARCH_PATHS = ['.claude/skills', '.codex/skills', 'skills'];
+
 @Injectable({ providedIn: 'root' })
 export class OrchestrationIpcService {
   private base = inject(ElectronIpcService);
@@ -13,8 +15,76 @@ export class OrchestrationIpcService {
     return this.base.getApi();
   }
 
-  private get ngZone() {
-    return this.base.getNgZone();
+  private notInElectron(): IpcResponse {
+    return { success: false, error: { message: 'Not in Electron' } };
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  private isIpcResponse(value: unknown): value is IpcResponse {
+    return this.isRecord(value) && typeof value['success'] === 'boolean';
+  }
+
+  private toIpcResponse<T>(value: unknown): IpcResponse<T> {
+    if (this.isIpcResponse(value)) {
+      return value as IpcResponse<T>;
+    }
+    return { success: true, data: value as T };
+  }
+
+  private async invokeChannel<T = unknown>(
+    channel: string,
+    payload?: unknown
+  ): Promise<IpcResponse<T>> {
+    if (!this.api) {
+      return this.notInElectron() as IpcResponse<T>;
+    }
+
+    try {
+      const raw = await this.base.invoke<T>(channel, payload);
+      return this.toIpcResponse<T>(raw);
+    } catch (error) {
+      return { success: false, error: { message: (error as Error).message } };
+    }
+  }
+
+  private toPhaseData(
+    phaseOrData?: string | Record<string, unknown>,
+    result?: unknown
+  ): Record<string, unknown> | undefined {
+    if (this.isRecord(phaseOrData)) {
+      return phaseOrData;
+    }
+
+    if (typeof phaseOrData === 'string') {
+      if (this.isRecord(result)) {
+        return { phaseId: phaseOrData, ...result };
+      }
+      if (result !== undefined) {
+        return { phaseId: phaseOrData, result };
+      }
+      return { phaseId: phaseOrData };
+    }
+
+    if (this.isRecord(result)) {
+      return result;
+    }
+
+    return undefined;
+  }
+
+  private resolveSkillSearchPaths(
+    searchPathsOrDirectory?: string[] | string
+  ): string[] {
+    if (Array.isArray(searchPathsOrDirectory)) {
+      return searchPathsOrDirectory.filter((path) => path.trim().length > 0);
+    }
+    if (typeof searchPathsOrDirectory === 'string' && searchPathsOrDirectory.trim().length > 0) {
+      return [searchPathsOrDirectory.trim()];
+    }
+    return [...DEFAULT_SKILL_SEARCH_PATHS];
   }
 
   // ============================================
@@ -25,16 +95,14 @@ export class OrchestrationIpcService {
    * List available workflow templates
    */
   async workflowListTemplates(): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowListTemplates();
+    return this.invokeChannel('workflow:list-templates');
   }
 
   /**
    * Get a specific workflow template
    */
   async workflowGetTemplate(templateId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowGetTemplate(templateId);
+    return this.invokeChannel('workflow:get-template', { templateId });
   }
 
   /**
@@ -45,64 +113,79 @@ export class OrchestrationIpcService {
     templateId: string;
     config?: Record<string, unknown>;
   }): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowStart(payload);
+    return this.invokeChannel('workflow:start', {
+      instanceId: payload.instanceId,
+      templateId: payload.templateId,
+    });
   }
 
   /**
    * Get workflow execution status
    */
   async workflowGetExecution(executionId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowGetExecution(executionId);
+    return this.invokeChannel('workflow:get-execution', { executionId });
   }
 
   /**
    * Get workflow execution for instance
    */
   async workflowGetByInstance(instanceId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowGetByInstance(instanceId);
+    return this.invokeChannel('workflow:get-by-instance', { instanceId });
   }
 
   /**
    * Complete a workflow phase
    */
-  async workflowCompletePhase(executionId: string, phaseId: string, result?: unknown): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowCompletePhase(executionId, phaseId, result);
+  async workflowCompletePhase(
+    executionId: string,
+    phaseOrData?: string | Record<string, unknown>,
+    result?: unknown
+  ): Promise<IpcResponse> {
+    const phaseData = this.toPhaseData(phaseOrData, result);
+    return this.invokeChannel('workflow:complete-phase', {
+      executionId,
+      phaseData,
+    });
   }
 
   /**
    * Satisfy a workflow gate
    */
-  async workflowSatisfyGate(executionId: string, gateId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowSatisfyGate(executionId, gateId);
+  async workflowSatisfyGate(
+    executionId: string,
+    responseOrGateId: string | { approved?: boolean; selection?: string; answer?: string }
+  ): Promise<IpcResponse> {
+    const response = typeof responseOrGateId === 'string'
+      ? { answer: responseOrGateId }
+      : responseOrGateId;
+    return this.invokeChannel('workflow:satisfy-gate', { executionId, response });
   }
 
   /**
    * Skip a workflow phase
    */
-  async workflowSkipPhase(executionId: string, phaseId: string, reason?: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowSkipPhase(executionId, phaseId, reason);
+  async workflowSkipPhase(
+    executionId: string,
+    _phaseId?: string,
+    _reason?: string
+  ): Promise<IpcResponse> {
+    void _phaseId;
+    void _reason;
+    return this.invokeChannel('workflow:skip-phase', { executionId });
   }
 
   /**
    * Cancel a workflow
    */
   async workflowCancel(executionId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowCancel(executionId);
+    return this.invokeChannel('workflow:cancel', { executionId });
   }
 
   /**
    * Get workflow prompt addition
    */
   async workflowGetPromptAddition(executionId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.workflowGetPromptAddition(executionId);
+    return this.invokeChannel('workflow:get-prompt-addition', { executionId });
   }
 
   // ============================================
@@ -113,16 +196,59 @@ export class OrchestrationIpcService {
    * List available review agents
    */
   async reviewListAgents(): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.reviewListAgents();
+    return this.invokeChannel('review:list-agents');
   }
 
   /**
    * Get a specific review agent
    */
   async reviewGetAgent(agentId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.reviewGetAgent(agentId);
+    return this.invokeChannel('review:get-agent', { agentId });
+  }
+
+  /**
+   * Start a review session
+   */
+  async reviewStartSession(payload: {
+    instanceId: string;
+    agentIds: string[];
+    files: string[];
+    diffOnly?: boolean;
+  }): Promise<IpcResponse> {
+    return this.invokeChannel('review:start-session', payload);
+  }
+
+  /**
+   * Get a review session
+   */
+  async reviewGetSession(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('review:get-session', { sessionId });
+  }
+
+  /**
+   * Get issues for a review session
+   */
+  async reviewGetIssues(payload: {
+    sessionId: string;
+    severity?: string;
+    agentId?: string;
+  }): Promise<IpcResponse> {
+    return this.invokeChannel('review:get-issues', payload);
+  }
+
+  /**
+   * Acknowledge or unacknowledge a review issue
+   */
+  async reviewAcknowledgeIssue(
+    sessionId: string,
+    issueId: string,
+    acknowledged: boolean
+  ): Promise<IpcResponse> {
+    return this.invokeChannel('review:acknowledge-issue', {
+      sessionId,
+      issueId,
+      acknowledged,
+    });
   }
 
   // ============================================
@@ -134,35 +260,100 @@ export class OrchestrationIpcService {
    */
   async worktreeCreate(payload: {
     instanceId: string;
+    taskDescription: string;
     baseBranch?: string;
     branchName?: string;
+    config?: Record<string, unknown>;
   }): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.worktreeCreate(payload);
+    return this.invokeChannel('worktree:create', payload);
   }
 
   /**
    * List worktrees
    */
   async worktreeList(instanceId?: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.worktreeList(instanceId);
+    const response = await this.invokeChannel<unknown[]>('worktree:list-sessions');
+    if (!instanceId || !response.success || !Array.isArray(response.data)) {
+      return response as IpcResponse;
+    }
+    const filtered = response.data.filter(
+      (session) => this.isRecord(session) && session['instanceId'] === instanceId
+    );
+    return { ...response, data: filtered };
   }
 
   /**
-   * Delete a worktree
+   * Get a specific worktree session
+   */
+  async worktreeGetSession(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:get-session', { sessionId });
+  }
+
+  /**
+   * Complete a worktree session (ready to merge)
+   */
+  async worktreeComplete(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:complete', { sessionId });
+  }
+
+  /**
+   * Preview worktree merge
+   */
+  async worktreePreviewMerge(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:preview-merge', { sessionId });
+  }
+
+  /**
+   * Merge a completed worktree
+   */
+  async worktreeMerge(payload: {
+    sessionId: string;
+    strategy?: string;
+    commitMessage?: string;
+  }): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:merge', payload);
+  }
+
+  /**
+   * Detect conflicts across sessions
+   */
+  async worktreeDetectConflicts(sessionIds: string[]): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:detect-conflicts', { sessionIds });
+  }
+
+  /**
+   * Sync a worktree session with remote/base branch
+   */
+  async worktreeSync(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:sync', { sessionId });
+  }
+
+  /**
+   * Abandon a worktree session
+   */
+  async worktreeAbandon(sessionId: string, reason?: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:abandon', { sessionId, reason });
+  }
+
+  /**
+   * Cleanup a worktree session (local delete)
+   */
+  async worktreeCleanup(sessionId: string): Promise<IpcResponse> {
+    return this.invokeChannel('worktree:cleanup', { sessionId });
+  }
+
+  /**
+   * Legacy alias for delete
    */
   async worktreeDelete(worktreeId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.worktreeDelete(worktreeId);
+    return this.worktreeCleanup(worktreeId);
   }
 
   /**
-   * Get worktree status
+   * Legacy alias for get status
    */
   async worktreeGetStatus(worktreeId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.worktreeGetStatus(worktreeId);
+    return this.worktreeGetSession(worktreeId);
   }
 
   // ============================================
@@ -360,16 +551,41 @@ export class OrchestrationIpcService {
    * Get supervision tree
    */
   async supervisionGetTree(rootInstanceId?: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.supervisionGetTree(rootInstanceId);
+    return this.invokeChannel('supervision:get-tree', { instanceId: rootInstanceId });
   }
 
   /**
    * Get supervision health status
    */
   async supervisionGetHealth(): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.supervisionGetHealth();
+    return this.invokeChannel('supervision:get-health');
+  }
+
+  /**
+   * Get supervision hierarchy + stats
+   */
+  async supervisionGetHierarchy(): Promise<IpcResponse> {
+    return this.invokeChannel('supervision:get-hierarchy');
+  }
+
+  /**
+   * Get all supervision registrations
+   */
+  async supervisionGetAllRegistrations(): Promise<IpcResponse> {
+    return this.invokeChannel('supervision:get-all-registrations');
+  }
+
+  /**
+   * Signal a worker failure to supervision tree
+   */
+  async supervisionHandleFailure(
+    childInstanceId: string,
+    error: string
+  ): Promise<IpcResponse> {
+    return this.invokeChannel('supervision:handle-failure', {
+      childInstanceId,
+      error,
+    });
   }
 
   // ============================================
@@ -384,40 +600,35 @@ export class OrchestrationIpcService {
     context?: string;
     config?: Record<string, unknown>;
   }): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.debateStart(payload);
+    return this.invokeChannel('debate:start', payload);
   }
 
   /**
    * Get debate result
    */
   async debateGetResult(debateId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.debateGetResult(debateId);
+    return this.invokeChannel('debate:get-result', debateId);
   }
 
   /**
    * Get active debates
    */
   async debateGetActive(): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.debateGetActive();
+    return this.invokeChannel('debate:get-active');
   }
 
   /**
    * Cancel debate
    */
   async debateCancel(debateId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.debateCancel(debateId);
+    return this.invokeChannel('debate:cancel', debateId);
   }
 
   /**
    * Get debate stats
    */
   async debateGetStats(): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.debateGetStats();
+    return this.invokeChannel('debate:get-stats');
   }
 
   // ============================================
@@ -427,9 +638,9 @@ export class OrchestrationIpcService {
   /**
    * Discover skills in a directory
    */
-  async skillsDiscover(directory?: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.skillsDiscover(directory);
+  async skillsDiscover(searchPathsOrDirectory?: string[] | string): Promise<IpcResponse> {
+    const searchPaths = this.resolveSkillSearchPaths(searchPathsOrDirectory);
+    return this.invokeChannel('skills:discover', { searchPaths });
   }
 
   /**
@@ -452,7 +663,7 @@ export class OrchestrationIpcService {
    * Load a skill
    */
   async skillsLoad(skillId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    if (!this.api) return this.notInElectron();
     return this.api.skillsLoad(skillId);
   }
 
@@ -460,39 +671,51 @@ export class OrchestrationIpcService {
    * Unload a skill
    */
   async skillsUnload(skillId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    if (!this.api) return this.notInElectron();
     return this.api.skillsUnload(skillId);
   }
 
   /**
    * Load reference documentation for a skill
    */
-  async skillsLoadReference(skillId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.skillsLoadReference(skillId);
+  async skillsLoadReference(skillId: string, referencePath: string): Promise<IpcResponse> {
+    if (!referencePath) {
+      return { success: false, error: { message: 'referencePath is required' } };
+    }
+    return this.invokeChannel('skills:load-reference', { skillId, referencePath });
   }
 
   /**
    * Load example for a skill
    */
-  async skillsLoadExample(skillId: string, exampleId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.skillsLoadExample(skillId, exampleId);
+  async skillsLoadExample(skillId: string, examplePath: string): Promise<IpcResponse> {
+    if (!examplePath) {
+      return { success: false, error: { message: 'examplePath is required' } };
+    }
+    return this.invokeChannel('skills:load-example', { skillId, examplePath });
   }
 
   /**
    * Match skills to a query
    */
   async skillsMatch(query: string, maxResults?: number): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.skillsMatch(query, maxResults);
+    const response = await this.invokeChannel<unknown[]>('skills:match', { text: query });
+    if (
+      response.success &&
+      Array.isArray(response.data) &&
+      typeof maxResults === 'number' &&
+      maxResults > 0
+    ) {
+      return { ...response, data: response.data.slice(0, maxResults) };
+    }
+    return response;
   }
 
   /**
    * Get skill memory
    */
-  async skillsGetMemory(skillId: string): Promise<IpcResponse> {
-    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
-    return this.api.skillsGetMemory(skillId);
+  async skillsGetMemory(_skillId?: string): Promise<IpcResponse> {
+    void _skillId;
+    return this.invokeChannel('skills:get-memory');
   }
 }

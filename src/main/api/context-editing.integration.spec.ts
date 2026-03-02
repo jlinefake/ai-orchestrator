@@ -7,7 +7,7 @@
  * Phase 0.5 verification tests
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   CONTEXT_MANAGEMENT_BETA,
@@ -19,15 +19,36 @@ import {
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const TEST_MODEL = 'claude-sonnet-4-5-20250929';
+const hasApiKey = Boolean(API_KEY);
 
-// Skip tests if no API key
-const describeIfApiKey = API_KEY ? describe : describe.skip;
+function createMockAnthropicClient(): Anthropic {
+  const create = vi.fn(async () => {
+    return {
+      id: `msg_mock_${Math.random().toString(36).slice(2, 10)}`,
+      content: [{ type: 'text', text: 'Mock response' }],
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+      },
+    };
+  });
 
-describeIfApiKey('Context Editing Integration', () => {
+  return {
+    beta: {
+      messages: {
+        create,
+      },
+    },
+  } as unknown as Anthropic;
+}
+
+describe('Context Editing Integration', () => {
   let client: Anthropic;
 
   beforeAll(() => {
-    client = new Anthropic({ apiKey: API_KEY });
+    client = hasApiKey
+      ? new Anthropic({ apiKey: API_KEY })
+      : createMockAnthropicClient();
   });
 
   describe('context_management parameter syntax', () => {

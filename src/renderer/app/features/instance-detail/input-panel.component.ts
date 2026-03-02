@@ -17,7 +17,9 @@ import {
 } from '@angular/core';
 import { CommandStore } from '../../core/state/command.store';
 import { DraftService } from '../../core/services/draft.service';
+import { PromptSuggestionService } from '../../core/services/prompt-suggestion.service';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
+import type { OutputMessage, InstanceStatus } from '../../../../shared/types/instance.types';
 
 @Component({
   selector: 'app-input-panel',
@@ -104,16 +106,26 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
           <span class="attach-icon">+</span>
         </button>
 
-        <textarea
-          class="message-input"
-          [placeholder]="placeholder()"
-          [disabled]="disabled()"
-          [value]="message()"
-          (input)="onInput($event)"
-          (keydown)="onKeyDown($event)"
-          rows="1"
-          #textareaRef
-        ></textarea>
+        <div class="textarea-wrapper" [class.has-ghost]="showGhostText()">
+          @if (showGhostText()) {
+            <div class="ghost-text" aria-hidden="true">
+              <span class="ghost-invisible">{{ message() }}</span><span class="ghost-visible">{{ ghostRemainder() }}</span>
+            </div>
+          }
+          <textarea
+            class="message-input"
+            [class.has-ghost]="showGhostText()"
+            [placeholder]="showGhostText() ? '' : placeholder()"
+            [disabled]="disabled()"
+            [value]="message()"
+            (input)="onInput($event)"
+            (keydown)="onKeyDown($event)"
+            (focus)="onFocus()"
+            (blur)="onBlur()"
+            rows="1"
+            #textareaRef
+          ></textarea>
+        </div>
 
         <button
           class="btn-send"
@@ -126,7 +138,11 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       </div>
 
       <div class="input-hints">
-        <span class="hint">Press Enter to send, Shift+Enter for new line</span>
+        @if (showGhostText()) {
+          <span class="hint hint-ghost">Tab or → to accept suggestion</span>
+        } @else {
+          <span class="hint">Press Enter to send, Shift+Enter for new line</span>
+        }
         @if (isRespawning()) {
           <span class="hint hint-respawning">Resuming session...</span>
         } @else if (isBusy()) {
@@ -315,8 +331,21 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       align-items: flex-end;
     }
 
-    .message-input {
+    /* Textarea Wrapper - Container for ghost text overlay */
+    .textarea-wrapper {
+      position: relative;
       flex: 1;
+      min-width: 0;
+      border-radius: var(--radius-md);
+    }
+
+    .textarea-wrapper.has-ghost {
+      background: var(--bg-tertiary);
+      border-radius: var(--radius-md);
+    }
+
+    .message-input {
+      width: 100%;
       min-height: 46px;
       max-height: 200px;
       padding: var(--spacing-sm) var(--spacing-md);
@@ -329,6 +358,9 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
       font-size: 14px;
       color: var(--text-primary);
       transition: all var(--transition-fast);
+      position: relative;
+      z-index: 2;
+      box-sizing: border-box;
 
       &::placeholder {
         color: var(--text-muted);
@@ -344,6 +376,45 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
         opacity: 0.4;
         cursor: not-allowed;
       }
+
+      &.has-ghost {
+        background: transparent;
+      }
+    }
+
+    /* Ghost Text Overlay - Faded suggestion behind textarea */
+    .ghost-text {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: var(--spacing-sm) var(--spacing-md);
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font-display);
+      font-size: 14px;
+      line-height: 1.5;
+      border: 1px solid transparent; /* Match textarea border space */
+      box-sizing: border-box;
+    }
+
+    .ghost-invisible {
+      visibility: hidden;
+      white-space: pre-wrap;
+    }
+
+    .ghost-visible {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    .hint-ghost {
+      color: var(--text-muted);
+      opacity: 0.7;
     }
 
     /* Action Buttons - Attach and Send */
@@ -612,6 +683,7 @@ import type { CommandTemplate } from '../../../../shared/types/command.types';
 export class InputPanelComponent implements OnDestroy {
   private commandStore = inject(CommandStore);
   private draftService = inject(DraftService);
+  private suggestionService = inject(PromptSuggestionService);
   private filePreviewUrls = new Map<File, string>();
   private textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('textareaRef');
 
@@ -624,6 +696,8 @@ export class InputPanelComponent implements OnDestroy {
   queuedMessages = input<{ message: string; files?: File[] }[]>([]);
   isBusy = input<boolean>(false);
   isRespawning = input<boolean>(false);
+  outputMessages = input<OutputMessage[]>([]);
+  instanceStatus = input<InstanceStatus>('idle');
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
@@ -672,6 +746,37 @@ export class InputPanelComponent implements OnDestroy {
       .slice(0, 8);
   });
 
+  // Ghost text suggestion state
+  ghostSuggestion = signal<string | null>(null);
+  private isFocused = signal(false);
+
+  // Computed: whether to show ghost text
+  showGhostText = computed(() => {
+    const suggestion = this.ghostSuggestion();
+    if (!suggestion) return false;
+    if (!this.isFocused()) return false;
+    if (this.showCommandSuggestions()) return false;
+    if (this.isBusy()) return false;
+    if (this.isRespawning()) return false;
+    if (this.disabled()) return false;
+
+    const msg = this.message();
+    // Show if empty, or if current text is a case-insensitive prefix of suggestion
+    return !msg || suggestion.toLowerCase().startsWith(msg.toLowerCase());
+  });
+
+  // Computed: the remaining ghost text after what the user has typed
+  ghostRemainder = computed(() => {
+    const suggestion = this.ghostSuggestion();
+    if (!suggestion) return '';
+    const msg = this.message();
+    if (!msg) return suggestion;
+    return suggestion.slice(msg.length);
+  });
+
+  // ViewChild for textarea
+  private textareaEl = viewChild<ElementRef<HTMLTextAreaElement>>('textareaRef');
+
   constructor() {
     // Load commands on init
     this.commandStore.loadCommands();
@@ -704,6 +809,22 @@ export class InputPanelComponent implements OnDestroy {
           this.filePreviewUrls.delete(file);
         }
       }
+    });
+
+    // Generate ghost text suggestion when conversation state changes
+    effect(() => {
+      // Track these signals to re-run when they change
+      this.outputMessages();
+      const status = this.instanceStatus();
+      const currentText = this.message();
+
+      // Don't generate while busy or when user has typed something
+      if (status === 'busy' || status === 'initializing' || currentText) {
+        this.ghostSuggestion.set(null);
+        return;
+      }
+
+      this.generateSuggestion();
     });
   }
 
@@ -740,6 +861,9 @@ export class InputPanelComponent implements OnDestroy {
     } else {
       this.showCommandSuggestions.set(false);
     }
+
+    // Update ghost text suggestion
+    this.updateGhostSuggestion(value);
 
     // Auto-resize textarea - debounced via requestAnimationFrame to avoid blocking input
     this.scheduleTextareaResize(textarea);
@@ -795,6 +919,30 @@ export class InputPanelComponent implements OnDestroy {
           event.preventDefault();
           this.showCommandSuggestions.set(false);
           return;
+      }
+    }
+
+    // Ghost text acceptance
+    if (this.showGhostText()) {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        this.acceptGhostSuggestion();
+        return;
+      }
+
+      if (event.key === 'ArrowRight') {
+        const textarea = event.target as HTMLTextAreaElement;
+        if (textarea.selectionStart === this.message().length) {
+          event.preventDefault();
+          this.acceptGhostSuggestion();
+          return;
+        }
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.dismissGhostSuggestion();
+        return;
       }
     }
 
@@ -857,6 +1005,72 @@ export class InputPanelComponent implements OnDestroy {
     if (textarea) {
       textarea.style.height = 'auto';
     }
+  }
+
+  // ============================================
+  // Ghost Text Suggestion Methods
+  // ============================================
+
+  onFocus(): void {
+    this.isFocused.set(true);
+  }
+
+  onBlur(): void {
+    this.isFocused.set(false);
+  }
+
+  private generateSuggestion(): void {
+    const suggestion = this.suggestionService.getSuggestion({
+      messages: this.outputMessages(),
+      status: this.instanceStatus(),
+      hasFiles: this.pendingFiles().length > 0,
+      currentText: this.message(),
+    });
+    this.ghostSuggestion.set(suggestion);
+  }
+
+  private updateGhostSuggestion(currentText: string): void {
+    // Don't show ghost text when command suggestions are active
+    if (this.showCommandSuggestions()) {
+      this.ghostSuggestion.set(null);
+      return;
+    }
+
+    // If user typed text that still matches current suggestion prefix, keep it
+    const current = this.ghostSuggestion();
+    if (current && currentText && current.toLowerCase().startsWith(currentText.toLowerCase())) {
+      return; // Still a prefix match, keep the ghost
+    }
+
+    // If field is now empty, regenerate suggestion
+    if (!currentText) {
+      this.generateSuggestion();
+    } else {
+      // User typed something that doesn't match — dismiss
+      this.ghostSuggestion.set(null);
+    }
+  }
+
+  private acceptGhostSuggestion(): void {
+    const suggestion = this.ghostSuggestion();
+    if (!suggestion) return;
+
+    this.message.set(suggestion);
+    this.ghostSuggestion.set(null);
+
+    // Save draft
+    this.draftService.setDraft(this.instanceId(), suggestion);
+
+    // Update textarea value and resize
+    const el = this.textareaEl();
+    if (el) {
+      el.nativeElement.value = suggestion;
+      this.scheduleTextareaResize(el.nativeElement);
+    }
+  }
+
+  private dismissGhostSuggestion(): void {
+    this.ghostSuggestion.set(null);
   }
 
   getFileIcon(file: File): string {

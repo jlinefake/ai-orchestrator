@@ -8,7 +8,7 @@
  * 4. Re-exports queries for consumers
  */
 
-import { Injectable, inject, OnDestroy } from '@angular/core';
+import { Injectable, inject, OnDestroy, signal } from '@angular/core';
 import { ElectronIpcService } from '../../services/ipc';
 import { UpdateBatcherService, StateUpdate } from '../../services/update-batcher.service';
 import { ActivityDebouncerService } from '../../services/activity-debouncer.service';
@@ -24,6 +24,7 @@ import { InstanceMessagingStore } from './instance-messaging.store';
 
 // Types
 import type { InstanceStatus, OutputMessage, CreateInstanceConfig } from './instance.types';
+import type { OrchestrationActivityPayload } from '../../../../../shared/types/ipc.types';
 
 @Injectable({ providedIn: 'root' })
 export class InstanceStore implements OnDestroy {
@@ -42,6 +43,12 @@ export class InstanceStore implements OnDestroy {
   private batcher = inject(UpdateBatcherService);
   private activityDebouncer = inject(ActivityDebouncerService);
   private unsubscribes: (() => void)[] = [];
+
+  // Compaction state (tracked per instance)
+  private _compactingInstances = signal(new Set<string>());
+
+  // Track when each instance entered 'busy' status (for elapsed time display)
+  private _busySince = signal(new Map<string, number>());
 
   // ============================================
   // Re-export Queries for backwards compatibility
@@ -138,6 +145,41 @@ export class InstanceStore implements OnDestroy {
         }
       })
     );
+
+    // Listen for orchestration activity (child spawn, debate, verification progress)
+    this.unsubscribes.push(
+      this.ipc.onOrchestrationActivity((rawData: unknown) => {
+        const data = rawData as OrchestrationActivityPayload;
+        if (data.instanceId && data.activity) {
+          this.activityDebouncer.setActivity(
+            data.instanceId,
+            data.activity,
+            `orch:${data.category}`
+          );
+        }
+      })
+    );
+
+    // Listen for compaction status updates (auto-compact and manual)
+    this.unsubscribes.push(
+      this.ipc.onCompactStatus((rawData: unknown) => {
+        const data = rawData as { instanceId: string; status: string };
+        if (data.status === 'started') {
+          this._compactingInstances.update(set => {
+            const next = new Set(set);
+            next.add(data.instanceId);
+            return next;
+          });
+        } else {
+          // completed or error
+          this._compactingInstances.update(set => {
+            const next = new Set(set);
+            next.delete(data.instanceId);
+            return next;
+          });
+        }
+      })
+    );
   }
 
   private setupBatcher(): void {
@@ -160,6 +202,9 @@ export class InstanceStore implements OnDestroy {
       this.activityDebouncer.clearActivity(update.instanceId);
       this.outputStore.flushInstanceOutput(update.instanceId);
     }
+
+    // Track busy-since timestamps for elapsed time display
+    this.updateBusySince(update.instanceId, newStatus);
 
     // Update state FIRST so processMessageQueue sees the new status
     this.stateService.state.update((current) => {
@@ -186,13 +231,14 @@ export class InstanceStore implements OnDestroy {
   }
 
   private applyBatchUpdates(updates: StateUpdate[]): void {
-    // Handle activity clearing for idle/terminated statuses
+    // Handle activity clearing and busy-since tracking for idle/terminated statuses
     for (const update of updates) {
       const newStatus = update.status as InstanceStatus;
       if (newStatus === 'idle' || newStatus === 'terminated') {
         this.activityDebouncer.clearActivity(update.instanceId);
         this.outputStore.flushInstanceOutput(update.instanceId);
       }
+      this.updateBusySince(update.instanceId, newStatus);
     }
 
     // Update state FIRST so processMessageQueue sees the new statuses
@@ -222,6 +268,32 @@ export class InstanceStore implements OnDestroy {
         this.messagingStore.processMessageQueue(update.instanceId);
       }
     }
+  }
+
+  // ============================================
+  // Busy-Since Tracking
+  // ============================================
+
+  private updateBusySince(instanceId: string, newStatus: InstanceStatus): void {
+    this._busySince.update(map => {
+      const next = new Map(map);
+      if (newStatus === 'busy') {
+        // Only set if not already tracking (so we record the initial transition)
+        if (!next.has(instanceId)) {
+          next.set(instanceId, Date.now());
+        }
+      } else {
+        next.delete(instanceId);
+      }
+      return next;
+    });
+  }
+
+  /** Get the timestamp when the selected instance became busy (for elapsed time) */
+  getSelectedInstanceBusySince(): number | undefined {
+    const id = this.queries.selectedInstanceId();
+    if (!id) return undefined;
+    return this._busySince().get(id);
   }
 
   // ============================================
@@ -358,5 +430,18 @@ export class InstanceStore implements OnDestroy {
   /** Validate files before sending - returns array of error messages */
   validateFiles(files: File[]): string[] {
     return this.listStore.validateFiles(files);
+  }
+
+  /** Check if an instance is currently compacting */
+  isInstanceCompacting(instanceId: string): boolean {
+    return this._compactingInstances().has(instanceId);
+  }
+
+  /** Compact context for an instance */
+  async compactInstance(instanceId: string): Promise<void> {
+    const response = await this.ipc.compactInstance(instanceId);
+    if (!response.success) {
+      console.error('Compaction failed:', response.error?.message);
+    }
   }
 }

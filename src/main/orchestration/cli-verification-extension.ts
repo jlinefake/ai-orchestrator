@@ -19,7 +19,7 @@ import { getProviderRegistry } from '../providers/provider-registry';
 import { BaseProvider } from '../providers/provider-interface';
 import { selectPersonalities, PERSONALITY_PROMPTS } from './personalities';
 import { generateId } from '../../shared/utils/id-generator';
-import { estimateTokens } from '@shared/utils/token-counter';
+import { estimateTokens } from '../rlm/token-counter';
 
 /**
  * Configuration for CLI-based verification

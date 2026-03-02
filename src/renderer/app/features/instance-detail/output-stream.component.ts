@@ -124,7 +124,13 @@ interface DisplayItem {
           }
         } @else if (item.message) {
           <!-- Regular message -->
-          @if (hasContent(item.message)) {
+          @if (isCompactionBoundary(item.message)) {
+            <div class="compaction-boundary">
+              <div class="boundary-line"></div>
+              <span class="boundary-label">{{ getCompactionLabel(item.message) }}</span>
+              <div class="boundary-line"></div>
+            </div>
+          } @else if (hasContent(item.message)) {
             <div class="message" [class]="'message-' + item.message.type">
               <div class="message-header">
                 <span class="message-type">{{
@@ -516,6 +522,34 @@ interface DisplayItem {
           flex-shrink: 0;
         }
       }
+
+      .compaction-boundary {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+        padding: var(--spacing-sm) 0;
+        user-select: none;
+      }
+
+      .boundary-line {
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(
+          to right,
+          transparent,
+          var(--border-color),
+          transparent
+        );
+      }
+
+      .boundary-label {
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--text-muted);
+        white-space: nowrap;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
     `
   ],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -805,6 +839,24 @@ export class OutputStreamComponent {
       return true;
     }
     return !!message.content?.trim();
+  }
+
+  isCompactionBoundary(message: OutputMessage): boolean {
+    return message.type === 'system' && !!message.metadata?.['isCompactionBoundary'];
+  }
+
+  getCompactionLabel(message: OutputMessage): string {
+    const meta = message.metadata;
+    if (!meta) return 'Context compacted';
+
+    const prev = meta['previousUsage'] as { percentage?: number } | undefined;
+    const next = meta['newUsage'] as { percentage?: number } | undefined;
+
+    if (prev?.percentage !== undefined && next?.percentage !== undefined) {
+      return `Context compacted (${Math.round(prev.percentage)}% → ${Math.round(next.percentage)}%)`;
+    }
+
+    return 'Context compacted';
   }
 
   /**

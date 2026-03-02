@@ -20,6 +20,10 @@ import type {
   ContextQuery,
   QueryType
 } from '../../../../shared/types/rlm.types';
+import type {
+  StrategyRecommendation,
+  TaskPattern
+} from '../../../../shared/types/self-improvement.types';
 import { ElectronIpcService } from '../../core/services/ipc';
 import { RlmContextBrowserComponent } from './rlm-context-browser.component';
 
@@ -71,17 +75,77 @@ interface QueryResult {
       </div>
 
       <div class="rlm-body">
-        <app-rlm-context-browser
-          #browser
-          [store]="store()"
-          [session]="session()"
-          (createStore)="createStore()"
-          (startSession)="startSession()"
-          (executeQueryRequest)="executeQuery($event)"
-          (sectionSelected)="handleSectionSelected($event)"
-          (queryExecuted)="handleQueryExecuted($event)"
-          (storeUpdated)="handleStoreUpdated($event)"
-        />
+        <div class="rlm-main">
+          <app-rlm-context-browser
+            #browser
+            [store]="store()"
+            [session]="session()"
+            (createStore)="createStore()"
+            (startSession)="startSession()"
+            (executeQueryRequest)="executeQuery($event)"
+            (sectionSelected)="handleSectionSelected($event)"
+            (queryExecuted)="handleQueryExecuted($event)"
+            (storeUpdated)="handleStoreUpdated($event)"
+          />
+        </div>
+
+        <div class="rlm-side">
+          <div class="side-card">
+            <div class="side-title">Learned Patterns</div>
+            @if (patterns().length > 0) {
+              <ul class="pattern-list">
+                @for (pattern of patterns().slice(0, 12); track pattern.type + ':' + pattern.value) {
+                  <li>
+                    <div class="pattern-head">
+                      <span class="pattern-type">{{ pattern.type }}</span>
+                      <span class="pattern-score">{{ (pattern.effectiveness * 100).toFixed(0) }}%</span>
+                    </div>
+                    <div class="pattern-value">{{ pattern.value }}</div>
+                    <div class="pattern-meta">{{ pattern.sampleSize }} samples</div>
+                  </li>
+                }
+              </ul>
+            } @else {
+              <div class="hint">No patterns recorded yet.</div>
+            }
+          </div>
+
+          <div class="side-card">
+            <div class="side-title">Strategy Suggestions</div>
+            <label class="toolbar-label" for="rlm-context-input">Context</label>
+            <textarea
+              id="rlm-context-input"
+              class="context-input"
+              [value]="suggestionContext()"
+              (input)="onSuggestionContextInput($event)"
+              placeholder="Describe the task to get RLM strategy suggestions"
+            ></textarea>
+            <div class="side-actions">
+              <button class="toolbar-btn" type="button" (click)="generateSuggestions()">
+                Suggest
+              </button>
+            </div>
+
+            @if (strategyRecommendation(); as recommendation) {
+              <div class="recommendation">
+                <div class="rec-main">
+                  <span>{{ recommendation.recommendedAgent }}</span>
+                  <span>{{ recommendation.recommendedModel }}</span>
+                  <span>{{ (recommendation.confidence * 100).toFixed(0) }}%</span>
+                </div>
+                @if (recommendation.reasoning.length > 0) {
+                  <ul class="reasoning">
+                    @for (reason of recommendation.reasoning.slice(0, 5); track reason) {
+                      <li>{{ reason }}</li>
+                    }
+                  </ul>
+                }
+              </div>
+            } @else {
+              <div class="hint">No suggestion generated yet.</div>
+            }
+          </div>
+        </div>
       </div>
     </div>
   `,
@@ -149,6 +213,43 @@ interface QueryResult {
         flex: 1;
         min-height: 0;
         width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: var(--spacing-md);
+      }
+
+      .rlm-main,
+      .rlm-side {
+        min-height: 0;
+      }
+
+      .rlm-main {
+        overflow: auto;
+      }
+
+      .rlm-side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-md);
+        overflow: auto;
+      }
+
+      .side-card {
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        padding: var(--spacing-md);
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+      }
+
+      .side-title {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 700;
       }
 
       app-rlm-context-browser {
@@ -177,6 +278,91 @@ interface QueryResult {
         color: var(--text-primary);
         cursor: pointer;
       }
+
+      .pattern-list,
+      .reasoning {
+        margin: 0;
+        padding-left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .pattern-head {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--spacing-xs);
+        align-items: center;
+      }
+
+      .pattern-type {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+      }
+
+      .pattern-score {
+        font-size: 11px;
+        color: var(--primary-color);
+        font-weight: 700;
+      }
+
+      .pattern-value {
+        font-size: 12px;
+        color: var(--text-primary);
+      }
+
+      .pattern-meta {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .context-input {
+        width: 100%;
+        min-height: 72px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-color);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 12px;
+        resize: vertical;
+        font-family: var(--font-family-mono);
+      }
+
+      .side-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .recommendation {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        padding: var(--spacing-xs) var(--spacing-sm);
+      }
+
+      .rec-main {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--spacing-xs);
+        font-size: 11px;
+        color: var(--text-primary);
+      }
+
+      .hint {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      @media (max-width: 1200px) {
+        .rlm-body {
+          grid-template-columns: 1fr;
+        }
+      }
     `
   ],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -193,6 +379,9 @@ export class RlmPageComponent implements OnInit, OnDestroy {
   readonly selectedStoreId = signal<string>('');
   readonly store = signal<ContextStore | null>(null);
   readonly session = signal<RLMSession | null>(null);
+  readonly patterns = signal<TaskPattern[]>([]);
+  readonly strategyRecommendation = signal<StrategyRecommendation | null>(null);
+  readonly suggestionContext = signal('');
 
   ngOnInit(): void {
     this.refreshStores();
@@ -226,6 +415,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
       this.store.set(null);
       this.session.set(null);
     }
+
+    await this.refreshLearningSignals();
   }
 
   async loadStore(storeId: string): Promise<void> {
@@ -287,6 +478,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
       if (updatedSession) {
         this.session.set(updatedSession);
       }
+
+      await this.refreshLearningSignals();
     } catch (error) {
       const queryResult: QueryResult = {
         id: `qry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -326,6 +519,8 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     if (updatedSession) {
       this.session.set(updatedSession);
     }
+
+    await this.refreshLearningSignals();
   }
 
   async handleStoreUpdated(store: ContextStore): Promise<void> {
@@ -333,6 +528,7 @@ export class RlmPageComponent implements OnInit, OnDestroy {
     const storesResponse = await this.ipc.rlmListStores();
     const stores = this.unwrapResponse<ContextStore[]>(storesResponse) || [];
     this.stores.set(stores);
+    await this.refreshLearningSignals();
   }
 
   onStoreChange(event: Event): void {
@@ -345,6 +541,23 @@ export class RlmPageComponent implements OnInit, OnDestroy {
       this.store.set(null);
       this.session.set(null);
     }
+  }
+
+  onSuggestionContextInput(event: Event): void {
+    const target = event.target as HTMLTextAreaElement;
+    this.suggestionContext.set(target.value);
+  }
+
+  async generateSuggestions(): Promise<void> {
+    const context = this.suggestionContext().trim();
+    if (!context) {
+      this.strategyRecommendation.set(null);
+      return;
+    }
+
+    const response = await this.ipc.rlmGetStrategySuggestions(context, 5);
+    const recommendation = this.unwrapResponse<StrategyRecommendation>(response);
+    this.strategyRecommendation.set(recommendation || null);
   }
 
   private setupEventSubscriptions(): void {
@@ -372,6 +585,16 @@ export class RlmPageComponent implements OnInit, OnDestroy {
         }
       })
     );
+  }
+
+  private async refreshLearningSignals(): Promise<void> {
+    const patternsResponse = await this.ipc.rlmGetPatterns(0.4);
+    const patterns = this.unwrapResponse<TaskPattern[]>(patternsResponse) || [];
+    this.patterns.set(patterns);
+
+    if (this.suggestionContext().trim().length > 0) {
+      await this.generateSuggestions();
+    }
   }
 
   private unwrapResponse<T>(response: unknown): T | null {

@@ -11,6 +11,7 @@ import {
   HostListener,
   effect
 } from '@angular/core';
+import { ContextWarningComponent } from './context-warning.component';
 import { InstanceStore } from '../../core/state/instance.store';
 import { SettingsStore } from '../../core/state/settings.store';
 import { ElectronIpcService, RecentDirectoriesIpcService } from '../../core/services/ipc';
@@ -37,6 +38,7 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
   imports: [
     OutputStreamComponent,
     ContextBarComponent,
+    ContextWarningComponent,
     InputPanelComponent,
     DropZoneComponent,
     ActivityStatusComponent,
@@ -86,6 +88,18 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             <app-context-bar [usage]="inst.contextUsage" [showDetails]="true" />
           </div>
 
+          <!-- Context warning -->
+          @if (contextWarningLevel()) {
+            <app-context-warning
+              [percentage]="inst.contextUsage.percentage"
+              [level]="contextWarningLevel()!"
+              [isCompacting]="isCompacting()"
+              [dismissed]="contextWarningDismissed()"
+              (compactNow)="onCompactNow()"
+              (dismiss)="onDismissContextWarning()"
+            />
+          }
+
           <!-- TODO list -->
           <app-todo-list [sessionId]="inst.sessionId" />
 
@@ -108,6 +122,7 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
               <app-activity-status
                 [status]="inst.status"
                 [activity]="currentActivity()"
+                [busySince]="busySince()"
               />
             }
           </div>
@@ -115,10 +130,16 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
           <!-- User action requests -->
           <app-user-action-request [instanceId]="inst.id" />
 
+          <!-- Agents section -->
+          <app-child-instances-panel
+            [childrenIds]="inst.childrenIds"
+            (selectChild)="onSelectChild($event)"
+          />
+
           <!-- Input panel -->
           <app-input-panel
             [instanceId]="inst.id"
-            [disabled]="inst.status === 'terminated'"
+            [disabled]="inst.status === 'terminated' || contextWarningLevel() === 'emergency'"
             [placeholder]="inputPlaceholder()"
             [pendingFiles]="pendingFiles()"
             [pendingFolders]="pendingFolders()"
@@ -126,17 +147,13 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             [queuedMessages]="queuedMessages()"
             [isBusy]="inst.status === 'busy'"
             [isRespawning]="inst.status === 'respawning'"
+            [outputMessages]="inst.outputBuffer"
+            [instanceStatus]="inst.status"
             (sendMessage)="onSendMessage($event)"
             (removeFile)="onRemoveFile($event)"
             (removeFolder)="onRemoveFolder($event)"
             (addFiles)="onAddFiles()"
             (cancelQueuedMessage)="onCancelQueuedMessage($event)"
-          />
-
-          <!-- Children section -->
-          <app-child-instances-panel
-            [childrenIds]="inst.childrenIds"
-            (selectChild)="onSelectChild($event)"
           />
         </div>
       </app-drop-zone>
@@ -298,6 +315,7 @@ export class InstanceDetailComponent {
 
   instance = this.store.selectedInstance;
   currentActivity = this.store.selectedInstanceActivity;
+  busySince = computed(() => this.store.getSelectedInstanceBusySince());
 
   // Settings for thinking display
   showThinking = this.settingsStore.showThinking;
@@ -310,6 +328,36 @@ export class InstanceDetailComponent {
   isTogglingYolo = signal(false);
   showModelDropdown = signal(false);
   availableModels = signal<ModelDisplayInfo[]>([]);
+  private manualCompacting = signal(false);
+  contextWarningDismissed = signal(false);
+  private lastDismissedPercentage = 0;
+
+  // Merge manual-trigger state with store-tracked auto-compact state
+  isCompacting = computed(() => {
+    if (this.manualCompacting()) return true;
+    const inst = this.instance();
+    return inst ? this.store.isInstanceCompacting(inst.id) : false;
+  });
+
+  contextWarningLevel = computed(() => {
+    const inst = this.instance();
+    if (!inst) return null;
+    const pct = inst.contextUsage.percentage;
+    if (pct >= 95) return 'emergency' as const;
+    if (pct >= 80) return 'critical' as const;
+    if (pct >= 75) return 'warning' as const;
+    return null;
+  });
+
+  // Effect to reset dismissal when usage increases >5% since dismissal
+  private dismissalResetEffect = effect(() => {
+    const inst = this.instance();
+    if (!inst) return;
+    const pct = inst.contextUsage.percentage;
+    if (this.contextWarningDismissed() && pct > this.lastDismissedPercentage + 5) {
+      this.contextWarningDismissed.set(false);
+    }
+  });
 
   // Track the provider we've fetched models for to avoid redundant fetches
   private lastFetchedProvider: string | null = null;
@@ -739,5 +787,23 @@ export class InstanceDetailComponent {
 
   onSelectChild(childId: string): void {
     this.store.setSelectedInstance(childId);
+  }
+
+  onCompactNow(): void {
+    const inst = this.instance();
+    if (inst && !this.isCompacting()) {
+      this.manualCompacting.set(true);
+      this.store.compactInstance(inst.id).finally(() => {
+        this.manualCompacting.set(false);
+      });
+    }
+  }
+
+  onDismissContextWarning(): void {
+    const inst = this.instance();
+    if (inst) {
+      this.lastDismissedPercentage = inst.contextUsage.percentage;
+      this.contextWarningDismissed.set(true);
+    }
   }
 }

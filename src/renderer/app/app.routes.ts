@@ -33,8 +33,8 @@ export const routes: Routes = [
   {
     path: 'workflows',
     loadComponent: () =>
-      import('./features/workflow/workflow-progress.component').then(
-        (m) => m.WorkflowProgressComponent
+      import('./features/workflow/workflow-page.component').then(
+        (m) => m.WorkflowPageComponent
       ),
   },
 
@@ -42,8 +42,8 @@ export const routes: Routes = [
   {
     path: 'hooks',
     loadComponent: () =>
-      import('./features/hooks/hooks-config.component').then(
-        (m) => m.HooksConfigComponent
+      import('./features/hooks/hooks-page.component').then(
+        (m) => m.HooksPageComponent
       ),
   },
 
@@ -51,8 +51,8 @@ export const routes: Routes = [
   {
     path: 'skills',
     loadComponent: () =>
-      import('./features/skills/skill-browser.component').then(
-        (m) => m.SkillBrowserComponent
+      import('./features/skills/skills-page.component').then(
+        (m) => m.SkillsPageComponent
       ),
   },
 
@@ -60,8 +60,8 @@ export const routes: Routes = [
   {
     path: 'reviews',
     loadComponent: () =>
-      import('./features/review/review-results.component').then(
-        (m) => m.ReviewResultsComponent
+      import('./features/review/reviews-page.component').then(
+        (m) => m.ReviewsPageComponent
       ),
   },
 
@@ -69,8 +69,8 @@ export const routes: Routes = [
   {
     path: 'specialists',
     loadComponent: () =>
-      import('./features/specialists/specialist-picker.component').then(
-        (m) => m.SpecialistPickerComponent
+      import('./features/specialists/specialists-page.component').then(
+        (m) => m.SpecialistsPageComponent
       ),
   },
 
@@ -78,8 +78,8 @@ export const routes: Routes = [
   {
     path: 'worktrees',
     loadComponent: () =>
-      import('./features/worktree/worktree-panel.component').then(
-        (m) => m.WorktreePanelComponent
+      import('./features/worktree/worktree-page.component').then(
+        (m) => m.WorktreePageComponent
       ),
   },
 
@@ -87,8 +87,8 @@ export const routes: Routes = [
   {
     path: 'supervision',
     loadComponent: () =>
-      import('./features/supervision/tree-view.component').then(
-        (m) => m.SupervisionTreeViewComponent
+      import('./features/supervision/supervision-page.component').then(
+        (m) => m.SupervisionPageComponent
       ),
   },
 
@@ -105,8 +105,8 @@ export const routes: Routes = [
   {
     path: 'training',
     loadComponent: () =>
-      import('./features/training/grpo-dashboard.component').then(
-        (m) => m.GrpoDashboardComponent
+      import('./features/training/training-page.component').then(
+        (m) => m.TrainingPageComponent
       ),
   },
 
@@ -114,8 +114,8 @@ export const routes: Routes = [
   {
     path: 'memory',
     loadComponent: () =>
-      import('./features/memory/memory-browser.component').then(
-        (m) => m.MemoryBrowserComponent
+      import('./features/memory/memory-page.component').then(
+        (m) => m.MemoryPageComponent
       ),
   },
 
@@ -132,8 +132,8 @@ export const routes: Routes = [
   {
     path: 'debate',
     loadComponent: () =>
-      import('./features/debate/debate-visualization.component').then(
-        (m) => m.DebateVisualizationComponent
+      import('./features/debate/debate-page.component').then(
+        (m) => m.DebatePageComponent
       ),
   },
 

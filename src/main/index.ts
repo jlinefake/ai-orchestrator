@@ -13,6 +13,11 @@ import { registerDefaultMultiVerifyInvoker, registerDefaultReviewInvoker, regist
 import { getOrchestratorPluginManager } from './plugins/plugin-manager';
 import { getObservationIngestor, getObserverAgent, getReflectorAgent } from './observation';
 import { initializePathValidator } from './security/path-validator';
+import { getCompactionCoordinator } from './context/compaction-coordinator';
+import { ContextCompactor } from './context/context-compactor';
+import { getOrchestrationActivityBridge } from './orchestration/orchestration-activity-bridge';
+import { getDebateCoordinator } from './orchestration/debate-coordinator';
+import { getMultiVerifyCoordinator } from './orchestration/multi-verify-coordinator';
 import { getLogger } from './logging/logger';
 
 const logger = getLogger('App');
@@ -51,6 +56,7 @@ class AIOrchestratorApp {
         { name: 'Observer agent', fn: () => { getObserverAgent(); } },
         { name: 'Reflector agent', fn: () => { getReflectorAgent(); } },
         { name: 'Path validator', fn: () => initializePathValidator() },
+        { name: 'Compaction coordinator', fn: () => this.setupCompactionCoordinator() },
       ];
 
       for (const step of steps) {
@@ -83,6 +89,7 @@ class AIOrchestratorApp {
 
     this.instanceManager.on('instance:removed', (instanceId) => {
       this.windowManager.sendToRenderer('instance:removed', instanceId);
+      getCompactionCoordinator().cleanupInstance(instanceId as string);
     });
 
     this.instanceManager.on('instance:state-update', (update) => {
@@ -95,6 +102,17 @@ class AIOrchestratorApp {
 
     this.instanceManager.on('instance:batch-update', (updates) => {
       this.windowManager.sendToRenderer('instance:batch-update', updates);
+
+      // Feed context usage updates to compaction coordinator
+      const data = updates as { updates?: { instanceId: string; contextUsage?: { used: number; total: number; percentage: number } }[] };
+      if (data.updates) {
+        const coordinator = getCompactionCoordinator();
+        for (const update of data.updates) {
+          if (update.contextUsage) {
+            coordinator.onContextUpdate(update.instanceId, update.contextUsage);
+          }
+        }
+      }
     });
 
     // Forward input-required events (permission prompts) to renderer
@@ -132,6 +150,143 @@ class AIOrchestratorApp {
         title,
         request.message || 'An AI instance is waiting for your response.'
       );
+    });
+
+    // Forward orchestration activity (child spawn, debate, verification) to renderer
+    const activityBridge = getOrchestrationActivityBridge();
+    activityBridge.initialize(
+      this.windowManager,
+      orchestration,
+      getDebateCoordinator(),
+      getMultiVerifyCoordinator()
+    );
+  }
+
+  private setupCompactionCoordinator(): void {
+    const coordinator = getCompactionCoordinator();
+
+    // Configure native compaction strategy: send /compact to Claude CLI
+    coordinator.configure({
+      nativeCompact: async (instanceId: string) => {
+        try {
+          await this.instanceManager.sendInput(instanceId, '/compact');
+          // The CLI will process /compact internally and context usage
+          // will be updated via the normal batch-update flow
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      getInstanceProvider: (instanceId: string) => {
+        const instance = this.instanceManager.getInstance(instanceId);
+        return instance?.provider;
+      },
+      restartCompact: async (instanceId: string) => {
+        // Use the singleton ContextCompactor with clear-before-use to avoid
+        // cross-instance contamination. The CompactionCoordinator's
+        // compactingInstances guard serialises concurrent compaction attempts.
+        const compactor = ContextCompactor.getInstance();
+        try {
+          const instance = this.instanceManager.getInstance(instanceId);
+          if (!instance) return false;
+
+          // Clear any stale state before building turns for this instance
+          compactor.clear();
+
+          // Build conversation turns from the output buffer
+          const turns = instance.outputBuffer
+            .filter(msg => msg.type === 'user' || msg.type === 'assistant')
+            .map(msg => ({
+              role: msg.type as 'user' | 'assistant',
+              content: msg.content,
+              tokenCount: Math.ceil(msg.content.length / 4),
+            }));
+
+          for (const turn of turns) {
+            compactor.addTurn(turn);
+          }
+
+          const compactionResult = await compactor.compact();
+
+          // Get the summary text
+          const summaries = compactor.getState().summaries;
+          const latestSummary = summaries[summaries.length - 1];
+          const summaryText = latestSummary?.content || 'Previous conversation context was compacted.';
+
+          // Restart instance with summary as initial prompt
+          await this.instanceManager.restartInstance(instanceId);
+
+          // Send the summary as the first message to re-seed context
+          await this.instanceManager.sendInput(
+            instanceId,
+            `[Context Summary from previous conversation]\n\n${summaryText}\n\nPlease continue from where we left off.`
+          );
+
+          console.log(
+            `[CompactionCoordinator] restart-with-summary completed for ${instanceId}`,
+            { reductionRatio: compactionResult.reductionRatio }
+          );
+
+          return true;
+        } catch (error) {
+          console.error('Restart-with-summary compaction failed:', error);
+          return false;
+        } finally {
+          compactor.clear();
+        }
+      },
+    });
+
+    // Forward compaction coordinator events to renderer
+    coordinator.on('context-warning', (payload) => {
+      this.windowManager.sendToRenderer('context:warning', payload);
+    });
+
+    coordinator.on('compaction-started', (payload) => {
+      this.windowManager.sendToRenderer('instance:compact-status', {
+        ...payload,
+        status: 'started',
+      });
+    });
+
+    coordinator.on('compaction-completed', (payload) => {
+      const { instanceId, result } = payload;
+      this.windowManager.sendToRenderer('instance:compact-status', {
+        instanceId,
+        ...result,
+        status: 'completed',
+      });
+
+      // Insert boundary message into instance output buffer
+      if (result.success) {
+        const instance = this.instanceManager.getInstance(instanceId);
+        if (instance) {
+          const boundaryMessage = {
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            type: 'system' as const,
+            content: '— Context compacted —',
+            metadata: {
+              isCompactionBoundary: true,
+              method: result.method,
+              previousUsage: result.previousUsage,
+              newUsage: result.newUsage,
+            },
+          };
+          // Emit as output so the renderer picks it up via the normal output pipeline
+          this.instanceManager.emit('instance:output', {
+            instanceId,
+            message: boundaryMessage,
+          });
+        }
+      }
+    });
+
+    coordinator.on('compaction-error', (payload) => {
+      this.windowManager.sendToRenderer('instance:compact-status', {
+        ...payload,
+        status: 'error',
+      });
     });
   }
 

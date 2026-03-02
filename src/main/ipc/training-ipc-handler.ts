@@ -9,6 +9,7 @@
 
 import { ipcMain } from 'electron';
 import type { IpcResponse, ErrorInfo } from '../../shared/types/ipc.types';
+import { IPC_CHANNELS } from '../../shared/types/ipc.types';
 import type { GRPOConfig, TrainingOutcome, GRPOBatch, TrainingStats } from '../learning/grpo-trainer';
 import {
   validateIpcPayload,
@@ -278,6 +279,126 @@ export function registerTrainingHandlers(): void {
           success: false,
           error: createErrorInfo(error),
         };
+      }
+    }
+  );
+
+  // Compatibility aliases for channels declared in shared IPC types.
+  // These are used by renderer domain IPC services.
+
+  ipcMain.handle(
+    IPC_CHANNELS.TRAINING_RECORD_OUTCOME,
+    async (_event, payload: unknown): Promise<IpcResponse<void>> => {
+      try {
+        const outcome = payload as Partial<TrainingOutcome>;
+        if (
+          !outcome ||
+          typeof outcome.taskId !== 'string' ||
+          typeof outcome.prompt !== 'string' ||
+          typeof outcome.response !== 'string' ||
+          typeof outcome.reward !== 'number'
+        ) {
+          return {
+            success: false,
+            error: createErrorInfo(
+              new Error('Invalid training outcome payload'),
+              'TRAINING_INVALID_PAYLOAD'
+            ),
+          };
+        }
+
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
+        getGRPOTrainer().recordOutcome({
+          taskId: outcome.taskId,
+          prompt: outcome.prompt,
+          response: outcome.response,
+          reward: outcome.reward,
+          strategy: outcome.strategy,
+          context: outcome.context,
+        });
+
+        return { success: true, data: undefined };
+      } catch (error) {
+        return { success: false, error: createErrorInfo(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.TRAINING_IMPORT_DATA,
+    async (_event, payload: unknown): Promise<IpcResponse<void>> => {
+      try {
+        const data = payload as { outcomes?: TrainingOutcome[]; batches?: GRPOBatch[] };
+        if (!data || !Array.isArray(data.outcomes) || !Array.isArray(data.batches)) {
+          return {
+            success: false,
+            error: createErrorInfo(
+              new Error('Invalid training import payload'),
+              'TRAINING_INVALID_PAYLOAD'
+            ),
+          };
+        }
+
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
+        getGRPOTrainer().importTrainingData({
+          outcomes: data.outcomes,
+          batches: data.batches,
+        });
+
+        return { success: true, data: undefined };
+      } catch (error) {
+        return { success: false, error: createErrorInfo(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.TRAINING_GET_TREND,
+    async (): Promise<IpcResponse<RewardTrendResponse>> => {
+      try {
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
+        const trend = getGRPOTrainer().getRewardTrend();
+        return { success: true, data: trend };
+      } catch (error) {
+        return { success: false, error: createErrorInfo(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.TRAINING_GET_TOP_STRATEGIES,
+    async (_event, payload: unknown): Promise<IpcResponse<StrategyData[]>> => {
+      try {
+        const limit = typeof payload === 'number' ? payload : undefined;
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
+        const strategies = getGRPOTrainer().getTopStrategies(limit ?? 10);
+        return { success: true, data: strategies };
+      } catch (error) {
+        return { success: false, error: createErrorInfo(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.TRAINING_CONFIGURE,
+    async (_event, payload: unknown): Promise<IpcResponse<void>> => {
+      try {
+        const config = payload as Partial<GRPOConfig>;
+        if (!config || typeof config !== 'object') {
+          return {
+            success: false,
+            error: createErrorInfo(
+              new Error('Invalid training config payload'),
+              'TRAINING_INVALID_PAYLOAD'
+            ),
+          };
+        }
+
+        const { getGRPOTrainer } = await import('../learning/grpo-trainer');
+        getGRPOTrainer().configure(config);
+        return { success: true, data: undefined };
+      } catch (error) {
+        return { success: false, error: createErrorInfo(error) };
       }
     }
   );

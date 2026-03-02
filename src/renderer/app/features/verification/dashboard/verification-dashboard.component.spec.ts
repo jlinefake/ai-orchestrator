@@ -246,21 +246,24 @@ describe('VerificationDashboardComponent', () => {
     });
 
     it('should initialize CLI store if not initialized', () => {
+      // Must set before component creation since init happens in constructor
       mockCliInitialized.set(false);
-      component.ngOnInit();
+      mockCliStore.initialize.mockClear();
+      fixture = TestBed.createComponent(VerificationDashboardComponent);
+      component = fixture.componentInstance;
       expect(mockCliStore.initialize).toHaveBeenCalled();
     });
 
     it('should NOT initialize CLI store if already initialized', () => {
-      mockCliStore.initialize.mockClear();
-      mockCliInitialized.set(true);
-      component.ngOnInit();
+      // initialized is true by default in setupMocks, constructor already ran
       expect(mockCliStore.initialize).not.toHaveBeenCalled();
     });
 
     it('should load saved strategy from store config', () => {
+      // Must set before component creation since init happens in constructor
       mockDefaultConfig.set({ synthesisStrategy: 'consensus' });
-      component.ngOnInit();
+      fixture = TestBed.createComponent(VerificationDashboardComponent);
+      component = fixture.componentInstance;
       expect(component.selectedStrategy).toBe('consensus');
     });
   });
@@ -461,6 +464,7 @@ describe('VerificationDashboardComponent', () => {
 
       expect(mockVerificationStore.startVerification).toHaveBeenCalledWith(
         'Test prompt for verification',
+        undefined,
         undefined,
         undefined
       );

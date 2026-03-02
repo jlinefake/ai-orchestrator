@@ -31,6 +31,14 @@ const IPC_CHANNELS = {
   INSTANCE_OUTPUT: 'instance:output',
   INSTANCE_BATCH_UPDATE: 'instance:batch-update',
 
+  // Context compaction
+  INSTANCE_COMPACT: 'instance:compact',
+  INSTANCE_COMPACT_STATUS: 'instance:compact-status',
+  CONTEXT_WARNING: 'context:warning',
+
+  // Orchestration activity (real-time status updates)
+  ORCHESTRATION_ACTIVITY: 'orchestration:activity',
+
   // User action requests (orchestrator -> user)
   USER_ACTION_REQUEST: 'user-action:request',
   USER_ACTION_RESPOND: 'user-action:respond',
@@ -325,6 +333,12 @@ const IPC_CHANNELS = {
   // Phase 6: Review Agents (6.2)
   REVIEW_LIST_AGENTS: 'review:list-agents',
   REVIEW_GET_AGENT: 'review:get-agent',
+  REVIEW_START_SESSION: 'review:start-session',
+  REVIEW_GET_SESSION: 'review:get-session',
+  REVIEW_GET_ISSUES: 'review:get-issues',
+  REVIEW_ACKNOWLEDGE_ISSUE: 'review:acknowledge-issue',
+  REVIEW_SESSION_STARTED: 'review:session-started',
+  REVIEW_SESSION_COMPLETED: 'review:session-completed',
 
   // Phase 6: Hooks (6.3)
   HOOKS_LIST: 'hooks:list',
@@ -355,6 +369,18 @@ const IPC_CHANNELS = {
   WORKTREE_LIST: 'worktree:list',
   WORKTREE_DELETE: 'worktree:delete',
   WORKTREE_GET_STATUS: 'worktree:get-status',
+  WORKTREE_COMPLETE: 'worktree:complete',
+  WORKTREE_PREVIEW_MERGE: 'worktree:preview-merge',
+  WORKTREE_MERGE: 'worktree:merge',
+  WORKTREE_CLEANUP: 'worktree:cleanup',
+  WORKTREE_ABANDON: 'worktree:abandon',
+  WORKTREE_GET_SESSION: 'worktree:get-session',
+  WORKTREE_LIST_SESSIONS: 'worktree:list-sessions',
+  WORKTREE_DETECT_CONFLICTS: 'worktree:detect-conflicts',
+  WORKTREE_SYNC: 'worktree:sync',
+  WORKTREE_SESSION_CREATED: 'worktree:session-created',
+  WORKTREE_SESSION_COMPLETED: 'worktree:session-completed',
+  WORKTREE_CONFLICT_DETECTED: 'worktree:conflict-detected',
 
   // Phase 7: Specialists (7.4)
   SPECIALIST_LIST: 'specialist:list',
@@ -375,8 +401,19 @@ const IPC_CHANNELS = {
   SPECIALIST_GET_PROMPT_ADDITION: 'specialist:get-prompt-addition',
 
   // Phase 7: Supervision (7.3)
+  SUPERVISION_CREATE_TREE: 'supervision:create-tree',
+  SUPERVISION_HANDLE_FAILURE: 'supervision:handle-failure',
   SUPERVISION_GET_TREE: 'supervision:get-tree',
   SUPERVISION_GET_HEALTH: 'supervision:get-health',
+  SUPERVISION_GET_HIERARCHY: 'supervision:get-hierarchy',
+  SUPERVISION_GET_ALL_REGISTRATIONS: 'supervision:get-all-registrations',
+  SUPERVISION_EXHAUSTED: 'supervision:exhausted',
+  SUPERVISION_HEALTH_CHANGED: 'supervision:health-changed',
+  SUPERVISION_HEALTH_GLOBAL: 'supervision:health-global',
+  SUPERVISION_TREE_UPDATED: 'supervision:tree-updated',
+  SUPERVISION_WORKER_FAILED: 'supervision:worker-failed',
+  SUPERVISION_WORKER_RESTARTED: 'supervision:worker-restarted',
+  SUPERVISION_CIRCUIT_BREAKER_CHANGED: 'supervision:circuit-breaker-changed',
 
   // Phase 8: RLM Context (8.1)
   RLM_CREATE_STORE: 'rlm:create-store',
@@ -560,6 +597,13 @@ const electronAPI = {
   },
 
   /**
+   * Compact context for an instance (manual trigger)
+   */
+  compactInstance: (payload: { instanceId: string }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_COMPACT, payload);
+  },
+
+  /**
    * Rename an instance
    */
   renameInstance: (payload: {
@@ -671,6 +715,39 @@ const electronAPI = {
     ipcRenderer.on(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_BATCH_UPDATE, handler);
+  },
+
+  /**
+   * Listen for compaction status updates
+   */
+  onCompactStatus: (callback: (data: unknown) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data);
+    ipcRenderer.on(IPC_CHANNELS.INSTANCE_COMPACT_STATUS, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.INSTANCE_COMPACT_STATUS, handler);
+  },
+
+  /**
+   * Listen for context warning events (75%/80%/95% thresholds)
+   */
+  onContextWarning: (callback: (data: unknown) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data);
+    ipcRenderer.on(IPC_CHANNELS.CONTEXT_WARNING, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.CONTEXT_WARNING, handler);
+  },
+
+  /**
+   * Listen for orchestration activity updates (child spawn, debate, verification progress)
+   */
+  onOrchestrationActivity: (callback: (data: unknown) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: unknown) =>
+      callback(data);
+    ipcRenderer.on(IPC_CHANNELS.ORCHESTRATION_ACTIVITY, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.ORCHESTRATION_ACTIVITY, handler);
   },
 
   // ============================================

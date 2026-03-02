@@ -152,6 +152,10 @@ export class IpcFacadeService {
   listUserActionRequestsForInstance = this.instance.listUserActionRequestsForInstance.bind(this.instance);
   onInputRequired = this.instance.onInputRequired.bind(this.instance);
   respondToInputRequired = this.instance.respondToInputRequired.bind(this.instance);
+  compactInstance = this.instance.compactInstance.bind(this.instance);
+  onCompactStatus = this.instance.onCompactStatus.bind(this.instance);
+  onContextWarning = this.instance.onContextWarning.bind(this.instance);
+  onOrchestrationActivity = this.instance.onOrchestrationActivity.bind(this.instance);
 
   // ============================================
   // Provider Service Methods
@@ -493,8 +497,20 @@ export class IpcFacadeService {
   workflowGetPromptAddition = this.orchestration.workflowGetPromptAddition.bind(this.orchestration);
   reviewListAgents = this.orchestration.reviewListAgents.bind(this.orchestration);
   reviewGetAgent = this.orchestration.reviewGetAgent.bind(this.orchestration);
+  reviewStartSession = this.orchestration.reviewStartSession.bind(this.orchestration);
+  reviewGetSession = this.orchestration.reviewGetSession.bind(this.orchestration);
+  reviewGetIssues = this.orchestration.reviewGetIssues.bind(this.orchestration);
+  reviewAcknowledgeIssue = this.orchestration.reviewAcknowledgeIssue.bind(this.orchestration);
   worktreeCreate = this.orchestration.worktreeCreate.bind(this.orchestration);
   worktreeList = this.orchestration.worktreeList.bind(this.orchestration);
+  worktreeGetSession = this.orchestration.worktreeGetSession.bind(this.orchestration);
+  worktreeComplete = this.orchestration.worktreeComplete.bind(this.orchestration);
+  worktreePreviewMerge = this.orchestration.worktreePreviewMerge.bind(this.orchestration);
+  worktreeMerge = this.orchestration.worktreeMerge.bind(this.orchestration);
+  worktreeDetectConflicts = this.orchestration.worktreeDetectConflicts.bind(this.orchestration);
+  worktreeSync = this.orchestration.worktreeSync.bind(this.orchestration);
+  worktreeAbandon = this.orchestration.worktreeAbandon.bind(this.orchestration);
+  worktreeCleanup = this.orchestration.worktreeCleanup.bind(this.orchestration);
   worktreeDelete = this.orchestration.worktreeDelete.bind(this.orchestration);
   worktreeGetStatus = this.orchestration.worktreeGetStatus.bind(this.orchestration);
   specialistList = this.orchestration.specialistList.bind(this.orchestration);
@@ -515,6 +531,9 @@ export class IpcFacadeService {
   specialistGetPromptAddition = this.orchestration.specialistGetPromptAddition.bind(this.orchestration);
   supervisionGetTree = this.orchestration.supervisionGetTree.bind(this.orchestration);
   supervisionGetHealth = this.orchestration.supervisionGetHealth.bind(this.orchestration);
+  supervisionGetHierarchy = this.orchestration.supervisionGetHierarchy.bind(this.orchestration);
+  supervisionGetAllRegistrations = this.orchestration.supervisionGetAllRegistrations.bind(this.orchestration);
+  supervisionHandleFailure = this.orchestration.supervisionHandleFailure.bind(this.orchestration);
   debateStart = this.orchestration.debateStart.bind(this.orchestration);
   debateGetResult = this.orchestration.debateGetResult.bind(this.orchestration);
   debateGetActive = this.orchestration.debateGetActive.bind(this.orchestration);

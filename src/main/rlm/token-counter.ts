@@ -386,3 +386,10 @@ export class TokenCounter {
 export function getTokenCounter(): TokenCounter {
   return TokenCounter.getInstance();
 }
+
+/**
+ * Convenience helper for one-off token estimation.
+ */
+export function estimateTokens(text: string, model?: string): number {
+  return getTokenCounter().countTokens(text, model);
+}

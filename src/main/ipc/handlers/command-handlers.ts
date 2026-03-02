@@ -18,6 +18,7 @@ import {
   validateIpcPayload
 } from '../../../shared/validation/ipc-schemas';
 import { getCommandManager } from '../../commands/command-manager';
+import { getCompactionCoordinator } from '../../context/compaction-coordinator';
 import { InstanceManager } from '../../instance/instance-manager';
 
 export function registerCommandHandlers(
@@ -75,6 +76,20 @@ export function registerCommandHandlers(
             error: {
               code: 'COMMAND_NOT_FOUND',
               message: `Command ${validated.commandId} not found`,
+              timestamp: Date.now()
+            }
+          };
+        }
+
+        // Special handling for /compact command — route to compaction coordinator
+        if (resolved.command.name === 'compact') {
+          const result = await getCompactionCoordinator().compactInstance(validated.instanceId);
+          return {
+            success: result.success,
+            data: result,
+            error: result.success ? undefined : {
+              code: 'COMPACT_FAILED',
+              message: result.error || 'Compaction failed',
               timestamp: Date.now()
             }
           };
