@@ -5,17 +5,6 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  EditorOpenFilePayload,
-  EditorOpenFileAtLinePayload,
-  EditorOpenDirectoryPayload,
-  EditorSetPreferredPayload,
-  WatcherStartPayload,
-  WatcherStopPayload,
-  WatcherGetChangesPayload,
-  WatcherClearBufferPayload,
-  MultiEditPayload
-} from '../../../shared/types/ipc.types';
 import {
   validateIpcPayload,
   EditorOpenFilePayloadSchema,
@@ -69,7 +58,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.EDITOR_OPEN_FILE,
     async (
       _event: IpcMainInvokeEvent,
-      payload: EditorOpenFilePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(EditorOpenFilePayloadSchema, payload, 'EDITOR_OPEN_FILE');
@@ -98,7 +87,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.EDITOR_OPEN_FILE_AT_LINE,
     async (
       _event: IpcMainInvokeEvent,
-      payload: EditorOpenFileAtLinePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(EditorOpenFileAtLinePayloadSchema, payload, 'EDITOR_OPEN_FILE_AT_LINE');
@@ -126,7 +115,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.EDITOR_OPEN_DIRECTORY,
     async (
       _event: IpcMainInvokeEvent,
-      payload: EditorOpenDirectoryPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(EditorOpenDirectoryPayloadSchema, payload, 'EDITOR_OPEN_DIRECTORY');
@@ -150,7 +139,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.EDITOR_SET_PREFERRED,
     async (
       _event: IpcMainInvokeEvent,
-      payload: EditorSetPreferredPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(EditorSetPreferredPayloadSchema, payload, 'EDITOR_SET_PREFERRED');
@@ -224,7 +213,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.WATCHER_START,
     async (
       _event: IpcMainInvokeEvent,
-      payload: WatcherStartPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(WatcherStartPayloadSchema, payload, 'WATCHER_START');
@@ -253,7 +242,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.WATCHER_STOP,
     async (
       _event: IpcMainInvokeEvent,
-      payload: WatcherStopPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(WatcherStopPayloadSchema, payload, 'WATCHER_STOP');
@@ -317,7 +306,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.WATCHER_GET_CHANGES,
     async (
       _event: IpcMainInvokeEvent,
-      payload: WatcherGetChangesPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(WatcherGetChangesPayloadSchema, payload, 'WATCHER_GET_CHANGES');
@@ -344,7 +333,7 @@ export function registerFileHandlers(deps: {
     IPC_CHANNELS.WATCHER_CLEAR_BUFFER,
     async (
       _event: IpcMainInvokeEvent,
-      payload: WatcherClearBufferPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(WatcherClearBufferPayloadSchema, payload, 'WATCHER_CLEAR_BUFFER');
@@ -396,8 +385,8 @@ export function registerFileHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.MULTIEDIT_PREVIEW,
     async (
-      event: IpcMainInvokeEvent,
-      payload: MultiEditPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(MultiEditPayloadSchema, payload, 'MULTIEDIT_PREVIEW');
@@ -423,8 +412,8 @@ export function registerFileHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.MULTIEDIT_APPLY,
     async (
-      event: IpcMainInvokeEvent,
-      payload: MultiEditPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(MultiEditPayloadSchema, payload, 'MULTIEDIT_APPLY');

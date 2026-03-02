@@ -5,22 +5,18 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  InstanceCreatePayload,
-  InstanceSendInputPayload,
-  InstanceTerminatePayload,
-  InstanceInterruptPayload,
-  InstanceRestartPayload,
-  InstanceRenamePayload
-} from '../../../shared/types/ipc.types';
 import {
   InstanceCreatePayloadSchema,
+  InstanceCreateWithMessagePayloadSchema,
   InstanceSendInputPayloadSchema,
   InstanceTerminatePayloadSchema,
   InstanceRenamePayloadSchema,
+  InstanceInterruptPayloadSchema,
+  InstanceRestartPayloadSchema,
   InstanceChangeAgentPayloadSchema,
   InstanceChangeModelPayloadSchema,
   InputRequiredResponsePayloadSchema,
+  UserActionRespondRawPayloadSchema,
   UserActionResponsePayloadSchema,
   validateIpcPayload
 } from '../../../shared/validation/ipc-schemas';
@@ -55,8 +51,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_CREATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceCreatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary
@@ -84,10 +80,10 @@ export function registerInstanceHandlers(deps: {
           parentId: validatedPayload.parentInstanceId,
           displayName: validatedPayload.displayName,
           initialPrompt: validatedPayload.initialPrompt,
-          attachments: payload.attachments, // Use original for proper typing
+          attachments: validatedPayload.attachments as import('../../../shared/types/instance.types').FileAttachment[] | undefined,
           yoloMode: validatedPayload.yoloMode,
           agentId: validatedPayload.agentId,
-          provider: payload.provider, // Use original for proper typing
+          provider: validatedPayload.provider as import('../../../shared/types/instance.types').InstanceProvider | undefined,
           modelOverride: validatedPayload.model
         });
 
@@ -112,18 +108,17 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_CREATE_WITH_MESSAGE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: {
-        workingDirectory: string;
-        message: string;
-        attachments?: any[];
-        provider?: 'claude' | 'openai' | 'gemini' | 'copilot' | 'auto';
-        model?: string;
-      }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(
+          InstanceCreateWithMessagePayloadSchema,
+          payload,
+          'INSTANCE_CREATE_WITH_MESSAGE'
+        );
         // Use default working directory from settings if not provided or is just '.'
-        let workingDirectory = payload.workingDirectory;
+        let workingDirectory = validated.workingDirectory;
         if (!workingDirectory || workingDirectory === '.') {
           const settings = getSettingsManager();
           const defaultDir = settings.get('defaultWorkingDirectory');
@@ -136,10 +131,10 @@ export function registerInstanceHandlers(deps: {
 
         const instance = await instanceManager.createInstance({
           workingDirectory,
-          initialPrompt: payload.message,
-          attachments: payload.attachments,
-          provider: payload.provider,
-          modelOverride: payload.model
+          initialPrompt: validated.message,
+          attachments: validated.attachments as import('../../../shared/types/instance.types').FileAttachment[] | undefined,
+          provider: validated.provider as import('../../../shared/types/instance.types').InstanceProvider | undefined,
+          modelOverride: validated.model
         });
 
         return {
@@ -163,8 +158,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_SEND_INPUT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceSendInputPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary
@@ -205,8 +200,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_TERMINATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceTerminatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary
@@ -239,11 +234,12 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_INTERRUPT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceInterruptPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const success = instanceManager.interruptInstance(payload.instanceId);
+        const validated = validateIpcPayload(InstanceInterruptPayloadSchema, payload, 'INSTANCE_INTERRUPT');
+        const success = instanceManager.interruptInstance(validated.instanceId);
 
         return {
           success,
@@ -266,11 +262,12 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_RESTART,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceRestartPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        await instanceManager.restartInstance(payload.instanceId);
+        const validated = validateIpcPayload(InstanceRestartPayloadSchema, payload, 'INSTANCE_RESTART');
+        await instanceManager.restartInstance(validated.instanceId);
 
         return { success: true };
       } catch (error) {
@@ -290,8 +287,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_RENAME,
     async (
-      event: IpcMainInvokeEvent,
-      payload: InstanceRenamePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary
@@ -324,8 +321,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_CHANGE_AGENT_MODE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: { instanceId: string; agentId: string }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary
@@ -361,12 +358,13 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_TOGGLE_YOLO_MODE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: { instanceId: string }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(InstanceInterruptPayloadSchema, payload, 'INSTANCE_TOGGLE_YOLO_MODE');
         const instance = await instanceManager.toggleYoloMode(
-          payload.instanceId
+          validated.instanceId
         );
 
         return {
@@ -390,8 +388,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INSTANCE_CHANGE_MODEL,
     async (
-      event: IpcMainInvokeEvent,
-      payload: { instanceId: string; model: string }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validatedPayload = validateIpcPayload(
@@ -475,18 +473,24 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.USER_ACTION_RESPOND,
     async (
-      event: IpcMainInvokeEvent,
-      payload: { requestId: string; approved: boolean; selectedOption?: string }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        // Validate raw payload first
+        const rawPayload = validateIpcPayload(
+          UserActionRespondRawPayloadSchema,
+          payload,
+          'USER_ACTION_RESPOND'
+        );
         // Map the payload to match the schema (action is approve/reject/custom, not approved)
         const mappedPayload = {
-          requestId: payload.requestId,
-          action: payload.approved ? 'approve' : 'reject' as const,
-          customValue: payload.selectedOption
+          requestId: rawPayload.requestId,
+          action: rawPayload.approved ? 'approve' : 'reject' as const,
+          customValue: rawPayload.selectedOption
         };
 
-        // Validate payload at IPC boundary
+        // Validate mapped payload at IPC boundary
         const validatedPayload = validateIpcPayload(
           UserActionResponsePayloadSchema,
           mappedPayload,
@@ -546,13 +550,14 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.USER_ACTION_LIST_FOR_INSTANCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: { instanceId: string }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(InstanceInterruptPayloadSchema, payload, 'USER_ACTION_LIST_FOR_INSTANCE');
         const orchestration = instanceManager.getOrchestrationHandler();
         const requests = orchestration.getPendingUserActionsForInstance(
-          payload.instanceId
+          validated.instanceId
         );
 
         return {
@@ -576,15 +581,8 @@ export function registerInstanceHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.INPUT_REQUIRED_RESPOND,
     async (
-      event: IpcMainInvokeEvent,
-      payload: {
-        instanceId: string;
-        requestId: string;
-        response: string;
-        permissionKey?: string;
-        decisionAction?: 'allow' | 'deny';
-        decisionScope?: 'once' | 'session' | 'always';
-      }
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary

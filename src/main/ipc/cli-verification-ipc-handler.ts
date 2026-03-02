@@ -14,6 +14,7 @@ import { PROVIDER_MODEL_LIST } from '../../shared/types/provider.types';
 import type { ModelDisplayInfo } from '../../shared/types/provider.types';
 import {
   validateIpcPayload,
+  CliDetectAllPayloadSchema,
   CliDetectOnePayloadSchema,
   CliTestConnectionPayloadSchema,
   ProviderListModelsPayloadSchema,
@@ -21,13 +22,6 @@ import {
   CliVerificationCancelPayloadSchema,
 } from '../../shared/validation/ipc-schemas';
 
-// ============================================
-// Types
-// ============================================
-
-interface CliDetectAllPayload {
-  force?: boolean;
-}
 
 // ============================================
 // Handler Registration
@@ -61,10 +55,11 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'cli:detect-all',
     async (
       _event: IpcMainInvokeEvent,
-      payload: CliDetectAllPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const result = await cliDetection.detectAll(payload?.force);
+        const validated = validateIpcPayload(CliDetectAllPayloadSchema, payload, 'cli:detect-all');
+        const result = await cliDetection.detectAll(validated?.force);
         return {
           success: true,
           data: {

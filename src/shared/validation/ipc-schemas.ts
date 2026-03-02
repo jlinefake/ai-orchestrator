@@ -44,6 +44,14 @@ export const InstanceCreatePayloadSchema = z.object({
 
 export type ValidatedInstanceCreatePayload = z.infer<typeof InstanceCreatePayloadSchema>;
 
+export const InstanceCreateWithMessagePayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  message: z.string().min(0).max(500000),
+  attachments: z.array(FileAttachmentSchema).max(10).optional(),
+  provider: z.enum(['auto', 'claude', 'openai', 'gemini', 'copilot']).optional(),
+  model: z.string().max(100).optional(),
+});
+
 // ============ Instance Input ============
 
 export const InstanceSendInputPayloadSchema = z.object({
@@ -193,6 +201,13 @@ export const UserActionResponsePayloadSchema = z.object({
 });
 
 export type UserActionResponsePayload = z.infer<typeof UserActionResponsePayloadSchema>;
+
+// Raw payload from renderer for USER_ACTION_RESPOND (uses approved boolean, not action enum)
+export const UserActionRespondRawPayloadSchema = z.object({
+  requestId: z.string().min(1).max(100),
+  approved: z.boolean(),
+  selectedOption: z.string().max(10000).optional(),
+});
 
 // ============ Orchestration Commands ============
 
@@ -1268,6 +1283,10 @@ export const LLMSetConfigPayloadSchema = z.object({
 
 // ============ CLI Verification Payloads ============
 
+export const CliDetectAllPayloadSchema = z.object({
+  force: z.boolean().optional(),
+}).optional();
+
 export const CliDetectOnePayloadSchema = z.object({
   command: z.string().min(1).max(200),
 });
@@ -1713,6 +1732,197 @@ export const AbListExperimentsPayloadSchema = z.object({
   status: z.enum(['active', 'paused', 'completed', 'draft']).optional(),
   taskType: z.string().max(200).optional(),
 }).optional();
+
+// ============ VCS Payloads ============
+
+export const VcsIsRepoPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+});
+
+export const VcsGetStatusPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+});
+
+export const VcsGetBranchesPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+});
+
+export const VcsGetCommitsPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  limit: z.number().int().min(1).max(10000).optional(),
+});
+
+export const VcsGetDiffPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  type: z.enum(['staged', 'unstaged', 'between']),
+  fromRef: z.string().max(500).optional(),
+  toRef: z.string().max(500).optional(),
+  filePath: FilePathSchema.optional(),
+});
+
+export const VcsGetFileHistoryPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  filePath: FilePathSchema,
+  limit: z.number().int().min(1).max(10000).optional(),
+});
+
+export const VcsGetFileAtCommitPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  filePath: FilePathSchema,
+  commitHash: z.string().min(1).max(500),
+});
+
+export const VcsGetBlamePayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+  filePath: FilePathSchema,
+});
+
+// ============ Task Payloads ============
+
+export const TaskGetStatusPayloadSchema = z.object({
+  taskId: z.string().min(1).max(200),
+});
+
+export const TaskGetHistoryPayloadSchema = z.object({
+  parentId: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(10000).optional(),
+});
+
+export const TaskGetByParentPayloadSchema = z.object({
+  parentId: z.string().min(1).max(200),
+});
+
+export const TaskGetByChildPayloadSchema = z.object({
+  childId: z.string().min(1).max(200),
+});
+
+export const TaskCancelPayloadSchema = z.object({
+  taskId: z.string().min(1).max(200),
+});
+
+// ============ Todo Payloads ============
+
+export const TodoGetListPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+});
+
+export const TodoCreatePayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  content: z.string().min(1).max(10000),
+  activeForm: z.string().max(100).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+  parentId: z.string().max(200).optional(),
+});
+
+export const TodoUpdatePayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  todoId: z.string().min(1).max(200),
+  content: z.string().min(1).max(10000).optional(),
+  activeForm: z.string().max(100).optional(),
+  status: z.enum(['pending', 'in_progress', 'completed', 'cancelled']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+});
+
+export const TodoDeletePayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  todoId: z.string().min(1).max(200),
+});
+
+export const TodoWriteAllPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  todos: z.array(z.object({
+    content: z.string().max(10000),
+    status: z.string().max(50),
+    activeForm: z.string().max(100).optional(),
+  })).max(1000),
+});
+
+export const TodoClearPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+});
+
+export const TodoGetCurrentPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+});
+
+// ============ Cost Payloads ============
+
+// IPC auth token used by some cost handlers for basic authentication
+const IpcAuthTokenSchema = z.string().max(500).optional();
+
+export const CostRecordUsagePayloadSchema = z.object({
+  instanceId: InstanceIdSchema,
+  sessionId: SessionIdSchema,
+  model: z.string().min(1).max(200),
+  inputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  cacheReadTokens: z.number().int().min(0).optional(),
+  cacheWriteTokens: z.number().int().min(0).optional(),
+  ipcAuthToken: IpcAuthTokenSchema,
+});
+
+export const CostGetSummaryPayloadSchema = z.object({
+  startTime: z.number().int().nonnegative().optional(),
+  endTime: z.number().int().nonnegative().optional(),
+  ipcAuthToken: IpcAuthTokenSchema,
+}).optional();
+
+export const CostGetSessionCostPayloadSchema = z.object({
+  sessionId: SessionIdSchema,
+  ipcAuthToken: IpcAuthTokenSchema,
+});
+
+export const CostSetBudgetPayloadSchema = z.object({
+  enabled: z.boolean().optional(),
+  dailyLimit: z.number().min(0).optional(),
+  weeklyLimit: z.number().min(0).optional(),
+  monthlyLimit: z.number().min(0).optional(),
+  perSessionLimit: z.number().min(0).optional(),
+  alertThresholds: z.array(z.number().min(0).max(1)).max(20).optional(),
+  ipcAuthToken: IpcAuthTokenSchema,
+});
+
+export const CostGetBudgetPayloadSchema = z.object({
+  ipcAuthToken: IpcAuthTokenSchema,
+}).optional();
+
+export const CostGetBudgetStatusPayloadSchema = z.object({
+  ipcAuthToken: IpcAuthTokenSchema,
+}).optional();
+
+export const CostGetEntriesPayloadSchema = z.object({
+  limit: z.number().int().min(1).max(100000).optional(),
+  ipcAuthToken: IpcAuthTokenSchema,
+}).optional();
+
+export const CostClearEntriesPayloadSchema = z.object({
+  ipcAuthToken: IpcAuthTokenSchema,
+}).optional();
+
+// ============ Ecosystem Payloads ============
+
+export const EcosystemListPayloadSchema = z.object({
+  workingDirectory: WorkingDirectorySchema,
+});
+
+// ============ Instance Additional Payloads ============
+// (InstanceInterruptPayload and InstanceRestartPayload)
+
+export const InstanceInterruptPayloadSchema = z.object({
+  instanceId: InstanceIdSchema,
+});
+
+export const InstanceRestartPayloadSchema = z.object({
+  instanceId: InstanceIdSchema,
+});
+
+// ============ Settings Additional Payloads ============
+// SettingsSetPayload (SettingsUpdatePayloadSchema already exists with key/value)
+
+export const SettingsSetPayloadSchema = z.object({
+  key: z.string().min(1).max(100),
+  value: z.unknown(),
+});
 
 // ============ Validation Helper ============
 

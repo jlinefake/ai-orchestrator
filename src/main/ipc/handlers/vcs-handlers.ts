@@ -5,16 +5,17 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  VcsIsRepoPayload,
-  VcsGetStatusPayload,
-  VcsGetBranchesPayload,
-  VcsGetCommitsPayload,
-  VcsGetDiffPayload,
-  VcsGetFileHistoryPayload,
-  VcsGetFileAtCommitPayload,
-  VcsGetBlamePayload
-} from '../../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  VcsIsRepoPayloadSchema,
+  VcsGetStatusPayloadSchema,
+  VcsGetBranchesPayloadSchema,
+  VcsGetCommitsPayloadSchema,
+  VcsGetDiffPayloadSchema,
+  VcsGetFileHistoryPayloadSchema,
+  VcsGetFileAtCommitPayloadSchema,
+  VcsGetBlamePayloadSchema,
+} from '../../../shared/validation/ipc-schemas';
 import { createVcsManager, isGitAvailable } from '../../workspace/git/vcs-manager';
 
 export function registerVcsHandlers(): void {
@@ -22,17 +23,18 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_IS_REPO,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsIsRepoPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(VcsIsRepoPayloadSchema, payload, 'VCS_IS_REPO');
         if (!isGitAvailable()) {
           return {
             success: true,
             data: { isRepo: false, gitAvailable: false }
           };
         }
-        const vcs = createVcsManager(payload.workingDirectory);
+        const vcs = createVcsManager(validated.workingDirectory);
         const isRepo = vcs.isGitRepository();
         const gitRoot = isRepo ? vcs.findGitRoot() : null;
         return {
@@ -56,11 +58,12 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_STATUS,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetStatusPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
+        const validated = validateIpcPayload(VcsGetStatusPayloadSchema, payload, 'VCS_GET_STATUS');
+        const vcs = createVcsManager(validated.workingDirectory);
         const status = vcs.getStatus();
         return {
           success: true,
@@ -83,11 +86,12 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_BRANCHES,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetBranchesPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
+        const validated = validateIpcPayload(VcsGetBranchesPayloadSchema, payload, 'VCS_GET_BRANCHES');
+        const vcs = createVcsManager(validated.workingDirectory);
         const branches = vcs.getBranches();
         const currentBranch = vcs.getCurrentBranch();
         return {
@@ -111,12 +115,13 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_COMMITS,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetCommitsPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
-        const commits = vcs.getRecentCommits(payload.limit || 50);
+        const validated = validateIpcPayload(VcsGetCommitsPayloadSchema, payload, 'VCS_GET_COMMITS');
+        const vcs = createVcsManager(validated.workingDirectory);
+        const commits = vcs.getRecentCommits(validated.limit || 50);
         return {
           success: true,
           data: commits
@@ -138,30 +143,31 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_DIFF,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetDiffPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
+        const validated = validateIpcPayload(VcsGetDiffPayloadSchema, payload, 'VCS_GET_DIFF');
+        const vcs = createVcsManager(validated.workingDirectory);
         let diff;
 
-        if (payload.filePath) {
-          diff = vcs.getFileDiff(payload.filePath, payload.type === 'staged');
-        } else if (payload.type === 'staged') {
+        if (validated.filePath) {
+          diff = vcs.getFileDiff(validated.filePath, validated.type === 'staged');
+        } else if (validated.type === 'staged') {
           diff = vcs.getStagedDiff();
-        } else if (payload.type === 'unstaged') {
+        } else if (validated.type === 'unstaged') {
           diff = vcs.getUnstagedDiff();
         } else if (
-          payload.type === 'between' &&
-          payload.fromRef &&
-          payload.toRef
+          validated.type === 'between' &&
+          validated.fromRef &&
+          validated.toRef
         ) {
-          diff = vcs.getDiffBetween(payload.fromRef, payload.toRef);
+          diff = vcs.getDiffBetween(validated.fromRef, validated.toRef);
         } else {
           diff = vcs.getUnstagedDiff();
         }
 
-        const stats = vcs.getDiffStats(payload.type === 'staged');
+        const stats = vcs.getDiffStats(validated.type === 'staged');
 
         return {
           success: true,
@@ -184,16 +190,17 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_FILE_HISTORY,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetFileHistoryPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
+        const validated = validateIpcPayload(VcsGetFileHistoryPayloadSchema, payload, 'VCS_GET_FILE_HISTORY');
+        const vcs = createVcsManager(validated.workingDirectory);
         const history = vcs.getFileHistory(
-          payload.filePath,
-          payload.limit || 20
+          validated.filePath,
+          validated.limit || 20
         );
-        const isTracked = vcs.isFileTracked(payload.filePath);
+        const isTracked = vcs.isFileTracked(validated.filePath);
         return {
           success: true,
           data: { history, isTracked }
@@ -215,14 +222,15 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_FILE_AT_COMMIT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetFileAtCommitPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
+        const validated = validateIpcPayload(VcsGetFileAtCommitPayloadSchema, payload, 'VCS_GET_FILE_AT_COMMIT');
+        const vcs = createVcsManager(validated.workingDirectory);
         const content = vcs.getFileAtCommit(
-          payload.filePath,
-          payload.commitHash
+          validated.filePath,
+          validated.commitHash
         );
         return {
           success: true,
@@ -245,12 +253,13 @@ export function registerVcsHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.VCS_GET_BLAME,
     async (
-      event: IpcMainInvokeEvent,
-      payload: VcsGetBlamePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const vcs = createVcsManager(payload.workingDirectory);
-        const blame = vcs.getBlame(payload.filePath);
+        const validated = validateIpcPayload(VcsGetBlamePayloadSchema, payload, 'VCS_GET_BLAME');
+        const vcs = createVcsManager(validated.workingDirectory);
+        const blame = vcs.getBlame(validated.filePath);
         return {
           success: true,
           data: { blame }

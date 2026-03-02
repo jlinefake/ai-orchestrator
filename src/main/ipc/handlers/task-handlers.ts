@@ -5,13 +5,14 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  TaskGetStatusPayload,
-  TaskGetHistoryPayload,
-  TaskGetByParentPayload,
-  TaskGetByChildPayload,
-  TaskCancelPayload
-} from '../../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  TaskGetStatusPayloadSchema,
+  TaskGetHistoryPayloadSchema,
+  TaskGetByParentPayloadSchema,
+  TaskGetByChildPayloadSchema,
+  TaskCancelPayloadSchema,
+} from '../../../shared/validation/ipc-schemas';
 import { getTaskManager } from '../../orchestration/task-manager';
 
 export function registerTaskHandlers(): void {
@@ -22,10 +23,11 @@ export function registerTaskHandlers(): void {
     IPC_CHANNELS.TASK_GET_STATUS,
     async (
       _event: IpcMainInvokeEvent,
-      payload: TaskGetStatusPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const task = taskManager.getTask(payload.taskId);
+        const validated = validateIpcPayload(TaskGetStatusPayloadSchema, payload, 'TASK_GET_STATUS');
+        const task = taskManager.getTask(validated.taskId);
         return {
           success: true,
           data: task ? taskManager.serializeTask(task) : null
@@ -48,10 +50,11 @@ export function registerTaskHandlers(): void {
     IPC_CHANNELS.TASK_GET_HISTORY,
     async (
       _event: IpcMainInvokeEvent,
-      payload: TaskGetHistoryPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const history = taskManager.getTaskHistory(payload.parentId);
+        const validated = validateIpcPayload(TaskGetHistoryPayloadSchema, payload, 'TASK_GET_HISTORY');
+        const history = taskManager.getTaskHistory(validated.parentId);
         return {
           success: true,
           data: history
@@ -74,10 +77,11 @@ export function registerTaskHandlers(): void {
     IPC_CHANNELS.TASK_GET_BY_PARENT,
     async (
       _event: IpcMainInvokeEvent,
-      payload: TaskGetByParentPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const tasks = taskManager.getTasksByParentId(payload.parentId);
+        const validated = validateIpcPayload(TaskGetByParentPayloadSchema, payload, 'TASK_GET_BY_PARENT');
+        const tasks = taskManager.getTasksByParentId(validated.parentId);
         return {
           success: true,
           data: tasks.map((t) => taskManager.serializeTask(t))
@@ -100,10 +104,11 @@ export function registerTaskHandlers(): void {
     IPC_CHANNELS.TASK_GET_BY_CHILD,
     async (
       _event: IpcMainInvokeEvent,
-      payload: TaskGetByChildPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const task = taskManager.getTaskByChildId(payload.childId);
+        const validated = validateIpcPayload(TaskGetByChildPayloadSchema, payload, 'TASK_GET_BY_CHILD');
+        const task = taskManager.getTaskByChildId(validated.childId);
         return {
           success: true,
           data: task ? taskManager.serializeTask(task) : null
@@ -126,10 +131,11 @@ export function registerTaskHandlers(): void {
     IPC_CHANNELS.TASK_CANCEL,
     async (
       _event: IpcMainInvokeEvent,
-      payload: TaskCancelPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const success = taskManager.cancelTask(payload.taskId);
+        const validated = validateIpcPayload(TaskCancelPayloadSchema, payload, 'TASK_CANCEL');
+        const success = taskManager.cancelTask(validated.taskId);
         return {
           success: true,
           data: { cancelled: success }

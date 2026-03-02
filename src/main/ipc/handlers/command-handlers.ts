@@ -5,17 +5,6 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  CommandExecutePayload,
-  CommandCreatePayload,
-  CommandUpdatePayload,
-  CommandDeletePayload,
-  PlanModeEnterPayload,
-  PlanModeExitPayload,
-  PlanModeApprovePayload,
-  PlanModeUpdatePayload,
-  PlanModeGetStatePayload
-} from '../../../shared/types/ipc.types';
 import {
   CommandExecutePayloadSchema,
   CommandCreatePayloadSchema,

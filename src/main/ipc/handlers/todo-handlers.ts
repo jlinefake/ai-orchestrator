@@ -5,15 +5,16 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  TodoGetListPayload,
-  TodoCreatePayload,
-  TodoUpdatePayload,
-  TodoDeletePayload,
-  TodoWriteAllPayload,
-  TodoClearPayload,
-  TodoGetCurrentPayload
-} from '../../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  TodoGetListPayloadSchema,
+  TodoCreatePayloadSchema,
+  TodoUpdatePayloadSchema,
+  TodoDeletePayloadSchema,
+  TodoWriteAllPayloadSchema,
+  TodoClearPayloadSchema,
+  TodoGetCurrentPayloadSchema,
+} from '../../../shared/validation/ipc-schemas';
 import { getTodoManager } from '../../tasks/todo-manager';
 import type { WindowManager } from '../../window-manager';
 
@@ -33,11 +34,12 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_GET_LIST,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoGetListPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const list = todos.getTodoList(payload.sessionId);
+        const validated = validateIpcPayload(TodoGetListPayloadSchema, payload, 'TODO_GET_LIST');
+        const list = todos.getTodoList(validated.sessionId);
         return {
           success: true,
           data: list
@@ -59,15 +61,16 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_CREATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoCreatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const item = todos.createTodo(payload.sessionId, {
-          content: payload.content,
-          activeForm: payload.activeForm,
-          priority: payload.priority,
-          parentId: payload.parentId
+        const validated = validateIpcPayload(TodoCreatePayloadSchema, payload, 'TODO_CREATE');
+        const item = todos.createTodo(validated.sessionId, {
+          content: validated.content,
+          activeForm: validated.activeForm,
+          priority: validated.priority,
+          parentId: validated.parentId
         });
         return {
           success: true,
@@ -90,23 +93,24 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_UPDATE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoUpdatePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const item = todos.updateTodo(payload.sessionId, {
-          id: payload.todoId,
-          content: payload.content,
-          activeForm: payload.activeForm,
-          status: payload.status,
-          priority: payload.priority
+        const validated = validateIpcPayload(TodoUpdatePayloadSchema, payload, 'TODO_UPDATE');
+        const item = todos.updateTodo(validated.sessionId, {
+          id: validated.todoId,
+          content: validated.content,
+          activeForm: validated.activeForm,
+          status: validated.status,
+          priority: validated.priority
         });
         if (!item) {
           return {
             success: false,
             error: {
               code: 'TODO_NOT_FOUND',
-              message: `TODO ${payload.todoId} not found`,
+              message: `TODO ${validated.todoId} not found`,
               timestamp: Date.now()
             }
           };
@@ -132,18 +136,19 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_DELETE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoDeletePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const deleted = todos.deleteTodo(payload.sessionId, payload.todoId);
+        const validated = validateIpcPayload(TodoDeletePayloadSchema, payload, 'TODO_DELETE');
+        const deleted = todos.deleteTodo(validated.sessionId, validated.todoId);
         return {
           success: deleted,
           error: deleted
             ? undefined
             : {
                 code: 'TODO_NOT_FOUND',
-                message: `TODO ${payload.todoId} not found`,
+                message: `TODO ${validated.todoId} not found`,
                 timestamp: Date.now()
               }
         };
@@ -164,11 +169,12 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_WRITE_ALL,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoWriteAllPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const list = todos.writeTodos(payload.sessionId, payload.todos);
+        const validated = validateIpcPayload(TodoWriteAllPayloadSchema, payload, 'TODO_WRITE_ALL');
+        const list = todos.writeTodos(validated.sessionId, validated.todos);
         return {
           success: true,
           data: list
@@ -190,11 +196,12 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_CLEAR,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoClearPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        todos.clearTodos(payload.sessionId);
+        const validated = validateIpcPayload(TodoClearPayloadSchema, payload, 'TODO_CLEAR');
+        todos.clearTodos(validated.sessionId);
         return { success: true };
       } catch (error) {
         return {
@@ -213,11 +220,12 @@ export function registerTodoHandlers(deps: {
   ipcMain.handle(
     IPC_CHANNELS.TODO_GET_CURRENT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: TodoGetCurrentPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const current = todos.getCurrentTodo(payload.sessionId);
+        const validated = validateIpcPayload(TodoGetCurrentPayloadSchema, payload, 'TODO_GET_CURRENT');
+        const current = todos.getCurrentTodo(validated.sessionId);
         return {
           success: true,
           data: current || null

@@ -5,21 +5,6 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  SettingsSetPayload,
-  SettingsUpdatePayload,
-  SettingsResetOnePayload,
-  ConfigResolvePayload,
-  ConfigGetProjectPayload,
-  ConfigSaveProjectPayload,
-  ConfigCreateProjectPayload,
-  ConfigFindProjectPayload,
-  RemoteConfigFetchUrlPayload,
-  RemoteConfigFetchWellKnownPayload,
-  RemoteConfigFetchGitHubPayload,
-  RemoteConfigDiscoverGitPayload,
-  RemoteConfigInvalidatePayload
-} from '../../../shared/types/ipc.types';
 import {
   SettingsGetPayloadSchema,
   SettingsUpdatePayloadSchema,
@@ -114,8 +99,8 @@ export function registerSettingsHandlers(deps: SettingsHandlerDeps): void {
   ipcMain.handle(
     IPC_CHANNELS.SETTINGS_SET,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SettingsSetPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         // Validate payload at IPC boundary

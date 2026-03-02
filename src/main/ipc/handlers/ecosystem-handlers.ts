@@ -12,7 +12,10 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type { EcosystemListPayload } from '../../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  EcosystemListPayloadSchema,
+} from '../../../shared/validation/ipc-schemas';
 import type { InstanceManager } from '../../instance/instance-manager';
 import { getMarkdownCommandRegistry } from '../../commands/markdown-command-registry';
 import { getAgentRegistry } from '../../agents/agent-registry';
@@ -53,10 +56,11 @@ export function registerEcosystemHandlers(instanceManager: InstanceManager): voi
     IPC_CHANNELS.ECOSYSTEM_LIST,
     async (
       _event: IpcMainInvokeEvent,
-      payload: EcosystemListPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const workingDirectory = payload.workingDirectory;
+        const validated = validateIpcPayload(EcosystemListPayloadSchema, payload, 'ECOSYSTEM_LIST');
+        const workingDirectory = validated.workingDirectory;
 
         // Ensure edits show up immediately in the UI.
         getMarkdownCommandRegistry().clearCache(workingDirectory);
@@ -101,10 +105,11 @@ export function registerEcosystemHandlers(instanceManager: InstanceManager): voi
     IPC_CHANNELS.ECOSYSTEM_WATCH_START,
     async (
       _event: IpcMainInvokeEvent,
-      payload: { workingDirectory: string }
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const wd = payload.workingDirectory;
+        const validated = validateIpcPayload(EcosystemListPayloadSchema, payload, 'ECOSYSTEM_WATCH_START');
+        const wd = validated.workingDirectory;
         if (!wd) return { success: true, data: { watching: false } };
         if (watchers.has(wd)) return { success: true, data: { watching: true } };
 
@@ -153,10 +158,11 @@ export function registerEcosystemHandlers(instanceManager: InstanceManager): voi
     IPC_CHANNELS.ECOSYSTEM_WATCH_STOP,
     async (
       _event: IpcMainInvokeEvent,
-      payload: { workingDirectory: string }
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const wd = payload.workingDirectory;
+        const validated = validateIpcPayload(EcosystemListPayloadSchema, payload, 'ECOSYSTEM_WATCH_STOP');
+        const wd = validated.workingDirectory;
         const watcher = wd ? watchers.get(wd) : null;
         if (!watcher) return { success: true, data: { watching: false } };
         watchers.delete(wd);

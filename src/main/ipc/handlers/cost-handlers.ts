@@ -5,16 +5,17 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  CostRecordUsagePayload,
-  CostGetSummaryPayload,
-  CostGetSessionCostPayload,
-  CostGetBudgetPayload,
-  CostSetBudgetPayload,
-  CostGetBudgetStatusPayload,
-  CostGetEntriesPayload,
-  CostClearEntriesPayload
-} from '../../../shared/types/ipc.types';
+import {
+  validateIpcPayload,
+  CostRecordUsagePayloadSchema,
+  CostGetSummaryPayloadSchema,
+  CostGetSessionCostPayloadSchema,
+  CostSetBudgetPayloadSchema,
+  CostGetBudgetPayloadSchema,
+  CostGetBudgetStatusPayloadSchema,
+  CostGetEntriesPayloadSchema,
+  CostClearEntriesPayloadSchema,
+} from '../../../shared/validation/ipc-schemas';
 import { getCostTracker } from '../../core/system/cost-tracker';
 import { WindowManager } from '../../window-manager';
 
@@ -32,17 +33,18 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_RECORD_USAGE,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostRecordUsagePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(CostRecordUsagePayloadSchema, payload, 'COST_RECORD_USAGE');
         costTracker.recordUsage(
-          payload.instanceId,
-          payload.sessionId,
-          payload.model,
-          payload.inputTokens,
-          payload.outputTokens,
-          payload.cacheReadTokens,
-          payload.cacheWriteTokens
+          validated.instanceId,
+          validated.sessionId,
+          validated.model,
+          validated.inputTokens,
+          validated.outputTokens,
+          validated.cacheReadTokens,
+          validated.cacheWriteTokens
         );
         return { success: true };
       } catch (error) {
@@ -63,12 +65,13 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_GET_SUMMARY,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostGetSummaryPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(CostGetSummaryPayloadSchema, payload, 'COST_GET_SUMMARY');
         const summary = costTracker.getSummary(
-          payload?.startTime,
-          payload?.endTime
+          validated?.startTime,
+          validated?.endTime
         );
         return { success: true, data: summary };
       } catch (error) {
@@ -89,10 +92,11 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_GET_SESSION_COST,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostGetSessionCostPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const cost = costTracker.getSessionCost(payload.sessionId);
+        const validated = validateIpcPayload(CostGetSessionCostPayloadSchema, payload, 'COST_GET_SESSION_COST');
+        const cost = costTracker.getSessionCost(validated.sessionId);
         return { success: true, data: cost };
       } catch (error) {
         return {
@@ -116,9 +120,10 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_GET_BUDGET,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostGetBudgetPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        validateIpcPayload(CostGetBudgetPayloadSchema, payload, 'COST_GET_BUDGET');
         const budget = costTracker.getBudget();
         return { success: true, data: budget };
       } catch (error) {
@@ -139,10 +144,12 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_SET_BUDGET,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostSetBudgetPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        costTracker.setBudget(payload);
+        const validated = validateIpcPayload(CostSetBudgetPayloadSchema, payload, 'COST_SET_BUDGET');
+        const { ipcAuthToken: _token, ...budgetConfig } = validated;
+        costTracker.setBudget(budgetConfig);
         return { success: true };
       } catch (error) {
         return {
@@ -162,9 +169,10 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_GET_BUDGET_STATUS,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostGetBudgetStatusPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        validateIpcPayload(CostGetBudgetStatusPayloadSchema, payload, 'COST_GET_BUDGET_STATUS');
         const status = costTracker.getBudgetStatus();
         return { success: true, data: status };
       } catch (error) {
@@ -189,10 +197,11 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_GET_ENTRIES,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostGetEntriesPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const entries = costTracker.getEntries(payload?.limit);
+        const validated = validateIpcPayload(CostGetEntriesPayloadSchema, payload, 'COST_GET_ENTRIES');
+        const entries = costTracker.getEntries(validated?.limit);
         return { success: true, data: entries };
       } catch (error) {
         return {
@@ -212,9 +221,10 @@ export function registerCostHandlers(deps: {
     IPC_CHANNELS.COST_CLEAR_ENTRIES,
     async (
       _event: IpcMainInvokeEvent,
-      payload: CostClearEntriesPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        validateIpcPayload(CostClearEntriesPayloadSchema, payload, 'COST_CLEAR_ENTRIES');
         costTracker.clearEntries();
         return { success: true };
       } catch (error) {

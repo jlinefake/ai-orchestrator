@@ -5,20 +5,6 @@
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
-import type {
-  SnapshotTakePayload,
-  SnapshotStartSessionPayload,
-  SnapshotEndSessionPayload,
-  SnapshotGetForInstancePayload,
-  SnapshotGetForFilePayload,
-  SnapshotGetSessionsPayload,
-  SnapshotGetContentPayload,
-  SnapshotRevertFilePayload,
-  SnapshotRevertSessionPayload,
-  SnapshotGetDiffPayload,
-  SnapshotDeletePayload,
-  SnapshotCleanupPayload
-} from '../../../shared/types/ipc.types';
 import {
   validateIpcPayload,
   SnapshotTakePayloadSchema,
@@ -43,8 +29,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_TAKE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotTakePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotTakePayloadSchema, payload, 'SNAPSHOT_TAKE');
@@ -75,8 +61,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_START_SESSION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotStartSessionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotStartSessionPayloadSchema, payload, 'SNAPSHOT_START_SESSION');
@@ -105,8 +91,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_END_SESSION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotEndSessionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotEndSessionPayloadSchema, payload, 'SNAPSHOT_END_SESSION');
@@ -132,8 +118,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_GET_FOR_INSTANCE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotGetForInstancePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotGetForInstancePayloadSchema, payload, 'SNAPSHOT_GET_FOR_INSTANCE');
@@ -161,8 +147,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_GET_FOR_FILE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotGetForFilePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotGetForFilePayloadSchema, payload, 'SNAPSHOT_GET_FOR_FILE');
@@ -188,8 +174,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_GET_SESSIONS,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotGetSessionsPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotGetSessionsPayloadSchema, payload, 'SNAPSHOT_GET_SESSIONS');
@@ -215,8 +201,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_GET_CONTENT,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotGetContentPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotGetContentPayloadSchema, payload, 'SNAPSHOT_GET_CONTENT');
@@ -242,8 +228,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_REVERT_FILE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotRevertFilePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotRevertFilePayloadSchema, payload, 'SNAPSHOT_REVERT_FILE');
@@ -276,8 +262,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_REVERT_SESSION,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotRevertSessionPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotRevertSessionPayloadSchema, payload, 'SNAPSHOT_REVERT_SESSION');
@@ -310,8 +296,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_GET_DIFF,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotGetDiffPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotGetDiffPayloadSchema, payload, 'SNAPSHOT_GET_DIFF');
@@ -337,8 +323,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_DELETE,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotDeletePayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotDeletePayloadSchema, payload, 'SNAPSHOT_DELETE');
@@ -349,7 +335,7 @@ export function registerSnapshotHandlers(): void {
             ? undefined
             : {
                 code: 'SNAPSHOT_NOT_FOUND',
-                message: `Snapshot ${payload.snapshotId} not found`,
+                message: `Snapshot ${validated.snapshotId} not found`,
                 timestamp: Date.now()
               }
         };
@@ -370,8 +356,8 @@ export function registerSnapshotHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_CLEANUP,
     async (
-      event: IpcMainInvokeEvent,
-      payload: SnapshotCleanupPayload
+      _event: IpcMainInvokeEvent,
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
         const validated = validateIpcPayload(SnapshotCleanupPayloadSchema, payload, 'SNAPSHOT_CLEANUP');
