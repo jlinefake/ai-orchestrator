@@ -10,6 +10,11 @@
 import { ipcMain } from 'electron';
 import type { IpcResponse, ErrorInfo } from '../../shared/types/ipc.types';
 import type { GRPOConfig, TrainingOutcome, GRPOBatch, TrainingStats } from '../learning/grpo-trainer';
+import {
+  validateIpcPayload,
+  TrainingGetStrategiesPayloadSchema,
+  TrainingUpdateConfigPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 
 // Helper function to create ErrorInfo from Error
 function createErrorInfo(error: unknown, code: string = 'TRAINING_ERROR'): ErrorInfo {
@@ -160,11 +165,12 @@ export function registerTrainingHandlers(): void {
   // Get strategies
   ipcMain.handle(
     TRAINING_IPC_CHANNELS.GET_STRATEGIES,
-    async (_event, payload?: { limit?: number }): Promise<IpcResponse<StrategyData[]>> => {
+    async (_event, payload: unknown): Promise<IpcResponse<StrategyData[]>> => {
       try {
+        const validated = validateIpcPayload(TrainingGetStrategiesPayloadSchema, payload, 'GET_STRATEGIES');
         const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
-        const strategies = trainer.getTopStrategies(payload?.limit || 10);
+        const strategies = trainer.getTopStrategies(validated?.limit || 10);
 
         return {
           success: true,
@@ -204,11 +210,12 @@ export function registerTrainingHandlers(): void {
   // Update config
   ipcMain.handle(
     TRAINING_IPC_CHANNELS.UPDATE_CONFIG,
-    async (_event, payload: { config: Partial<import('../learning/grpo-trainer').GRPOConfig> }): Promise<IpcResponse<void>> => {
+    async (_event, payload: unknown): Promise<IpcResponse<void>> => {
       try {
+        const validated = validateIpcPayload(TrainingUpdateConfigPayloadSchema, payload, 'UPDATE_CONFIG');
         const { getGRPOTrainer } = await import('../learning/grpo-trainer');
         const trainer = getGRPOTrainer();
-        trainer.configure(payload.config);
+        trainer.configure(validated.config as Partial<GRPOConfig>);
 
         return {
           success: true,

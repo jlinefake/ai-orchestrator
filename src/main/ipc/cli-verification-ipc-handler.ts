@@ -5,13 +5,21 @@
 
 import { ipcMain, IpcMainInvokeEvent, BrowserWindow } from 'electron';
 import { IpcResponse } from '../../shared/types/ipc.types';
-import { CliDetectionService, CliInfo, CliType } from '../cli/cli-detection';
+import { CliDetectionService, CliType } from '../cli/cli-detection';
 import { getCliVerificationCoordinator, CliVerificationConfig } from '../orchestration/cli-verification-extension';
 import type { PersonalityType, SynthesisStrategy } from '../../shared/types/verification.types';
 import type { WindowManager } from '../window-manager';
 import { CopilotSdkAdapter, CopilotModelInfo, COPILOT_DEFAULT_MODELS } from '../cli/adapters/copilot-sdk-adapter';
 import { PROVIDER_MODEL_LIST } from '../../shared/types/provider.types';
 import type { ModelDisplayInfo } from '../../shared/types/provider.types';
+import {
+  validateIpcPayload,
+  CliDetectOnePayloadSchema,
+  CliTestConnectionPayloadSchema,
+  ProviderListModelsPayloadSchema,
+  CliVerificationStartPayloadSchema,
+  CliVerificationCancelPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 
 // ============================================
 // Types
@@ -19,36 +27,6 @@ import type { ModelDisplayInfo } from '../../shared/types/provider.types';
 
 interface CliDetectAllPayload {
   force?: boolean;
-}
-
-interface CliDetectOnePayload {
-  command: string;
-}
-
-interface CliTestConnectionPayload {
-  command: string;
-}
-
-interface CliVerificationStartPayload {
-  id: string;
-  prompt: string;
-  context?: string;
-  attachments?: { name: string; mimeType: string; data: string }[]; // Base64 encoded files
-  config: {
-    cliAgents?: CliType[];
-    agentCount?: number;
-    synthesisStrategy?: string;
-    personalities?: string[];
-    confidenceThreshold?: number;
-    timeout?: number;
-    maxDebateRounds?: number;
-    fallbackToApi?: boolean;
-    mixedMode?: boolean;
-  };
-}
-
-interface CliVerificationCancelPayload {
-  id: string;
 }
 
 // ============================================
@@ -114,10 +92,11 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'cli:detect-one',
     async (
       _event: IpcMainInvokeEvent,
-      payload: CliDetectOnePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const cliInfo = await cliDetection.detectOne(payload.command as CliType);
+        const validated = validateIpcPayload(CliDetectOnePayloadSchema, payload, 'cli:detect-one');
+        const cliInfo = await cliDetection.detectOne(validated.command as CliType);
         return { success: true, data: cliInfo };
       } catch (error) {
         return {
@@ -137,10 +116,11 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'cli:test-connection',
     async (
       _event: IpcMainInvokeEvent,
-      payload: CliTestConnectionPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const cliInfo = await cliDetection.detectOne(payload.command as CliType);
+        const validated = validateIpcPayload(CliTestConnectionPayloadSchema, payload, 'cli:test-connection');
+        const cliInfo = await cliDetection.detectOne(validated.command as CliType);
         return {
           success: true,
           data: {
@@ -220,20 +200,11 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'provider:list-models',
     async (
       _event: IpcMainInvokeEvent,
-      payload: { provider: string }
+      payload: unknown
     ): Promise<IpcResponse<ModelDisplayInfo[]>> => {
       try {
-        const provider = payload?.provider;
-        if (!provider) {
-          return {
-            success: false,
-            error: {
-              code: 'INVALID_PROVIDER',
-              message: 'Provider parameter is required',
-              timestamp: Date.now(),
-            },
-          };
-        }
+        const validated = validateIpcPayload(ProviderListModelsPayloadSchema, payload, 'provider:list-models');
+        const provider = validated.provider;
 
         console.log(`[CLI-Verification-IPC] Listing models for provider: ${provider}`);
 
@@ -286,47 +257,48 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'verification:start-cli',
     async (
       _event: IpcMainInvokeEvent,
-      payload: CliVerificationStartPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(CliVerificationStartPayloadSchema, payload, 'verification:start-cli');
         console.log('[CLI-Verification-IPC] Starting verification with payload:', {
-          id: payload.id,
-          promptLength: payload.prompt?.length,
-          config: payload.config,
+          id: validated.id,
+          promptLength: validated.prompt?.length,
+          config: validated.config,
         });
 
         const config: CliVerificationConfig = {
-          agentCount: payload.config.agentCount || 3,
-          cliAgents: payload.config.cliAgents,
-          synthesisStrategy: (payload.config.synthesisStrategy as SynthesisStrategy) || 'debate',
-          personalities: payload.config.personalities as PersonalityType[],
-          confidenceThreshold: payload.config.confidenceThreshold || 0.7,
-          timeout: payload.config.timeout || 300000,
-          maxDebateRounds: payload.config.maxDebateRounds || 4,
+          agentCount: validated.config.agentCount || 3,
+          cliAgents: validated.config.cliAgents as CliType[] | undefined,
+          synthesisStrategy: (validated.config.synthesisStrategy as SynthesisStrategy) || 'debate',
+          personalities: validated.config.personalities as PersonalityType[],
+          confidenceThreshold: validated.config.confidenceThreshold || 0.7,
+          timeout: validated.config.timeout || 300000,
+          maxDebateRounds: validated.config.maxDebateRounds || 4,
           preferCli: true,
-          fallbackToApi: payload.config.fallbackToApi ?? true,
-          mixedMode: payload.config.mixedMode ?? false,
+          fallbackToApi: validated.config.fallbackToApi ?? true,
+          mixedMode: validated.config.mixedMode ?? false,
         };
 
         // Start verification (async - result sent via events)
         // Pass the frontend's session ID so events use the same ID
         coordinator.startVerificationWithCli(
-          { prompt: payload.prompt, context: payload.context, id: payload.id, attachments: payload.attachments },
+          { prompt: validated.prompt, context: validated.context, id: validated.id, attachments: validated.attachments },
           config
         ).then((result) => {
           sendToRenderer('verification:complete', {
-            sessionId: payload.id,
+            sessionId: validated.id,
             result,
           });
         }).catch((error) => {
           console.error('[CLI-Verification-IPC] Verification error:', error);
           sendToRenderer('verification:error', {
-            sessionId: payload.id,
+            sessionId: validated.id,
             error: (error as Error).message,
           });
         });
 
-        return { success: true, data: { verificationId: payload.id } };
+        return { success: true, data: { verificationId: validated.id } };
       } catch (error) {
         console.error('[CLI-Verification-IPC] Failed to start verification:', error);
         return {
@@ -346,10 +318,11 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
     'verification:cancel',
     async (
       _event: IpcMainInvokeEvent,
-      payload: CliVerificationCancelPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const result = await coordinator.cancelVerification(payload.id);
+        const validated = validateIpcPayload(CliVerificationCancelPayloadSchema, payload, 'verification:cancel');
+        const result = await coordinator.cancelVerification(validated.id);
 
         if (!result.success) {
           return {
@@ -365,7 +338,7 @@ export function registerCliVerificationHandlers(windowManager: WindowManager): v
         return {
           success: true,
           data: {
-            verificationId: payload.id,
+            verificationId: validated.id,
             agentsCancelled: result.agentsCancelled,
           },
         };

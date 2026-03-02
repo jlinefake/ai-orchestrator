@@ -1306,6 +1306,16 @@ export const CliVerificationCancelPayloadSchema = z.object({
   id: z.string().min(1).max(200),
 });
 
+// ============ Training Payloads ============
+
+export const TrainingGetStrategiesPayloadSchema = z.object({
+  limit: z.number().int().min(1).max(1000).optional(),
+}).optional();
+
+export const TrainingUpdateConfigPayloadSchema = z.object({
+  config: z.record(z.string(), z.unknown()),
+});
+
 // ============ Validation Helper ============
 
 /**

@@ -8,7 +8,12 @@ import { IPC_CHANNELS } from '../../shared/types/ipc.types';
 import { getObservationStore } from '../observation/observation-store';
 import { getObservationIngestor } from '../observation/observation-ingestor';
 import { getReflectorAgent } from '../observation/reflector-agent';
-import type { ObservationConfig } from '../../shared/types/observation.types';
+import {
+  validateIpcPayload,
+  ObservationConfigurePayloadSchema,
+  ObservationGetReflectionsPayloadSchema,
+  ObservationGetObservationsPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 
 /**
  * Register all observation-related IPC handlers
@@ -27,12 +32,13 @@ export function registerObservationHandlers(): void {
   // Get reflections
   ipcMain.handle(
     IPC_CHANNELS.OBSERVATION_GET_REFLECTIONS,
-    (_event, payload?: { minConfidence?: number; limit?: number }) => {
+    (_event, payload: unknown) => {
       try {
+        const validated = validateIpcPayload(ObservationGetReflectionsPayloadSchema, payload, 'OBSERVATION_GET_REFLECTIONS');
         const store = getObservationStore();
         const reflections = store.getReflections({
-          minConfidence: payload?.minConfidence,
-          limit: payload?.limit,
+          minConfidence: validated?.minConfidence,
+          limit: validated?.limit,
         });
         return { success: true, data: reflections };
       } catch (error) {
@@ -44,12 +50,13 @@ export function registerObservationHandlers(): void {
   // Get observations
   ipcMain.handle(
     IPC_CHANNELS.OBSERVATION_GET_OBSERVATIONS,
-    (_event, payload?: { since?: number; limit?: number }) => {
+    (_event, payload: unknown) => {
       try {
+        const validated = validateIpcPayload(ObservationGetObservationsPayloadSchema, payload, 'OBSERVATION_GET_OBSERVATIONS');
         const store = getObservationStore();
         const observations = store.getObservations({
-          since: payload?.since,
-          limit: payload?.limit,
+          since: validated?.since,
+          limit: validated?.limit,
         });
         return { success: true, data: observations };
       } catch (error) {
@@ -61,10 +68,11 @@ export function registerObservationHandlers(): void {
   // Configure
   ipcMain.handle(
     IPC_CHANNELS.OBSERVATION_CONFIGURE,
-    (_event, config: Partial<ObservationConfig>) => {
+    (_event, payload: unknown) => {
       try {
-        getObservationStore().configure(config);
-        getObservationIngestor().configure(config);
+        const validated = validateIpcPayload(ObservationConfigurePayloadSchema, payload, 'OBSERVATION_CONFIGURE');
+        getObservationStore().configure(validated ?? {});
+        getObservationIngestor().configure(validated ?? {});
         return { success: true };
       } catch (error) {
         return { success: false, error: (error as Error).message };

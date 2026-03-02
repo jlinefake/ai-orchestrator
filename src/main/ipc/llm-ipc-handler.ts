@@ -5,16 +5,17 @@
 
 import { ipcMain, BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS, IpcResponse } from '../../shared/types/ipc.types';
-import type {
-  LLMSummarizePayload,
-  LLMSubQueryPayload,
-  LLMCancelStreamPayload,
-  LLMCountTokensPayload,
-  LLMTruncateTokensPayload,
-  LLMSetConfigPayload,
-} from '../../shared/types/ipc.types';
 import { getLLMService, StreamChunk } from '../rlm/llm-service';
 import { getTokenCounter } from '../rlm/token-counter';
+import {
+  validateIpcPayload,
+  LLMSummarizePayloadSchema,
+  LLMSubQueryPayloadSchema,
+  LLMCancelStreamPayloadSchema,
+  LLMCountTokensPayloadSchema,
+  LLMTruncateTokensPayloadSchema,
+  LLMSetConfigPayloadSchema,
+} from '../../shared/validation/ipc-schemas';
 
 /**
  * Get the main window for sending events
@@ -50,21 +51,23 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_SUMMARIZE,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMSummarizePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(LLMSummarizePayloadSchema, payload, 'LLM_SUMMARIZE');
+        const targetTokens: number = validated.targetTokens ?? 500;
         const summary = await llm.summarize({
-          requestId: payload.requestId,
-          content: payload.content,
-          targetTokens: payload.targetTokens,
-          preserveKeyPoints: payload.preserveKeyPoints,
+          requestId: validated.requestId,
+          content: validated.content,
+          targetTokens,
+          preserveKeyPoints: validated.preserveKeyPoints,
         });
         return {
           success: true,
           data: {
-            requestId: payload.requestId,
+            requestId: validated.requestId,
             summary,
-            originalTokens: llm.countTokens(payload.content),
+            originalTokens: llm.countTokens(validated.content),
             summaryTokens: llm.countTokens(summary),
           },
         };
@@ -86,23 +89,26 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_SUBQUERY,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMSubQueryPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(LLMSubQueryPayloadSchema, payload, 'LLM_SUBQUERY');
+        const context: string = validated.context ?? '';
+        const depth: number = validated.depth ?? 0;
         const response = await llm.subQuery({
-          requestId: payload.requestId,
-          prompt: payload.prompt,
-          context: payload.context,
-          depth: payload.depth,
+          requestId: validated.requestId,
+          prompt: validated.prompt,
+          context,
+          depth,
         });
         return {
           success: true,
           data: {
-            requestId: payload.requestId,
+            requestId: validated.requestId,
             response,
-            depth: payload.depth,
+            depth: validated.depth,
             tokens: {
-              input: llm.countTokens(payload.context + payload.prompt),
+              input: llm.countTokens((validated.context ?? '') + validated.prompt),
               output: llm.countTokens(response),
             },
           },
@@ -131,24 +137,26 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_SUMMARIZE_STREAM,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMSummarizePayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(LLMSummarizePayloadSchema, payload, 'LLM_SUMMARIZE_STREAM');
+        const streamTargetTokens: number = validated.targetTokens ?? 500;
         // Start streaming in background
         const streamGenerator = llm.summarizeStreaming({
-          requestId: payload.requestId,
-          content: payload.content,
-          targetTokens: payload.targetTokens,
-          preserveKeyPoints: payload.preserveKeyPoints,
+          requestId: validated.requestId,
+          content: validated.content,
+          targetTokens: streamTargetTokens,
+          preserveKeyPoints: validated.preserveKeyPoints,
         });
 
         // Process stream and send chunks to renderer
-        processStreamInBackground(streamGenerator, payload.requestId);
+        processStreamInBackground(streamGenerator, validated.requestId);
 
         return {
           success: true,
           data: {
-            requestId: payload.requestId,
+            requestId: validated.requestId,
             streaming: true,
           },
         };
@@ -170,24 +178,27 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_SUBQUERY_STREAM,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMSubQueryPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(LLMSubQueryPayloadSchema, payload, 'LLM_SUBQUERY_STREAM');
+        const streamContext: string = validated.context ?? '';
+        const streamDepth: number = validated.depth ?? 0;
         // Start streaming in background
         const streamGenerator = llm.subQueryStreaming({
-          requestId: payload.requestId,
-          prompt: payload.prompt,
-          context: payload.context,
-          depth: payload.depth,
+          requestId: validated.requestId,
+          prompt: validated.prompt,
+          context: streamContext,
+          depth: streamDepth,
         });
 
         // Process stream and send chunks to renderer
-        processStreamInBackground(streamGenerator, payload.requestId);
+        processStreamInBackground(streamGenerator, validated.requestId);
 
         return {
           success: true,
           data: {
-            requestId: payload.requestId,
+            requestId: validated.requestId,
             streaming: true,
           },
         };
@@ -209,13 +220,14 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_CANCEL_STREAM,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMCancelStreamPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const cancelled = llm.cancelStream(payload.requestId);
+        const validated = validateIpcPayload(LLMCancelStreamPayloadSchema, payload, 'LLM_CANCEL_STREAM');
+        const cancelled = llm.cancelStream(validated.requestId);
         return {
           success: true,
-          data: { cancelled, requestId: payload.requestId },
+          data: { cancelled, requestId: validated.requestId },
         };
       } catch (error) {
         return {
@@ -239,13 +251,14 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_COUNT_TOKENS,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMCountTokensPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        const count = tokenCounter.countTokens(payload.text, payload.model);
+        const validated = validateIpcPayload(LLMCountTokensPayloadSchema, payload, 'LLM_COUNT_TOKENS');
+        const count = tokenCounter.countTokens(validated.text, validated.model);
         return {
           success: true,
-          data: { count, model: payload.model },
+          data: { count, model: validated.model },
         };
       } catch (error) {
         return {
@@ -265,20 +278,21 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_TRUNCATE_TOKENS,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMTruncateTokensPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
+        const validated = validateIpcPayload(LLMTruncateTokensPayloadSchema, payload, 'LLM_TRUNCATE_TOKENS');
         const truncated = tokenCounter.truncateToTokens(
-          payload.text,
-          payload.maxTokens,
-          payload.model
+          validated.text,
+          validated.maxTokens,
+          validated.model
         );
         return {
           success: true,
           data: {
             truncated,
-            originalTokens: tokenCounter.countTokens(payload.text, payload.model),
-            truncatedTokens: tokenCounter.countTokens(truncated, payload.model),
+            originalTokens: tokenCounter.countTokens(validated.text, validated.model),
+            truncatedTokens: tokenCounter.countTokens(truncated, validated.model),
           },
         };
       } catch (error) {
@@ -329,10 +343,11 @@ export function registerLLMHandlers(): void {
     IPC_CHANNELS.LLM_SET_CONFIG,
     async (
       _event: IpcMainInvokeEvent,
-      payload: LLMSetConfigPayload
+      payload: unknown
     ): Promise<IpcResponse> => {
       try {
-        llm.configure(payload);
+        const validated = validateIpcPayload(LLMSetConfigPayloadSchema, payload, 'LLM_SET_CONFIG');
+        llm.configure(validated);
         const config = llm.getConfig();
         // Mask API keys for security
         const safeConfig = {
