@@ -516,8 +516,19 @@ export class InstanceCommunicationManager extends EventEmitter {
     });
 
     adapter.on('input_required', (payload: { id: string; prompt: string; timestamp: number; metadata?: Record<string, unknown> }) => {
+      const payloadMetadata = payload.metadata || {};
+      const approvalTraceId = typeof payloadMetadata['approvalTraceId'] === 'string'
+        ? String(payloadMetadata['approvalTraceId'])
+        : `approval-forward-${payload.id}`;
+
       const capabilities = this.getAdapterRuntimeCapabilities(adapter);
       if (!capabilities.supportsPermissionPrompts) {
+        logger.info('[APPROVAL_TRACE] communication_drop_input_required', {
+          approvalTraceId,
+          instanceId,
+          requestId: payload.id,
+          reason: 'provider_does_not_support_permission_prompts'
+        });
         const instance = this.deps.getInstance(instanceId);
         if (instance) {
           const message: OutputMessage = {
@@ -533,17 +544,31 @@ export class InstanceCommunicationManager extends EventEmitter {
         return;
       }
 
-      logger.info('INPUT_REQUIRED event received', { instanceId, payload });
+      const metadata: Record<string, unknown> = {
+        ...payloadMetadata,
+        approvalTraceId,
+        traceStage: 'main:instance-communication:forwarded'
+      };
+      logger.info('[APPROVAL_TRACE] communication_receive_input_required', {
+        approvalTraceId,
+        instanceId,
+        requestId: payload.id,
+        metadataType: metadata['type']
+      });
 
       this.emit('input-required', {
         instanceId,
         requestId: payload.id,
         prompt: payload.prompt,
         timestamp: payload.timestamp,
-        metadata: payload.metadata
+        metadata
       });
 
-      logger.info('input-required event emitted', { instanceId });
+      logger.info('[APPROVAL_TRACE] communication_emit_input_required', {
+        approvalTraceId,
+        instanceId,
+        requestId: payload.id
+      });
     });
 
     adapter.on('error', async (error: Error) => {

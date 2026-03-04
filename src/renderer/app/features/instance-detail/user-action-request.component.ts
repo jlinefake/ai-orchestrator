@@ -38,6 +38,7 @@ export interface UserActionRequest {
     action?: string;
     path?: string;
     originalContent?: string;
+    approvalTraceId?: string;
   };
 }
 
@@ -511,28 +512,35 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
     });
 
     // Subscribe to input required events (CLI permission prompts)
-    console.log('[UserActionRequestComponent] Setting up onInputRequired subscription');
+    console.log('[APPROVAL_TRACE][renderer:user-action] onInputRequired subscription setup');
     this.unsubscribeInputRequired = this.ipc.onInputRequired((payload) => {
-      console.log('=== [UserActionRequestComponent] INPUT_REQUIRED CALLBACK TRIGGERED ===');
-      console.log('[UserActionRequestComponent] Payload:', JSON.stringify(payload, null, 2));
+      const metadata = payload.metadata as UserActionRequest['permissionMetadata'] | undefined;
+      const approvalTraceId = metadata?.approvalTraceId || `approval-renderer-component-${payload.requestId}`;
+      console.log('[APPROVAL_TRACE][renderer:user-action] received', {
+        approvalTraceId,
+        instanceId: payload.instanceId,
+        requestId: payload.requestId,
+        metadataType: metadata?.type
+      });
 
       const currentInstanceId = this.instanceId();
-      console.log('[UserActionRequestComponent] Current instance ID:', currentInstanceId);
-      console.log('[UserActionRequestComponent] Payload instance ID:', payload.instanceId);
 
       // Check if YOLO mode is enabled - skip showing dialog if so
       if (currentInstanceId) {
         const instance = this.instanceStore.getInstance(currentInstanceId);
         if (instance?.yoloMode) {
-          console.log('[UserActionRequestComponent] YOLO mode enabled, skipping permission dialog');
+          console.log('[APPROVAL_TRACE][renderer:user-action] skipped_yolo_enabled', {
+            approvalTraceId,
+            currentInstanceId,
+            payloadInstanceId: payload.instanceId,
+            requestId: payload.requestId
+          });
           return;
         }
       }
 
       // Only show for this instance
       if (!currentInstanceId || payload.instanceId === currentInstanceId) {
-        console.log('[UserActionRequestComponent] Instance ID matches, creating request...');
-        const metadata = payload.metadata as UserActionRequest['permissionMetadata'];
         const isPermissionPrompt = metadata?.type === 'permission_denial';
         const req: UserActionRequest = {
           id: payload.requestId,
@@ -543,20 +551,33 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
           createdAt: payload.timestamp,
           permissionMetadata: metadata // Store permission details for retry message
         };
-        console.log('[UserActionRequestComponent] Created request:', JSON.stringify(req, null, 2));
         this.pendingRequests.update((requests) => {
-          console.log('[UserActionRequestComponent] Current pending requests:', requests.length);
+          if (requests.some((r) => r.id === req.id)) {
+            console.log('[APPROVAL_TRACE][renderer:user-action] duplicate_request_skipped', {
+              approvalTraceId,
+              requestId: req.id,
+              pendingCount: requests.length
+            });
+            return requests;
+          }
           const updated = [...requests, req];
-          console.log('[UserActionRequestComponent] Updated pending requests:', updated.length);
+          console.log('[APPROVAL_TRACE][renderer:user-action] request_added', {
+            approvalTraceId,
+            requestId: req.id,
+            pendingCount: updated.length
+          });
           return updated;
         });
-        console.log('[UserActionRequestComponent] Request added to pending list');
       } else {
-        console.log('[UserActionRequestComponent] Instance ID mismatch, ignoring');
+        console.log('[APPROVAL_TRACE][renderer:user-action] skipped_instance_mismatch', {
+          approvalTraceId,
+          currentInstanceId,
+          payloadInstanceId: payload.instanceId,
+          requestId: payload.requestId
+        });
       }
-      console.log('=== [UserActionRequestComponent] INPUT_REQUIRED HANDLING COMPLETE ===');
     });
-    console.log('[UserActionRequestComponent] onInputRequired subscription set up');
+    console.log('[APPROVAL_TRACE][renderer:user-action] onInputRequired subscription ready');
   }
 
   ngOnDestroy(): void {
@@ -746,6 +767,13 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
           if (!inputText) {
             return;
           }
+          const approvalTraceId =
+            request.permissionMetadata?.approvalTraceId || `approval-renderer-generic-${request.id}`;
+          console.log('[APPROVAL_TRACE][renderer:user-action] submit_generic_input_required', {
+            approvalTraceId,
+            requestId: request.id,
+            instanceId: request.instanceId
+          });
 
           const result = await this.ipc.respondToInputRequired(
             request.instanceId,
@@ -754,6 +782,11 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
           );
 
           if (result.success) {
+            console.log('[APPROVAL_TRACE][renderer:user-action] submit_generic_input_required_success', {
+              approvalTraceId,
+              requestId: request.id,
+              instanceId: request.instanceId
+            });
             this.inputRequiredTexts.delete(request.id);
             this.pendingRequests.update((requests) =>
               requests.filter((r) => r.id !== request.id)
@@ -764,6 +797,7 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
 
         let response: string;
         const meta = request.permissionMetadata;
+        const approvalTraceId = meta?.approvalTraceId || `approval-renderer-permission-${request.id}`;
         // Create permission key to clear pending permission tracking
         const permissionKey = meta?.action && meta?.path ? `${meta.action}:${meta.path}` : undefined;
         const decisionScope = this.getInputRequiredScope(request.id);
@@ -778,10 +812,24 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
             // Generic approval message
             response = `Permission granted. Please proceed with the operation.`;
           }
-          console.log('[UserActionRequestComponent] Sending approval with retry message:', response);
+          console.log('[APPROVAL_TRACE][renderer:user-action] submit_permission_decision', {
+            approvalTraceId,
+            requestId: request.id,
+            instanceId: request.instanceId,
+            decisionAction,
+            decisionScope,
+            permissionKey: permissionKey || null
+          });
         } else {
           response = 'Permission denied. Please do not perform that operation.';
-          console.log('[UserActionRequestComponent] Sending denial message:', response);
+          console.log('[APPROVAL_TRACE][renderer:user-action] submit_permission_decision', {
+            approvalTraceId,
+            requestId: request.id,
+            instanceId: request.instanceId,
+            decisionAction,
+            decisionScope,
+            permissionKey: permissionKey || null
+          });
         }
 
         const result = await this.ipc.respondToInputRequired(
@@ -794,6 +842,13 @@ export class UserActionRequestComponent implements OnInit, OnDestroy {
         );
 
         if (result.success) {
+          console.log('[APPROVAL_TRACE][renderer:user-action] submit_permission_decision_success', {
+            approvalTraceId,
+            requestId: request.id,
+            instanceId: request.instanceId,
+            decisionAction,
+            decisionScope
+          });
           this.inputRequiredScopes.delete(request.id);
           this.pendingRequests.update((requests) =>
             requests.filter((r) => r.id !== request.id)

@@ -313,6 +313,15 @@ export class InstanceManager extends EventEmitter {
 
     const meta = payload.metadata || {};
     const metaType = String((meta as any)['type'] || '');
+    const approvalTraceId = typeof meta['approvalTraceId'] === 'string'
+      ? String(meta['approvalTraceId'])
+      : `approval-manager-${payload.requestId}`;
+    logger.info('[APPROVAL_TRACE] manager_handle_input_required', {
+      approvalTraceId,
+      instanceId: payload.instanceId,
+      requestId: payload.requestId,
+      metadataType: metaType
+    });
 
     // Only gate the known CLI permission denial prompts (Claude CLI emits these for tool_result denial).
     if (metaType === 'permission_denial') {
@@ -345,6 +354,13 @@ export class InstanceManager extends EventEmitter {
 
       const decision = getPermissionManager().checkPermission(request);
       if (decision.action === 'allow' || decision.action === 'deny') {
+        logger.info('[APPROVAL_TRACE] manager_auto_decision', {
+          approvalTraceId,
+          instanceId: payload.instanceId,
+          requestId: payload.requestId,
+          decision: decision.action,
+          reason: decision.reason
+        });
         const response =
           decision.action === 'allow'
             ? `Permission granted. (Rule: ${decision.reason})`
@@ -373,8 +389,20 @@ export class InstanceManager extends EventEmitter {
     }
 
     // Default behavior: forward to renderer and let the user decide.
-    this.emit('instance:input-required', payload);
-    logger.info('instance:input-required event emitted');
+    const forwardedPayload = {
+      ...payload,
+      metadata: {
+        ...meta,
+        approvalTraceId,
+        traceStage: 'main:instance-manager:forwarded'
+      }
+    };
+    this.emit('instance:input-required', forwardedPayload);
+    logger.info('[APPROVAL_TRACE] manager_forward_to_renderer', {
+      approvalTraceId,
+      instanceId: payload.instanceId,
+      requestId: payload.requestId
+    });
   }
 
   recordInputRequiredPermissionDecision(params: {

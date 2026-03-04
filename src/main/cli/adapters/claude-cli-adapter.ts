@@ -845,7 +845,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
               if (this.pendingPermissions.has(permissionKey)) {
                 logger.debug('Skipping duplicate permission prompt', { permissionKey });
                 this.forgetToolUse(block.tool_use_id);
-                break;
+                continue;
               }
 
               // Skip if user already approved this permission (retry still failed but don't re-prompt)
@@ -864,7 +864,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                   });
                 }
                 this.forgetToolUse(block.tool_use_id);
-                break;
+                continue;
               }
 
               // Track this permission request
@@ -872,6 +872,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
               logger.debug('Added to pending permissions', { permissionKey });
 
               const inputRequestId = generateId();
+              const approvalTraceId = this.createApprovalTraceId('permission');
               const prompt = `Permission required: Claude wants to ${action} ${path}. Enable YOLO mode to allow all tool use, or reject to continue with this action denied.`;
               const timestamp = message.timestamp || Date.now();
 
@@ -879,6 +880,15 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                 inputRequestId,
                 action,
                 path
+              });
+              logger.info('[APPROVAL_TRACE] adapter_emit_permission_denial', {
+                approvalTraceId,
+                instanceSessionId: this.sessionId,
+                requestId: inputRequestId,
+                permissionKey,
+                action,
+                path,
+                toolUseId: block.tool_use_id
               });
 
               this.emit('status', 'waiting_for_input' as InstanceStatus);
@@ -894,7 +904,9 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                   action,
                   path,
                   originalContent: block.content,
-                  permissionKey // Include for cleanup after response
+                  permissionKey, // Include for cleanup after response
+                  approvalTraceId,
+                  traceStage: 'adapter:permission_denial_emit'
                 }
               });
 
@@ -904,7 +916,12 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
                 timestamp,
                 type: 'system',
                 content: prompt,
-                metadata: { requiresInput: true, permissionDenial: true }
+                metadata: {
+                  requiresInput: true,
+                  permissionDenial: true,
+                  approvalTraceId,
+                  traceStage: 'adapter:permission_denial_output'
+                }
               });
 
               logger.debug('Permission denial handling complete');
@@ -1063,16 +1080,27 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
         this.emit('status', 'waiting_for_input' as InstanceStatus);
         const inputRequestId = generateId();
+        const approvalTraceId = this.createApprovalTraceId('input_required');
         const prompt = message.prompt || 'Input required';
         const timestamp = message.timestamp || Date.now();
 
         logger.debug('Processing input_required', { inputRequestId, prompt });
+        logger.info('[APPROVAL_TRACE] adapter_emit_input_required', {
+          approvalTraceId,
+          instanceSessionId: this.sessionId,
+          requestId: inputRequestId,
+          promptLength: prompt.length
+        });
 
         // Emit the input_required event for UI to handle
         this.emit('input_required', {
           id: inputRequestId,
           prompt,
-          timestamp
+          timestamp,
+          metadata: {
+            approvalTraceId,
+            traceStage: 'adapter:input_required_emit'
+          }
         });
 
         // Also emit as system output for visibility in chat
@@ -1081,7 +1109,11 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
           timestamp,
           type: 'system',
           content: prompt,
-          metadata: { requiresInput: true }
+          metadata: {
+            requiresInput: true,
+            approvalTraceId,
+            traceStage: 'adapter:input_required_output'
+          }
         });
         logger.debug('Input_required handling complete');
         break;
@@ -1105,7 +1137,14 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     this.emittedAskUserQuestionKeys.add(dedupeKey);
 
     const inputRequestId = generateId();
+    const approvalTraceId = this.createApprovalTraceId('ask_user_question');
     this.emit('status', 'waiting_for_input' as InstanceStatus);
+    logger.info('[APPROVAL_TRACE] adapter_emit_ask_user_question', {
+      approvalTraceId,
+      instanceSessionId: this.sessionId,
+      requestId: inputRequestId,
+      toolUseId: toolUseId || null
+    });
 
     this.emit('input_required', {
       id: inputRequestId,
@@ -1115,6 +1154,8 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
         type: 'ask_user_question',
         tool_use_id: toolUseId,
         input,
+        approvalTraceId,
+        traceStage: 'adapter:ask_user_question_emit'
       }
     });
 
@@ -1127,6 +1168,8 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
       metadata: {
         requiresInput: true,
         askUserQuestion: true,
+        approvalTraceId,
+        traceStage: 'adapter:ask_user_question_output'
       }
     });
   }
@@ -1284,5 +1327,9 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
     }
 
     return undefined;
+  }
+
+  private createApprovalTraceId(kind: string): string {
+    return `approval-${kind}-${generateId()}`;
   }
 }

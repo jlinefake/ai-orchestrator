@@ -290,17 +290,30 @@ export class InstanceIpcService {
     timestamp: number;
     metadata?: Record<string, unknown>;
   }) => void): () => void {
-    console.log('[InstanceIpcService] onInputRequired: Setting up subscription');
+    console.log('[APPROVAL_TRACE][renderer:ipc] onInputRequired subscription setup');
     if (!this.api) {
-      console.warn('[InstanceIpcService] onInputRequired: No API available!');
+      console.warn('[APPROVAL_TRACE][renderer:ipc] onInputRequired unavailable (no Electron API)');
       return () => { /* noop */ };
     }
     return this.api.onInputRequired((payload) => {
-      console.log('=== [InstanceIpcService] INPUT_REQUIRED RECEIVED FROM PRELOAD ===');
-      console.log('[InstanceIpcService] Payload:', JSON.stringify(payload, null, 2));
-      console.log('[InstanceIpcService] Running callback in NgZone...');
-      this.ngZone.run(() => callback(payload));
-      console.log('[InstanceIpcService] Callback executed');
+      const metadata = payload.metadata || {};
+      const approvalTraceId = typeof metadata['approvalTraceId'] === 'string'
+        ? String(metadata['approvalTraceId'])
+        : `approval-renderer-ipc-${payload.requestId}`;
+      console.log('[APPROVAL_TRACE][renderer:ipc] received', {
+        approvalTraceId,
+        instanceId: payload.instanceId,
+        requestId: payload.requestId,
+        metadataType: metadata['type']
+      });
+      this.ngZone.run(() => {
+        console.log('[APPROVAL_TRACE][renderer:ipc] callback_dispatch', {
+          approvalTraceId,
+          instanceId: payload.instanceId,
+          requestId: payload.requestId
+        });
+        callback(payload);
+      });
     });
   }
 
