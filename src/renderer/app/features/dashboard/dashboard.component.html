@@ -83,6 +83,7 @@
       <app-file-explorer
         [initialPath]="selectedInstanceWorkingDir()"
         (fileDragged)="onFileDragged($event)"
+        (filesDragged)="onFilesDragged($event)"
       />
     }
   </div>

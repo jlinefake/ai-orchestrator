@@ -56,6 +56,7 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
         (filesDropped)="onFilesDropped($event)"
         (imagesPasted)="onImagesPasted($event)"
         (filePathDropped)="onFilePathDropped($event)"
+        (filePathsDropped)="onFilePathsDropped($event)"
         (folderDropped)="onFolderDropped($event)"
       >
         <div class="instance-detail">
@@ -589,6 +590,35 @@ export class InstanceDetailComponent {
       this.draftService.addPendingFiles(inst.id, [file]);
     } catch (error) {
       console.error('Failed to load file from path:', error);
+    }
+  }
+
+  async onFilePathsDropped(filePaths: string[]): Promise<void> {
+    const inst = this.instance();
+    if (!inst || !window.electronAPI) return;
+
+    const files: File[] = [];
+    for (const filePath of filePaths) {
+      try {
+        const stats = await window.electronAPI.getFileStats(filePath);
+        if (!stats.success || !stats.data) continue;
+        const data = stats.data as { isDirectory?: boolean };
+        if (data.isDirectory) continue;
+
+        const response = await fetch(`file://${filePath}`);
+        const blob = await response.blob();
+        const fileName = filePath.split('/').pop() || 'file';
+        const file = new File([blob], fileName, {
+          type: blob.type || 'application/octet-stream',
+        });
+        files.push(file);
+      } catch (error) {
+        console.warn('Failed to load file from path:', filePath, error);
+      }
+    }
+
+    if (files.length > 0) {
+      this.draftService.addPendingFiles(inst.id, files);
     }
   }
 

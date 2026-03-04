@@ -295,6 +295,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
     console.log('File dragged from explorer:', event);
   }
 
+  onFilesDragged(event: { paths: string[]; names: string[] }): void {
+    // Multi-file drag from explorer - can be used for drag preview feedback
+    console.log('Files dragged from explorer:', event.paths.length, 'files');
+  }
+
   ngOnDestroy(): void {
     // Cleanup keybinding handlers
     this.keybindingCleanup.forEach((cleanup) => cleanup());

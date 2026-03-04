@@ -109,6 +109,8 @@ export class DropZoneComponent {
 
   // Output for file paths dragged from file explorer
   filePathDropped = output<string>();
+  // Output for multiple file paths dragged from file explorer (multi-select)
+  filePathsDropped = output<string[]>();
   // Output for folder paths dropped (directories cannot be attached as files)
   folderDropped = output<string>();
 
@@ -173,7 +175,21 @@ export class DropZoneComponent {
       return;
     }
 
-    // Check for file path from file explorer
+    // Check for multiple file paths from file explorer (multi-select drag)
+    const filePaths = event.dataTransfer?.getData('application/x-file-paths');
+    if (filePaths) {
+      try {
+        const paths: string[] = JSON.parse(filePaths);
+        if (paths.length > 0) {
+          this.filePathsDropped.emit(paths);
+          return;
+        }
+      } catch {
+        // Fall through to single file path
+      }
+    }
+
+    // Check for single file path from file explorer
     const filePath = event.dataTransfer?.getData('application/x-file-path');
     if (filePath) {
       this.filePathDropped.emit(filePath);
