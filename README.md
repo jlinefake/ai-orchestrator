@@ -35,10 +35,13 @@ npm install
 
 ```bash
 # Start the app in development mode
-npm start
+npm run dev
 
 # Build for production
 npm run build
+
+# Package for macOS (unsigned)
+npm run build && npm run electron:build -- --mac --config.mac.identity=null
 
 # Run tests
 npm run test

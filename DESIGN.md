@@ -19,7 +19,7 @@ AI Orchestrator is a high-performance desktop environment designed to manage, mo
 ### Technology Stack
 
 - **Electron** - Robust desktop application framework for cross-platform deployment.
-- **Angular 19+** - Modern, zoneless frontend framework utilizing signals for reactive performance.
+- **Angular 21** - Modern, zoneless frontend framework utilizing signals for reactive performance.
 - **TypeScript** - Ensuring full-stack type safety and shared interfaces between main and renderer processes.
 - **Claude Code CLI** - The core AI engine, managed as spawned child processes for isolation and control.
 
@@ -52,7 +52,7 @@ AI Orchestrator is a high-performance desktop environment designed to manage, mo
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Hierarchical Supervisor Tree (Planned)
+### Hierarchical Supervisor Tree (Implemented)
 
 Inspired by Erlang OTP, instances can be organized in a supervision hierarchy:
 
@@ -138,25 +138,19 @@ Inspired by Erlang OTP, instances can be organized in a supervision hierarchy:
   - `terminationPolicy`: Cascade termination behavior
   - `contextInheritance`: What settings children inherit
 
-### Phase 3: Cross-Instance Communication (Planned)
+### Phase 3: Cross-Instance Communication (Partially Implemented)
 
 #### Token-Based Messaging
 Instances utilize a capability-based security model to communicate:
 
 ```typescript
-interface CommunicationToken {
-  id: string;
-  sourceInstanceId: string;
+export interface CommunicationToken {
+  token: string;
   targetInstanceId: string;
-  permissions: TokenPermission[];
-  expiresAt: number | null;
+  permissions: ('read' | 'write' | 'control')[];
+  expiresAt: number;
+  createdBy: string;
 }
-
-type TokenPermission =
-  | 'read'      // Can read target's output stream
-  | 'write'     // Can send messages to target input
-  | 'control'   // Can restart/terminate target lifecycle
-  | 'spawn';    // Can create child instances
 ```
 
 #### Message Topologies
@@ -359,12 +353,15 @@ claude \
 
 ### Default Limits
 ```typescript
+// From src/shared/constants/limits.ts
 const LIMITS = {
-  MAX_INSTANCES: 10000,
+  MAX_CHILDREN_PER_NODE: 12,
+  MAX_RESTARTS: 5,
+  RESTART_WINDOW_MS: 60000,            // 1 minute
+  OUTPUT_BUFFER_MAX_SIZE: 2000,        // messages per instance
+  OUTPUT_BATCH_INTERVAL_MS: 50,        // batching frequency
   DEFAULT_MAX_CONTEXT_TOKENS: 200000,
-  OUTPUT_BUFFER_MAX_SIZE: 1000,      // messages per instance
-  OUTPUT_BATCH_INTERVAL_MS: 50,      // batching frequency
-  INSTANCE_IDLE_TIMEOUT_MS: 3600000, // 1 hour
+  IPC_TIMEOUT_MS: 30000,
 };
 ```
 
@@ -427,34 +424,47 @@ const LIMITS = {
 ```
 claude-orchestrator/
 ├── src/
-│   ├── main/           # Electron Main Process (Node.js)
-│   │   ├── cli/        # Claude CLI Adapter Layer
-│   │   ├── instance/   # Instance State Management
-│   │   ├── ipc/        # IPC Event Handlers
-│   │   └── index.ts    # Application Entry Point
-│   ├── preload/        # Secure Context Bridge
-│   ├── renderer/       # Angular 19+ Frontend
+│   ├── main/              # Electron Main Process (Node.js)
+│   │   ├── agents/        # Agent management
+│   │   ├── cli/           # Claude CLI Adapter Layer
+│   │   ├── communication/ # Cross-instance communication
+│   │   ├── core/          # Config, health, cost tracking
+│   │   ├── indexing/      # Code indexing and search
+│   │   ├── instance/      # Instance State Management
+│   │   ├── ipc/           # IPC Event Handlers
+│   │   ├── orchestration/ # Multi-agent coordination
+│   │   ├── process/       # Supervisor tree, circuit breaker
+│   │   ├── skills/        # Skills system
+│   │   └── index.ts       # Application Entry Point
+│   ├── preload/           # Secure Context Bridge
+│   ├── renderer/          # Angular 21 Frontend
 │   │   └── app/
-│   │       ├── core/   # Services, Stores, Models
-│   │       └── features/ # Feature Modules
-│   └── shared/         # Shared Interfaces & Types
-├── dist/               # Compilation Artifacts
+│   │       ├── core/      # Services, Stores, Models
+│   │       └── features/  # Feature Modules (47 feature dirs)
+│   └── shared/            # Shared Interfaces & Types
+├── dist/                  # Compilation Artifacts
 └── package.json
 ```
 
 ### Scripts
 ```bash
-npm start          # Launch in Development Mode
+npm run dev        # Launch in Development Mode
 npm run build      # Compile for Production
 npm run build:main # Recompile Main Process only
+npm run test       # Run tests (Vitest)
+npm run lint       # ESLint check (ng lint)
+npx tsc --noEmit   # TypeScript compilation check
+
+# Package for macOS (unsigned)
+npm run build && npm run electron:build -- --mac --config.mac.identity=null
 ```
 
 ---
 
 ## Version History
 
-- **v0.1.0** (Current) - Core functionality, single-instance management
-- **v0.2.0** (Planned) - Hierarchical instances, parent-child relationships
-- **v0.3.0** (Planned) - Cross-instance communication
+- **v0.1.0** - Core functionality, single-instance management
+- **v0.2.0** - Hierarchical instances, parent-child relationships, supervisor tree
+- **v0.3.0** (In Progress) - Cross-instance communication
 - **v0.4.0** (Planned) - Scale optimizations, resource management
 - **v1.0.0** (Planned) - Production ready, full feature set

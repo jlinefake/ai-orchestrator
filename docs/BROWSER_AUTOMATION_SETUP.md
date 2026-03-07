@@ -12,6 +12,16 @@ The solution is to configure the **Chrome DevTools MCP server** in your Claude C
 
 ## Quick Setup
 
+### In-App Path
+
+Open the MCP page in AI Orchestrator and use the **Browser Automation** card:
+
+1. Click **Add Chrome DevTools Preset**
+2. Connect the `chrome-devtools` server from the server list
+3. Click **Test Browser Tooling** to verify runtime, config, and discovered browser tools
+
+The in-app health check also inspects your Claude Code user settings so you can tell whether browser access is coming from the orchestrator MCP registry, your existing Claude MCP setup, or both.
+
 ### Option 1: CLI Command (Recommended)
 
 Run this command to add Chrome DevTools MCP to your Claude Code configuration:

@@ -4,9 +4,9 @@
 
 A desktop application for managing multiple AI CLI instances (Claude, Gemini, OpenAI) with hierarchical supervision, cross-instance communication, and a scalable UI supporting 10,000+ instances.
 
-## Current Status: Phase 1 MVP Complete ✅
+## Current Status: Phase 2 Complete, Phase 3 In Progress
 
-The foundational architecture is in place and compiles successfully.
+The foundational architecture is in place with hierarchical supervision implemented.
 
 ### What's Built
 
@@ -15,27 +15,49 @@ src/
 ├── main/                              # Electron Main Process
 │   ├── index.ts                       # App entry point, lifecycle
 │   ├── window-manager.ts              # Window creation, IPC to renderer
+│   ├── agents/                        # Agent management system
+│   ├── api/                           # API handlers and routes
+│   ├── browser-automation/            # Browser automation features
 │   ├── cli/
 │   │   ├── adapters/                  # CLI adapters (Claude, Copilot)
 │   │   └── ndjson-parser.ts           # NDJSON stream parsing
+│   ├── commands/                      # Command execution system
+│   ├── communication/                 # Cross-instance communication
+│   ├── context/                       # Context management
 │   ├── core/
 │   │   ├── config/                    # Configuration management
 │   │   └── system/                    # Health, stats, cost tracking
+│   ├── history/                       # History tracking
 │   ├── hooks/                         # Hook system (pre/post exec)
+│   ├── indexing/                      # Code indexing and search
 │   ├── instance/                      # Instance management (lifecycle, state)
 │   ├── ipc/                           # IPC handlers for all features
 │   ├── learning/                      # ML/learning systems (GRPO, A/B testing)
+│   ├── logging/                       # Structured logging system
+│   ├── mcp/                           # Model Context Protocol integration
 │   ├── memory/                        # Memory system (episodic, procedural)
+│   ├── observation/                   # Observation/telemetry
 │   ├── orchestration/                 # Multi-instance orchestration
 │   ├── persistence/                   # Data persistence (RLM database)
+│   ├── plugins/                       # Plugin system
+│   ├── process/                       # Supervisor tree, circuit breaker
 │   ├── providers/                     # Provider plugins (Claude, Codex)
+│   ├── remote/                        # Remote execution
+│   ├── repo-jobs/                     # Repository job management
 │   ├── rlm/                           # Reinforcement Learning from Memory
+│   ├── routing/                       # Message routing
 │   ├── security/                      # Secret detection, redaction
 │   ├── session/                       # Session continuity
+│   ├── skills/                        # Extensible skills framework
 │   ├── tasks/                         # Background tasks, todo management
+│   ├── testing/                       # Test utilities
+│   ├── tools/                         # External tools integration
+│   ├── util/                          # Utilities
+│   ├── vcs/                           # Version control integration
+│   ├── workflows/                     # Workflow automation
 │   └── workspace/                     # Worktree management
 │
-├── renderer/                          # Angular 19 Application (Zoneless)
+├── renderer/                          # Angular 21 Application (Zoneless)
 │   ├── app/
 │   │   ├── app.component.ts           # Root component
 │   │   ├── app.config.ts              # Zoneless change detection
@@ -46,22 +68,53 @@ src/
 │   │   │   └── services/
 │   │   │       └── ipc/               # Feature-specific IPC services
 │   │   └── features/
+│   │       ├── agents/                # Agent management UI
+│   │       ├── archive/               # Archive management
+│   │       ├── codebase/              # Codebase browser
+│   │       ├── commands/              # Command UI
+│   │       ├── communication/         # Cross-instance communication UI
+│   │       ├── context/               # Context management UI
+│   │       ├── cost/                  # Cost tracking
 │   │       ├── dashboard/             # Main layout
 │   │       ├── debate/                # Debate feature
+│   │       ├── editor/                # Editor integration
 │   │       ├── file-drop/             # File handling
 │   │       ├── file-explorer/         # File browser
+│   │       ├── history/               # History viewer
+│   │       ├── hooks/                 # Hooks management
 │   │       ├── instance-detail/       # Instance view
 │   │       ├── instance-list/         # Instance list
+│   │       ├── logs/                  # Log viewer
+│   │       ├── lsp/                   # LSP integration
+│   │       ├── mcp/                   # MCP management
+│   │       ├── memory/                # Memory management
+│   │       ├── models/                # Model configuration
+│   │       ├── multi-edit/            # Multi-file editing
+│   │       ├── observations/          # Observation dashboard
+│   │       ├── plan/                  # Plan management
+│   │       ├── plugins/               # Plugin management
 │   │       ├── providers/             # Provider management
+│   │       ├── remote-access/         # Remote access UI
+│   │       ├── remote-config/         # Remote configuration
+│   │       ├── replay/                # Session replay
+│   │       ├── review/                # Code review
 │   │       ├── rlm/                   # RLM analytics UI
+│   │       ├── routing/               # Routing management
+│   │       ├── security/              # Security settings
+│   │       ├── semantic-search/       # Semantic search UI
 │   │       ├── settings/              # Settings panels
+│   │       ├── skills/                # Skills management
+│   │       ├── snapshots/             # Snapshot management
+│   │       ├── specialists/           # Specialist agents
+│   │       ├── stats/                 # Statistics dashboard
+│   │       ├── supervision/           # Supervision tree UI
+│   │       ├── tasks/                 # Task management
+│   │       ├── thinking/              # Thinking visualization
 │   │       ├── training/              # Training dashboard
-│   │       └── verification/          # Multi-agent verification
-│   │           ├── config/            # Agent config panels
-│   │           ├── dashboard/         # Verification dashboard
-│   │           ├── execution/         # Monitoring, selectors
-│   │           ├── results/           # Results, export, heatmap
-│   │           └── shared/            # Shared verification components
+│   │       ├── vcs/                   # Version control UI
+│   │       ├── verification/          # Multi-agent verification
+│   │       ├── workflow/              # Workflow management
+│   │       └── worktree/              # Worktree management
 │   └── styles.scss
 │
 ├── shared/                            # Shared types and utils
@@ -77,26 +130,36 @@ src/
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Electron + Angular setup | ✅ | Zoneless Angular 19 |
-| CLI adapter with NDJSON streaming | ✅ | Real-time output parsing |
-| Instance Manager | ✅ | Create, terminate, restart |
-| Signal-based state store | ✅ | 50ms batched updates |
-| Virtual scroll list | ✅ | Angular CDK, ready for 10k+ |
-| Status color indicators | ✅ | Idle/busy/waiting/error |
-| Context usage bar | ✅ | Visual token usage |
-| Output stream display | ✅ | Auto-scroll, message types |
-| Input panel | ✅ | Enter to send, Shift+Enter newline |
-| File drag & drop | ✅ | Drop zone component |
-| Image paste | ✅ | Clipboard image support |
-| Dark/light theme | ✅ | CSS variables, system preference |
-| macOS title bar | ✅ | Traffic light positioning |
+| Electron + Angular setup | Done | Zoneless Angular 21 |
+| CLI adapter with NDJSON streaming | Done | Real-time output parsing |
+| Instance Manager | Done | Create, terminate, restart |
+| Signal-based state store | Done | 50ms batched updates |
+| Virtual scroll list | Done | Angular CDK, ready for 10k+ |
+| Status color indicators | Done | Idle/busy/waiting/error |
+| Context usage bar | Done | Visual token usage |
+| Output stream display | Done | Auto-scroll, message types |
+| Input panel | Done | Enter to send, Shift+Enter newline |
+| File drag & drop | Done | Drop zone component |
+| Image paste | Done | Clipboard image support |
+| Dark/light theme | Done | CSS variables, system preference |
+| macOS title bar | Done | Traffic light positioning |
+| Supervisor tree | Done | Erlang OTP-inspired hierarchy |
+| Circuit breaker | Done | Restart rate limiting |
+| Cross-instance communication | Done | Token-based messaging |
+| Multi-agent verification | Done | Semantic clustering |
+| Debate system | Done | Multi-round agent debates |
+| Skills system | Done | Progressive skill loading |
+| Code indexing & search | Done | Semantic search |
+| Remote access | Done | Remote observer server |
+| Plugin system | Done | Extensible plugin framework |
+| Workflow automation | Done | Multi-step workflows |
 
 ---
 
 ## Running the App
 
 ### Prerequisites
-- Node.js 22+
+- Node.js 20+
 - npm 10+
 - Claude Code CLI installed (`claude` command available)
 
@@ -107,10 +170,7 @@ src/
 npm install
 
 # Development (builds main, starts Angular + Electron)
-npm start
-
-# If port 4200 is busy, use alternate port
-npm run start:fresh
+npm run dev
 
 # Build main process only (useful for quick testing)
 npm run build:main
@@ -118,85 +178,26 @@ npm run build:main
 # Build everything for production
 npm run build
 
-# Package for distribution
-npm run electron:build
+# Package for macOS (unsigned)
+npm run build && npm run electron:build -- --mac --config.mac.identity=null
+
+# Run tests
+npm run test
+
+# Run linting
+npm run lint
+
+# TypeScript compilation check
+npx tsc --noEmit
 ```
 
 ### Troubleshooting
 
 **"Cannot find module dist/main/index.js"**
-- Run `npm run build:main` first, then `npm start`
+- Run `npm run build:main` first, then `npm run dev`
 
-**"Port 4200 is already in use"**
-- Use `npm run start:fresh` (uses port 4201)
-- Or kill the process: `lsof -ti:4200 | xargs kill -9`
-
----
-
-## What's Next
-
-### Phase 2: Multi-Instance with Hierarchy (3-4 weeks)
-
-**Files to create:**
-```
-src/main/process/
-├── supervisor-tree.ts      # Root supervisor, auto-expansion
-├── supervisor-node.ts      # Individual supervisor node
-└── circuit-breaker.ts      # Resource protection, restart limits
-```
-
-**Tasks:**
-- [ ] Implement supervisor tree with 8-16 children per node
-- [ ] Add `one_for_one` restart strategy
-- [ ] Circuit breaker (max 5 restarts per minute)
-- [ ] Parent-child instance relationships in UI
-- [ ] Hierarchy tree visualization component
-- [ ] Instance grouping/filtering by parent
-
-### Phase 3: Cross-Instance Communication (2-3 weeks)
-
-**Files to create:**
-```
-src/main/communication/
-├── token-broker.ts         # Generate, validate, expire tokens
-├── message-router.ts       # Route messages between instances
-└── stream-bridge.ts        # Pipe output to another instance's input
-```
-
-**Tasks:**
-- [ ] Token-based permission system (read/write/control)
-- [ ] Instance A can send message to Instance B
-- [ ] Instance A can subscribe to Instance B's output
-- [ ] Stream chaining (A's output → B's input)
-- [ ] Control commands (restart/terminate via token)
-- [ ] UI for managing tokens and connections
-
-### Phase 4: Scale Testing & Optimization (2-3 weeks)
-
-**Files to create:**
-```
-workers/
-├── cli-worker.ts           # CLI management in worker thread
-├── parser-worker.ts        # NDJSON parsing offloaded
-└── metrics-worker.ts       # Metrics collection
-```
-
-**Tasks:**
-- [ ] Worker thread pool for CLI management
-- [ ] Stress test with 1,000 instances
-- [ ] Profile and optimize memory usage
-- [ ] Tune batching intervals
-- [ ] Add resource monitoring dashboard
-
-### Phase 5: Polish & Cross-Platform (2-3 weeks)
-
-**Tasks:**
-- [ ] Keyboard shortcuts (Cmd+N new, Cmd+W close, etc.)
-- [ ] Settings panel (theme, default working dir, etc.)
-- [ ] Session persistence (restore instances on restart)
-- [ ] Linux build (AppImage, deb)
-- [ ] Windows build (NSIS installer)
-- [ ] App icons and branding
+**Port conflicts**
+- Dev server uses port 4567 by default (configured in package.json start script)
 
 ---
 
@@ -223,19 +224,6 @@ workers/
 - Scales to 10,000+ with 2-3 tree levels
 - Natural fault isolation
 - Easy to implement restart strategies
-
----
-
-## File Counts
-
-| Category | Files |
-|----------|-------|
-| Main Process | 6 |
-| Renderer (Angular) | 16 |
-| Shared Types/Utils | 8 |
-| Preload | 1 |
-| Config | 4 |
-| **Total Source** | **35** |
 
 ---
 

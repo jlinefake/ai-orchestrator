@@ -16,7 +16,7 @@ This is an Electron + Angular application that orchestrates multiple Claude CLI 
 
 ```bash
 # Development
-npm start                    # Start Electron app in dev mode
+npm run dev                  # Start Electron app in dev mode
 npm run build               # Build for production
 
 # Quality Checks (ALWAYS run after changes)
