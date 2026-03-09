@@ -3,9 +3,11 @@
  * Footer section of the dashboard sidebar with stats and close all button
  */
 
-import { ChangeDetectionStrategy, Component, inject, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { InstanceStore } from '../../core/state/instance.store';
+import { HistoryStore } from '../../core/state/history.store';
+import { RecentDirectoriesIpcService } from '../../core/services/ipc/recent-directories-ipc.service';
 
 @Component({
   selector: 'app-sidebar-footer',
@@ -16,7 +18,10 @@ import { InstanceStore } from '../../core/state/instance.store';
     <div class="sidebar-footer">
       <div class="stats">
         <span class="stat">
-          {{ store.instanceCount() }} instances
+          {{ projectCount() }} projects
+        </span>
+        <span class="stat">
+          {{ store.instanceCount() }} sessions
         </span>
         @if (store.totalContextUsage().total > 0) {
           <span class="stat">
@@ -33,22 +38,69 @@ import { InstanceStore } from '../../core/state/instance.store';
           </span>
         }
       </div>
-      @if (store.instanceCount() > 0) {
+      <div class="footer-actions">
         <button
-          class="btn-close-all"
-          (click)="closeAllClicked.emit()"
-          title="Close all instances"
+          class="btn-control-plane"
+          [class.open]="controlPlaneOpen()"
+          (click)="controlPlaneClicked.emit()"
         >
-          Close All
+          {{ controlPlaneOpen() ? 'Hide Control Plane' : 'Open Control Plane' }}
         </button>
-      }
+        @if (store.instanceCount() > 0) {
+          <button
+            class="btn-close-all"
+            (click)="closeAllClicked.emit()"
+            title="Close all instances"
+          >
+            Close All
+          </button>
+        }
+      </div>
     </div>
   `,
   styleUrl: './sidebar-footer.component.scss'
 })
 export class SidebarFooterComponent {
   store = inject(InstanceStore);
+  private historyStore = inject(HistoryStore);
+  private recentDirectoriesService = inject(RecentDirectoriesIpcService);
+  controlPlaneOpen = input(false);
+  private recentProjectKeys = signal<string[]>([]);
+  readonly projectCount = computed(() =>
+    new Set(
+      [
+        ...this.store
+          .instances()
+          .filter((instance) => !instance.parentId)
+          .map((instance) => ((instance.workingDirectory || '').trim().toLowerCase()) || '__no_workspace__'),
+        ...this.historyStore
+          .entries()
+          .map((entry) => ((entry.workingDirectory || '').trim().toLowerCase()) || '__no_workspace__'),
+        ...this.recentProjectKeys(),
+      ]
+    ).size
+  );
 
   // Output events
   closeAllClicked = output<void>();
+  controlPlaneClicked = output<void>();
+
+  constructor() {
+    void this.loadRecentProjects();
+
+    effect(() => {
+      this.store.instanceCount();
+      this.historyStore.entryCount();
+      void this.loadRecentProjects();
+    });
+  }
+
+  private async loadRecentProjects(): Promise<void> {
+    const directories = await this.recentDirectoriesService.getDirectories({
+      sortBy: 'lastAccessed',
+    });
+    this.recentProjectKeys.set(
+      directories.map((entry) => ((entry.path || '').trim().toLowerCase()) || '__no_workspace__')
+    );
+  }
 }

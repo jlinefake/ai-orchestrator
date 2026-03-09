@@ -5,7 +5,17 @@
  * Fetches available models dynamically from the Copilot CLI.
  */
 
-import { ChangeDetectionStrategy, Component, output, signal, computed, inject, OnInit } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  OnInit,
+  output,
+  signal
+} from '@angular/core';
 import { ElectronIpcService, CopilotModelInfo } from '../../core/services/ipc';
 
 export interface CopilotModel {
@@ -337,6 +347,8 @@ function convertToModel(info: CopilotModelInfo): CopilotModel {
 export class CopilotModelSelectorComponent implements OnInit {
   private ipcService = inject(ElectronIpcService);
 
+  model = input<string | null | undefined>(undefined);
+
   // Output
   modelSelected = output<string>();
 
@@ -356,8 +368,14 @@ export class CopilotModelSelectorComponent implements OnInit {
   protected highPerfModels = computed(() => this.models().filter(m => m.tier === 'high'));
   protected fastModels = computed(() => this.models().filter(m => m.tier === 'fast'));
 
+  constructor() {
+    effect(() => {
+      this.syncSelectedModel(false);
+    });
+  }
+
   ngOnInit(): void {
-    this.loadModelsFromCli();
+    void this.loadModelsFromCli();
   }
 
   /**
@@ -378,13 +396,6 @@ export class CopilotModelSelectorComponent implements OnInit {
         if (loadedModels.length > 0) {
           this.models.set(loadedModels);
           console.log(`[CopilotModelSelector] Loaded ${loadedModels.length} models from CLI`);
-
-          // If the current selection doesn't exist in the loaded models, select the first high-perf model
-          const currentExists = loadedModels.some(m => m.id === this.selectedModelId());
-          if (!currentExists) {
-            const defaultModel = loadedModels.find(m => m.tier === 'high') || loadedModels[0];
-            this.selectedModelId.set(defaultModel.id);
-          }
         }
       } else {
         console.log('[CopilotModelSelector] Using default models (CLI unavailable)');
@@ -393,6 +404,7 @@ export class CopilotModelSelectorComponent implements OnInit {
       console.error('[CopilotModelSelector] Failed to load models from CLI:', error);
       // Keep using default models
     } finally {
+      this.syncSelectedModel(true);
       this.isLoading.set(false);
     }
   }
@@ -417,6 +429,33 @@ export class CopilotModelSelectorComponent implements OnInit {
       case 'high': return 'Fast';
       case 'fast': return 'Lite';
       default: return tier;
+    }
+  }
+
+  private syncSelectedModel(emitIfChanged: boolean): void {
+    const configuredModel = this.model();
+    const availableModels = this.models();
+    if (availableModels.length === 0) {
+      return;
+    }
+
+    const nextModel = (configuredModel
+      ? availableModels.find(model => model.id === configuredModel)
+      : undefined) || availableModels.find(model => model.id === this.selectedModelId())
+      || availableModels.find(model => model.tier === 'high')
+      || availableModels[0];
+
+    if (!nextModel) {
+      return;
+    }
+
+    const changed = this.selectedModelId() !== nextModel.id;
+    if (changed) {
+      this.selectedModelId.set(nextModel.id);
+    }
+
+    if (emitIfChanged && (changed || configuredModel !== nextModel.id)) {
+      this.modelSelected.emit(nextModel.id);
     }
   }
 

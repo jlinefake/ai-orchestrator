@@ -549,10 +549,16 @@ function createManager(): InstanceManager {
 
 describe('InstanceManager', () => {
   let manager: InstanceManager;
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     idCounter = 0;
+    originalHome = process.env['HOME'];
+    originalUserProfile = process.env['USERPROFILE'];
+    process.env['HOME'] = '/tmp/test-empty-home';
+    process.env['USERPROFILE'] = '/tmp/test-empty-home';
 
     // Restore default mocks after clearAllMocks wipes them
     mockAdapterSpawn.mockResolvedValue(12345);
@@ -584,6 +590,18 @@ describe('InstanceManager', () => {
       manager.destroy();
     } catch {
       // Ignore errors on destroy in cleanup
+    }
+
+    if (originalHome === undefined) {
+      delete process.env['HOME'];
+    } else {
+      process.env['HOME'] = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env['USERPROFILE'];
+    } else {
+      process.env['USERPROFILE'] = originalUserProfile;
     }
   });
 

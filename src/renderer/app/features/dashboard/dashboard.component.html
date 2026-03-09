@@ -1,4 +1,6 @@
-@if (cliStore.loading()) {
+@if (showBrowserPreview()) {
+  <app-browser-preview-notice />
+} @else if (cliStore.loading()) {
   <div class="loading-container">
     <div class="loading-spinner"></div>
     <p>Detecting available AI CLIs...</p>
@@ -18,20 +20,17 @@
     @if (showSidebar()) {
       <aside class="sidebar" [style.width.px]="sidebarWidth()">
         <app-sidebar-header
-          (verificationClicked)="navigateToVerification()"
-          (rlmClicked)="openRlm()"
           (historyClicked)="showHistory.set(true)"
           (settingsClicked)="showSettings.set(true)"
           (createClicked)="createInstance()"
-          (providerSelected)="onProviderSelected($event)"
         />
-
-        <app-sidebar-nav />
 
         <app-instance-list />
 
         <app-sidebar-footer
+          [controlPlaneOpen]="showControlPlane()"
           (closeAllClicked)="closeAllInstances()"
+          (controlPlaneClicked)="toggleControlPlane()"
         />
       </aside>
 
@@ -67,19 +66,63 @@
 
     <!-- Main content area -->
     <main class="main-content">
-      <!-- Copilot model selector - shown when Copilot is selected and no instance active -->
-      @if (showCopilotModelSelector()) {
-        <div class="copilot-model-overlay">
-          <app-copilot-model-selector
-            (modelSelected)="onModelSelected($event)"
-          />
-        </div>
+      <div class="workspace-shell" [class.empty]="!store.selectedInstance()">
+        <app-instance-detail
+          [canShowFileExplorer]="canShowFileExplorer()"
+          [isFileExplorerOpen]="showFileExplorer()"
+          (toggleFileExplorer)="toggleFileExplorer()"
+        />
+      </div>
+
+      @if (showControlPlane()) {
+        <section class="control-plane-panel">
+          <div class="control-plane-header">
+            <div>
+              <p class="control-plane-eyebrow">Control Plane</p>
+              <h2 class="control-plane-title">Secondary tools and system views</h2>
+            </div>
+            <button
+              class="control-plane-close"
+              (click)="showControlPlane.set(false)"
+              title="Close control plane"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="control-plane-actions">
+            <button
+              class="control-plane-chip"
+              [class.active]="showHistory()"
+              (click)="showHistory.set(true)"
+            >
+              History
+            </button>
+            <button
+              class="control-plane-chip"
+              [class.active]="showSettings()"
+              (click)="showSettings.set(true)"
+            >
+              Settings
+            </button>
+            @if (canShowFileExplorer()) {
+              <button
+                class="control-plane-chip"
+                [class.active]="showFileExplorer()"
+                (click)="toggleFileExplorer()"
+              >
+                {{ showFileExplorer() ? 'Hide Files' : 'Show Files' }}
+              </button>
+            }
+          </div>
+
+          <app-sidebar-nav />
+        </section>
       }
-      <app-instance-detail />
     </main>
 
     <!-- File Explorer Sidebar (right side) - only show when an instance is selected -->
-    @if (store.selectedInstance()) {
+    @if (canShowFileExplorer() && showFileExplorer()) {
       <app-file-explorer
         [initialPath]="selectedInstanceWorkingDir()"
         (fileDragged)="onFileDragged($event)"

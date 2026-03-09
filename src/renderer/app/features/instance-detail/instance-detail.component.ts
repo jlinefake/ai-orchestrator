@@ -7,6 +7,8 @@ import {
   inject,
   signal,
   computed,
+  input,
+  output,
   ChangeDetectionStrategy,
   HostListener,
   effect
@@ -31,6 +33,7 @@ import { UserActionRequestComponent } from './user-action-request.component';
 import { InstanceHeaderComponent } from './instance-header.component';
 import { InstanceWelcomeComponent } from './instance-welcome.component';
 import { InstanceReviewPanelComponent } from './instance-review-panel.component';
+import { TodoStore } from '../../core/state/todo.store';
 
 @Component({
   selector: 'app-instance-detail',
@@ -69,6 +72,8 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             [showModelDropdown]="showModelDropdown()"
             [currentModel]="inst.currentModel"
             [models]="availableModels()"
+            [canShowFileExplorer]="canShowFileExplorer()"
+            [isFileExplorerOpen]="isFileExplorerOpen()"
             (startEditName)="onStartEditName()"
             (cancelEditName)="onCancelEditName()"
             (saveName)="onSaveName($event)"
@@ -82,6 +87,7 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             (toggleModelDropdown)="toggleModelDropdown()"
             (closeModelDropdown)="showModelDropdown.set(false)"
             (selectModel)="onChangeModel($event)"
+            (toggleFileExplorer)="toggleFileExplorer.emit()"
           />
 
           <!-- Context bar -->
@@ -101,17 +107,8 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             />
           }
 
-          <!-- TODO list -->
-          <app-todo-list [sessionId]="inst.sessionId" />
-
-          <!-- Review panel -->
-          <app-instance-review-panel
-            [instanceId]="inst.id"
-            [workingDirectory]="inst.workingDirectory"
-          />
-
-          <!-- Output stream -->
-          <div class="output-section">
+          <!-- Output stream (primary content) -->
+          <div class="output-section" [class.empty-transcript]="inst.outputBuffer.length === 0">
             <app-output-stream
               [messages]="inst.outputBuffer"
               [instanceId]="inst.id"
@@ -128,16 +125,78 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             }
           </div>
 
-          <!-- User action requests -->
+          <!-- Inspector toggles -->
+          <div class="inspector-toggles">
+            <button
+              class="inspector-toggle"
+              [class.active]="showTodoInspector()"
+              (click)="showTodoInspector.set(!showTodoInspector())"
+              title="Toggle task list"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/>
+              </svg>
+              Tasks
+              @if (todoStore.hasTodos() && !showTodoInspector()) {
+                <span class="inspector-badge">{{ todoStore.stats().completed }}/{{ todoStore.stats().total }}</span>
+              }
+            </button>
+            <button
+              class="inspector-toggle"
+              [class.active]="showReviewInspector()"
+              (click)="showReviewInspector.set(!showReviewInspector())"
+              title="Toggle review panel"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/>
+              </svg>
+              Review
+            </button>
+            @if (hasChildren()) {
+              <button
+                class="inspector-toggle"
+                [class.active]="showChildrenInspector()"
+                (click)="showChildrenInspector.set(!showChildrenInspector())"
+                title="Toggle child agents"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                Agents ({{ inst.childrenIds.length }})
+              </button>
+            }
+          </div>
+
+          <!-- User action requests + on-demand inspector panels -->
           <app-user-action-request [instanceId]="inst.id" />
+          @if (hasActiveInspector()) {
+            <div class="inspector-panels">
+              @if (showTodoInspector()) {
+                <app-todo-list [sessionId]="inst.sessionId" />
+              }
+              @if (showReviewInspector()) {
+                <app-instance-review-panel
+                  [instanceId]="inst.id"
+                  [workingDirectory]="inst.workingDirectory"
+                />
+              }
+              @if (showChildrenInspector()) {
+                <app-child-instances-panel
+                  [childrenIds]="inst.childrenIds"
+                  (selectChild)="onSelectChild($event)"
+                />
+              }
+            </div>
+          }
 
-          <!-- Agents section -->
-          <app-child-instances-panel
-            [childrenIds]="inst.childrenIds"
-            (selectChild)="onSelectChild($event)"
-          />
-
-          <!-- Input panel -->
+          <!-- Input panel (composer) -->
           <app-input-panel
             [instanceId]="inst.id"
             [disabled]="inst.status === 'terminated' || contextWarningLevel() === 'emergency'"
@@ -150,6 +209,8 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
             [isRespawning]="inst.status === 'respawning'"
             [outputMessages]="inst.outputBuffer"
             [instanceStatus]="inst.status"
+            [provider]="inst.provider"
+            [currentModel]="inst.currentModel"
             (sendMessage)="onSendMessage($event)"
             (removeFile)="onRemoveFile($event)"
             (removeFolder)="onRemoveFolder($event)"
@@ -198,19 +259,24 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
         display: flex;
         flex-direction: column;
         flex: 1;
+        width: min(1160px, 100%);
         min-height: 0;
         overflow: hidden;
-        padding: var(--spacing-lg);
-        gap: var(--spacing-md);
+        margin: 0 auto;
+        padding: 4px 0 0;
+        gap: 12px;
         position: relative;
         z-index: 1;
       }
 
       .context-section {
-        padding: var(--spacing-sm) var(--spacing-md);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border-subtle);
+        padding: 8px 12px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+          rgba(255, 255, 255, 0.025);
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(14px);
       }
 
       .output-section {
@@ -218,11 +284,19 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
         min-height: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-sm);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border-subtle);
+        gap: 8px;
+        padding: 10px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+          rgba(8, 12, 11, 0.42);
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
         overflow: hidden;
+      }
+
+      .output-section.empty-transcript {
+        flex: 0 0 270px;
       }
 
       .output-section app-output-stream {
@@ -232,8 +306,67 @@ import { InstanceReviewPanelComponent } from './instance-review-panel.component'
 
       .output-section app-activity-status {
         flex-shrink: 0;
-        padding: 0 var(--spacing-md);
-        padding-bottom: var(--spacing-sm);
+        padding: 0 10px 8px;
+      }
+
+      .inspector-toggles {
+        display: flex;
+        gap: var(--spacing-xs);
+        flex-shrink: 0;
+        flex-wrap: wrap;
+      }
+
+      .inspector-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.025);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 999px;
+        color: var(--text-muted);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover {
+          color: var(--text-secondary);
+          border-color: rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        &.active {
+          color: var(--primary-color);
+          border-color: rgba(var(--primary-rgb), 0.24);
+          background: rgba(var(--primary-rgb), 0.1);
+        }
+      }
+
+      .inspector-badge {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 8px;
+        background: rgba(var(--primary-rgb), 0.15);
+        color: var(--primary-color);
+        line-height: 1.2;
+      }
+
+      .inspector-panels {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        max-height: 35vh;
+        overflow-y: auto;
+        flex-shrink: 0;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.02);
+        padding: 8px;
+        backdrop-filter: blur(12px);
       }
 
       .creating-view {
@@ -313,10 +446,36 @@ export class InstanceDetailComponent {
   private draftService = inject(DraftService);
   private providerState = inject(ProviderStateService);
   private providerIpc = inject(ProviderIpcService);
+  todoStore = inject(TodoStore);
+  canShowFileExplorer = input(false);
+  isFileExplorerOpen = input(false);
+  toggleFileExplorer = output<void>();
 
   instance = this.store.selectedInstance;
   currentActivity = this.store.selectedInstanceActivity;
   busySince = computed(() => this.store.getSelectedInstanceBusySince());
+
+  // Inspector panel visibility (F3: on-demand inspectors)
+  showTodoInspector = signal(false);
+  showReviewInspector = signal(false);
+  showChildrenInspector = signal(false);
+
+  // Keep TodoStore session in sync with the selected instance (regardless of inspector state)
+  private todoSessionSync = effect(() => {
+    const inst = this.instance();
+    void this.todoStore.setSession(inst?.sessionId ?? null);
+  });
+
+  // Computed: any inspector is open
+  hasActiveInspector = computed(() =>
+    this.showTodoInspector() || this.showReviewInspector() || this.showChildrenInspector()
+  );
+
+  // Computed: show children toggle only when instance has children
+  hasChildren = computed(() => {
+    const inst = this.instance();
+    return inst ? inst.childrenIds.length > 0 : false;
+  });
 
   // Settings for thinking display
   showThinking = this.settingsStore.showThinking;

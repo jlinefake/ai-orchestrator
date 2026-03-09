@@ -30,14 +30,22 @@ const STATUS_LABELS: Record<InstanceStatus, string> = {
   standalone: true,
   template: `
     <div class="status-wrapper" [class.with-label]="showLabel()">
-      <div
-        class="status-indicator"
-        [style.backgroundColor]="color()"
-        [class.pulsing]="isPulsing()"
-        [title]="label()"
-      ></div>
+      @if (showSpinnerIndicator()) {
+        <div
+          class="status-spinner"
+          [style.--spinner-color]="color()"
+          [title]="label()"
+        ></div>
+      } @else {
+        <div
+          class="status-indicator"
+          [style.backgroundColor]="color()"
+          [class.pulsing]="isPulsing()"
+          [title]="label()"
+        ></div>
+      }
       @if (showLabel()) {
-        <span class="status-label">{{ label() }}</span>
+        <span class="status-label">{{ visibleLabel() }}</span>
       }
     </div>
   `,
@@ -53,6 +61,17 @@ const STATUS_LABELS: Record<InstanceStatus, string> = {
       height: 12px;
       border-radius: 50%;
       flex-shrink: 0;
+    }
+
+    .status-spinner {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--spinner-color);
+      border-right-color: var(--spinner-color);
+      animation: spin 0.75s linear infinite;
     }
 
     .status-indicator.pulsing {
@@ -75,6 +94,15 @@ const STATUS_LABELS: Record<InstanceStatus, string> = {
         transform: scale(0.9);
       }
     }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+      to {
+        transform: rotate(360deg);
+      }
+    }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -84,8 +112,13 @@ export class StatusIndicatorComponent {
 
   color = computed(() => STATUS_COLORS[this.status()]);
   label = computed(() => STATUS_LABELS[this.status()]);
+  visibleLabel = computed(() => this.label());
 
   isPulsing = computed(() =>
     this.status() === 'busy' || this.status() === 'initializing' || this.status() === 'respawning'
+  );
+
+  showSpinnerIndicator = computed(() =>
+    this.status() === 'busy'
   );
 }

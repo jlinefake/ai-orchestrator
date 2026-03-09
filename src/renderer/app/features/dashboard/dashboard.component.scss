@@ -1,6 +1,6 @@
 /**
  * Dashboard Component Styles
- * Main application layout styling
+ * Workspace-first shell with a quiet rail and on-demand control plane
  */
 
 :host {
@@ -9,7 +9,6 @@
   width: 100%;
 }
 
-/* Loading State - Mission Control aesthetic */
 .loading-container {
   display: flex;
   flex-direction: column;
@@ -18,54 +17,39 @@
   height: 100%;
   gap: var(--spacing-lg);
   color: var(--text-secondary);
-  background: var(--bg-primary);
-  position: relative;
-  overflow: hidden;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(
-        ellipse 80% 50% at 50% -20%,
-        rgba(var(--primary-rgb), 0.15),
-        transparent
-      ),
-      radial-gradient(
-        circle at 20% 80%,
-        rgba(var(--secondary-rgb), 0.08),
-        transparent
-      );
-    pointer-events: none;
-  }
+  background:
+    radial-gradient(circle at 18% 18%, rgba(var(--secondary-rgb), 0.12), transparent 34%),
+    radial-gradient(circle at 82% 82%, rgba(var(--primary-rgb), 0.12), transparent 30%),
+    var(--bg-primary);
 
   p {
     font-family: var(--font-mono);
-    font-size: 13px;
-    letter-spacing: 0.05em;
+    font-size: 12px;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    animation: pulse 2s ease-in-out infinite;
   }
 }
 
 .loading-spinner {
   width: 48px;
   height: 48px;
-  border: 2px solid var(--border-subtle);
+  border: 2px solid rgba(255, 255, 255, 0.08);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 20px rgba(var(--primary-rgb), 0.3);
 }
 
-/* Main Dashboard Layout */
 .dashboard {
   display: flex;
   min-height: 100%;
   height: calc(100vh - 52px);
   width: 100%;
-  background: var(--bg-primary);
+  background:
+    radial-gradient(circle at 10% 6%, rgba(var(--secondary-rgb), 0.1), transparent 26%),
+    radial-gradient(circle at 84% 100%, rgba(var(--primary-rgb), 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.01), transparent 34%),
+    var(--bg-primary);
   position: relative;
 
   &.resizing {
@@ -74,17 +58,21 @@
   }
 }
 
-/* Sidebar - Command Center feel */
 .sidebar {
-  min-width: 285px;
-  max-width: 600px;
+  min-width: 250px;
+  max-width: 460px;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 20%),
+    rgba(8, 13, 12, 0.88);
+  backdrop-filter: blur(24px);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.02),
+    24px 0 60px rgba(0, 0, 0, 0.22);
   flex-shrink: 0;
-  position: relative;
   overflow: hidden;
 }
 
@@ -100,84 +88,160 @@
 
   &:hover,
   &.dragging {
-    background: var(--primary-color);
-    box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.5);
+    background: linear-gradient(180deg, transparent, rgba(var(--primary-rgb), 0.45), transparent);
   }
 }
 
-/* Main Content Area */
 .main-content {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  height: 100%;
   display: flex;
-  overflow: hidden;
-  background: var(--bg-primary);
   position: relative;
+  overflow: hidden;
+  background: transparent;
+}
 
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 120px;
-    background: linear-gradient(
-      180deg,
-      rgba(var(--primary-rgb), 0.03) 0%,
-      transparent 100%
-    );
-    pointer-events: none;
-    z-index: 0;
+.workspace-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+  padding: 22px 28px 28px;
+}
+
+.workspace-shell.empty {
+  padding: 0 28px 28px;
+}
+
+.control-plane-panel {
+  position: absolute;
+  top: 24px;
+  right: 28px;
+  width: min(380px, calc(100% - 48px));
+  max-height: calc(100% - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    rgba(11, 16, 15, 0.94);
+  backdrop-filter: blur(26px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.44);
+  overflow: hidden;
+  z-index: 30;
+  animation: fadeInUp 0.18s ease-out;
+}
+
+.control-plane-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.control-plane-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.control-plane-title {
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.control-plane-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+
+  &:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
   }
 }
 
-/* Copilot model selector overlay */
-.copilot-model-overlay {
-  position: absolute;
-  top: 180px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  width: 280px;
+.control-plane-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-/* File Explorer - ensure it takes full height */
+.control-plane-chip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all var(--transition-fast);
+
+  &:hover,
+  &.active {
+    color: var(--text-primary);
+    border-color: rgba(var(--primary-rgb), 0.28);
+    background: rgba(var(--primary-rgb), 0.1);
+  }
+}
+
 app-file-explorer {
   height: 100%;
   flex-shrink: 0;
   overflow: hidden;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(11, 15, 14, 0.9);
+  backdrop-filter: blur(18px);
 }
 
-/* Sidebar toggle button when collapsed */
 .sidebar-toggle-btn {
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 24px;
-  height: 48px;
+  width: 26px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  background: rgba(11, 15, 14, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-left: none;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-radius: 0 12px 12px 0;
   color: var(--text-muted);
   cursor: pointer;
   transition: all var(--transition-fast);
-  z-index: 100;
+  z-index: 20;
 
   &:hover {
-    background: var(--bg-tertiary);
-    color: var(--primary-color);
-    width: 28px;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+    color: var(--text-primary);
+    width: 30px;
+    background: rgba(18, 24, 22, 0.98);
+  }
+}
+
+@media (max-width: 1180px) {
+  .workspace-shell {
+    padding: 18px 18px 24px;
   }
 
-  svg {
-    flex-shrink: 0;
+  .workspace-shell.empty {
+    padding: 0 18px 24px;
   }
 }

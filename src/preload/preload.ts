@@ -103,6 +103,7 @@ const IPC_CHANNELS = {
   // History operations
   HISTORY_LIST: 'history:list',
   HISTORY_LOAD: 'history:load',
+  HISTORY_ARCHIVE: 'history:archive',
   HISTORY_DELETE: 'history:delete',
   HISTORY_RESTORE: 'history:restore',
   HISTORY_CLEAR: 'history:clear',
@@ -282,6 +283,7 @@ const IPC_CHANNELS = {
   REMOTE_CONFIG_STATUS: 'remote-config:status',
 
   // External Editor (9.2)
+  EDITOR_DETECT: 'editor:detect',
   EDITOR_OPEN: 'editor:open',
   EDITOR_GET_AVAILABLE: 'editor:get-available',
   EDITOR_SET_DEFAULT: 'editor:set-default',
@@ -1421,6 +1423,13 @@ const electronAPI = {
    */
   loadHistoryEntry: (entryId: string): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_LOAD, { entryId });
+  },
+
+  /**
+   * Archive a history entry
+   */
+  archiveHistoryEntry: (entryId: string): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_ARCHIVE, { entryId });
   },
 
   /**
@@ -2858,6 +2867,13 @@ const electronAPI = {
   // ============================================
   // External Editor (9.2)
   // ============================================
+
+  /**
+   * Detect available editors
+   */
+  editorDetect: (): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.EDITOR_DETECT);
+  },
 
   /**
    * Open file in external editor

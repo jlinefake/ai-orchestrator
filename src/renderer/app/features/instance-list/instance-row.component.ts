@@ -11,13 +11,12 @@ import {
 } from '@angular/core';
 import { Instance } from '../../core/state/instance.store';
 import { StatusIndicatorComponent } from './status-indicator.component';
-import { ContextBarComponent } from '../instance-detail/context-bar.component';
 import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.types';
 
 @Component({
   selector: 'app-instance-row',
   standalone: true,
-  imports: [StatusIndicatorComponent, ContextBarComponent],
+  imports: [StatusIndicatorComponent],
   template: `
     <div
       class="instance-row"
@@ -32,7 +31,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       (keydown.space)="instanceSelect.emit(instance().id)"
       tabindex="0"
       role="button"
-      [attr.aria-label]="'Select instance ' + instance().displayName"
+      [attr.aria-label]="'Select instance ' + resolvedDisplayTitle()"
     >
       <!-- Drag handle for root instances -->
       @if (isDraggable()) {
@@ -64,7 +63,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
             {{ agent().name.charAt(0) }}
           </span>
           <div class="name-and-provider">
-            <span class="instance-name">{{ instance().displayName }}</span>
+            <span class="instance-name">{{ resolvedDisplayTitle() }}</span>
             <span
               class="provider-badge"
               [class]="'provider-badge provider-' + instance().provider"
@@ -79,11 +78,6 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
           }
         </div>
       </div>
-
-      <app-context-bar
-        [usage]="instance().contextUsage"
-        [compact]="true"
-      />
 
       <div class="instance-actions">
         <button
@@ -109,23 +103,23 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     .instance-row {
       display: flex;
       align-items: center;
-      padding: 12px 16px;
-      gap: 10px;
+      padding: 6px 10px;
+      gap: 6px;
       cursor: pointer;
       transition: all var(--transition-fast);
-      height: 72px;
+      min-height: 40px;
       position: relative;
       background: transparent;
-      border-bottom: 1px solid var(--border-subtle);
+      border-radius: 10px;
     }
 
     .instance-row:hover {
-      background-color: var(--bg-hover);
+      background-color: rgba(255, 255, 255, 0.025);
     }
 
     .instance-row.selected {
-      background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12) 0%, rgba(var(--primary-rgb), 0.06) 100%);
-      border-left: 3px solid var(--primary-color);
+      background: rgba(var(--primary-rgb), 0.08);
+      box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
     }
 
     .instance-row.error {
@@ -133,25 +127,25 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     }
 
     .instance-row.yolo {
-      border-left: 3px solid var(--primary-color);
+      box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.14);
 
       &.selected {
-        border-left: 3px solid var(--primary-color);
+        box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.2);
       }
     }
 
     /* Child instance styling - subtle hierarchy indication */
     .instance-row.is-child {
-      background-color: rgba(var(--secondary-rgb), 0.03);
+      background-color: transparent;
     }
 
     .instance-row.is-child:hover {
-      background-color: var(--bg-hover);
+      background-color: rgba(255, 255, 255, 0.02);
     }
 
     .instance-row.is-child.selected {
-      background: linear-gradient(135deg, rgba(var(--secondary-rgb), 0.12) 0%, rgba(var(--secondary-rgb), 0.06) 100%);
-      border-left: 3px solid var(--secondary-color);
+      background: rgba(var(--secondary-rgb), 0.08);
+      box-shadow: inset 0 0 0 1px rgba(var(--secondary-rgb), 0.12);
     }
 
     /* Draggable root instance */
@@ -166,12 +160,12 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     /* Drag handle - Enhanced visibility on hover */
     .drag-handle {
       color: var(--text-muted);
-      font-size: 11px;
+      font-size: 10px;
       letter-spacing: -2px;
       opacity: 0;
       transition: all var(--transition-fast);
       cursor: grab;
-      padding: 6px 4px;
+      padding: 4px 3px;
       flex-shrink: 0;
       border-radius: var(--radius-sm);
     }
@@ -193,8 +187,8 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     /* Child connector - Refined tree line */
     .child-connector {
       color: var(--border-color);
-      font-size: 14px;
-      width: 18px;
+      font-size: 12px;
+      width: 14px;
       text-align: center;
       flex-shrink: 0;
       opacity: 0.6;
@@ -202,21 +196,21 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
 
     /* Placeholder for consistent alignment */
     .expand-placeholder {
-      width: 18px;
-      height: 18px;
+      width: 14px;
+      height: 14px;
       flex-shrink: 0;
     }
 
     /* Expand/collapse button - Refined interaction */
     .expand-btn {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
       border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
       cursor: pointer;
       transition: all var(--transition-fast);
       flex-shrink: 0;
@@ -224,14 +218,14 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     }
 
     .expand-btn:hover {
-      background: rgba(var(--primary-rgb), 0.1);
-      border-color: var(--primary-color);
+      background: rgba(var(--primary-rgb), 0.08);
+      border-color: rgba(var(--primary-rgb), 0.24);
       color: var(--primary-color);
-      transform: scale(1.05);
+      transform: scale(1.03);
     }
 
     .expand-btn .chevron {
-      font-size: 12px;
+      font-size: 10px;
       font-weight: bold;
       line-height: 1;
       transition: transform var(--transition-fast);
@@ -251,28 +245,29 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     .instance-name-row {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+      min-width: 0;
     }
 
     .agent-badge {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
-      border-radius: var(--radius-sm);
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       color: white;
       flex-shrink: 0;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
     }
 
     .name-and-provider {
       display: flex;
-      flex-direction: column;
-      gap: 2px;
+      align-items: center;
+      gap: 6px;
       min-width: 0;
       flex: 1;
     }
@@ -282,10 +277,10 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      padding: 1px 6px;
-      border-radius: 3px;
+      padding: 2px 6px;
+      border-radius: 999px;
       font-family: var(--font-mono);
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 600;
       letter-spacing: 0.04em;
       line-height: 1.4;
@@ -348,45 +343,31 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     .instance-name {
       font-family: var(--font-display);
       font-weight: 600;
-      font-size: 13px;
+      font-size: 12px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 180px;
       color: var(--text-primary);
       letter-spacing: -0.01em;
     }
 
     .collapsed-badge {
-      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
-      color: var(--bg-primary);
+      background: rgba(var(--primary-rgb), 0.14);
+      color: var(--primary-color);
       font-family: var(--font-mono);
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 700;
-      padding: 3px 7px;
-      border-radius: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
       flex-shrink: 0;
       letter-spacing: 0.02em;
-    }
-
-    .instance-meta {
-      display: flex;
-      gap: 8px;
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 5px;
-    }
-
-    .session-id {
-      font-family: var(--font-mono);
-      color: var(--text-muted);
-      letter-spacing: 0.03em;
-      opacity: 0.8;
     }
 
     /* Instance Actions - Action buttons */
     .instance-actions {
       display: flex;
-      gap: 4px;
+      gap: 3px;
       opacity: 0;
       transition: opacity var(--transition-fast);
       flex-shrink: 0;
@@ -397,25 +378,25 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
     }
 
     .action-btn {
-      width: 28px;
-      height: 28px;
+      width: 20px;
+      height: 20px;
       border-radius: var(--radius-sm);
       border: none;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: 11px;
       cursor: pointer;
       transition: all var(--transition-fast);
     }
 
     .action-btn.restart {
-      background: var(--bg-tertiary);
+      background: rgba(255, 255, 255, 0.03);
       color: var(--text-secondary);
-      border: 1px solid var(--border-subtle);
+      border: 1px solid rgba(255, 255, 255, 0.05);
 
       &:hover:not(:disabled) {
-        background: var(--bg-hover);
+        background: rgba(255, 255, 255, 0.06);
         color: var(--secondary-color);
         border-color: rgba(var(--secondary-rgb), 0.3);
         transform: rotate(180deg);
@@ -445,6 +426,7 @@ import { getAgentById, getDefaultAgent } from '../../../../shared/types/agent.ty
 export class InstanceRowComponent {
   // Required inputs
   instance = input.required<Instance>();
+  displayTitle = input<string | null>(null);
 
   // Hierarchy inputs
   depth = input<number>(0);
@@ -520,6 +502,7 @@ export class InstanceRowComponent {
   });
 
   // Keep methods for backwards compat but prefer computed signals
+  readonly resolvedDisplayTitle = computed(() => this.displayTitle()?.trim() || this.instance().displayName);
   getProviderDisplayName(provider: string): string {
     switch (provider) {
       case 'claude': return 'Claude';

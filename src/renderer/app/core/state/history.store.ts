@@ -150,6 +150,42 @@ export class HistoryStore {
   }
 
   /**
+   * Archive a history entry from the primary workspace index
+   */
+  async archiveEntry(entryId: string): Promise<boolean> {
+    try {
+      const response = await this.ipc.archiveHistoryEntry(entryId) as {
+        success: boolean;
+        error?: { message: string };
+      };
+
+      if (response.success) {
+        this.state.update(s => ({
+          ...s,
+          entries: s.entries.map((entry) =>
+            entry.id === entryId
+              ? { ...entry, archivedAt: Date.now() }
+              : entry
+          ),
+        }));
+        return true;
+      }
+
+      this.state.update(s => ({
+        ...s,
+        error: response.error?.message || 'Failed to archive entry',
+      }));
+      return false;
+    } catch {
+      this.state.update(s => ({
+        ...s,
+        error: 'Failed to archive entry',
+      }));
+      return false;
+    }
+  }
+
+  /**
    * Delete a history entry
    */
   async deleteEntry(entryId: string): Promise<boolean> {

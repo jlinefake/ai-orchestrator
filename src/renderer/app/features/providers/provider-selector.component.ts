@@ -5,7 +5,17 @@
  * switching between them for new instances. For Copilot, also allows model selection.
  */
 
-import { ChangeDetectionStrategy, Component, inject, output, signal, computed, OnInit } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  OnInit,
+  output,
+  signal
+} from '@angular/core';
 import { CliStore } from '../../core/state/cli.store';
 
 export type ProviderType = 'claude' | 'codex' | 'gemini' | 'copilot' | 'auto';
@@ -250,6 +260,8 @@ export interface ProviderOption {
 export class ProviderSelectorComponent implements OnInit {
   private cliStore = inject(CliStore);
 
+  provider = input<ProviderType | null>(null);
+
   // Outputs
   providerSelected = output<ProviderType>();
 
@@ -315,13 +327,34 @@ export class ProviderSelectorComponent implements OnInit {
     return this.availableProviders().find(p => p.id === id) || this.availableProviders()[0];
   });
 
+  constructor() {
+    effect(() => {
+      const requested = this.provider();
+      if (!requested) return;
+
+      const availableProviders = this.availableProviders();
+      const matchingProvider = availableProviders.find(
+        provider => provider.id === requested && provider.available
+      );
+
+      if (matchingProvider && matchingProvider.id !== this.selectedProviderId()) {
+        this.selectedProviderId.set(matchingProvider.id);
+      }
+    });
+  }
+
   ngOnInit(): void {
-    // Default to first available provider and emit initial value
-    const available = this.availableProviders().find(p => p.available);
-    if (available) {
-      this.selectedProviderId.set(available.id);
-      // Emit initial value so parent gets the default selection
-      this.providerSelected.emit(available.id);
+    const requested = this.provider();
+    const availableProviders = this.availableProviders();
+    const selected = (requested
+      ? availableProviders.find(provider => provider.id === requested && provider.available)
+      : undefined) || availableProviders.find(provider => provider.available);
+
+    if (selected) {
+      this.selectedProviderId.set(selected.id);
+      if (requested !== selected.id) {
+        this.providerSelected.emit(selected.id);
+      }
     }
   }
 

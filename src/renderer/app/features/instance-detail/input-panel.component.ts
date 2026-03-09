@@ -4,26 +4,38 @@
 
 import {
   Component,
+  ChangeDetectionStrategy,
+  computed,
+  effect,
+  ElementRef,
+  inject,
   input,
+  OnDestroy,
   output,
   signal,
-  computed,
-  inject,
-  effect,
   viewChild,
-  ElementRef,
-  OnDestroy,
-  ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommandStore } from '../../core/state/command.store';
 import { DraftService } from '../../core/services/draft.service';
 import { PromptSuggestionService } from '../../core/services/prompt-suggestion.service';
+import { PerfInstrumentationService } from '../../core/services/perf-instrumentation.service';
+import {
+  ProviderSelectorComponent,
+  ProviderType
+} from '../providers/provider-selector.component';
+import { CopilotModelSelectorComponent } from '../providers/copilot-model-selector.component';
+import { ProviderStateService } from '../../core/services/provider-state.service';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
-import type { OutputMessage, InstanceStatus } from '../../../../shared/types/instance.types';
+import type {
+  InstanceProvider,
+  InstanceStatus,
+  OutputMessage
+} from '../../core/state/instance/instance.types';
 
 @Component({
   selector: 'app-input-panel',
   standalone: true,
+  imports: [ProviderSelectorComponent, CopilotModelSelectorComponent],
   template: `
     <div class="input-panel">
       <!-- Pending files and folders preview -->
@@ -77,6 +89,29 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
           }
         </div>
       }
+
+      <div class="composer-toolbar">
+        <div class="composer-runtime">
+          <span class="toolbar-label">Current session</span>
+          <span class="runtime-chip">{{ sessionProviderLabel() }}</span>
+        </div>
+
+        <div class="composer-defaults">
+          <span class="toolbar-label">New sessions</span>
+          <div class="default-controls">
+            <app-provider-selector
+              [provider]="selectedProvider()"
+              (providerSelected)="onProviderSelected($event)"
+            />
+            @if (selectedProvider() === 'copilot') {
+              <app-copilot-model-selector
+                [model]="selectedModel()"
+                (modelSelected)="onModelSelected($event)"
+              />
+            }
+          </div>
+        </div>
+      </div>
 
       <!-- Command suggestions dropdown -->
       @if (showCommandSuggestions() && filteredCommands().length > 0) {
@@ -187,11 +222,73 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     /* Input Panel - Refined message composer */
     .input-panel {
       position: relative;
-      background: var(--bg-secondary);
-      border-radius: var(--radius-lg);
-      padding: var(--spacing-md);
-      border: 1px solid var(--border-subtle);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0)),
+        rgba(11, 16, 15, 0.9);
+      border-radius: 22px;
+      padding: 14px 14px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      box-shadow:
+        0 22px 54px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      backdrop-filter: blur(22px);
+    }
+
+    .composer-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--spacing-md);
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .composer-runtime,
+    .composer-defaults {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .composer-defaults {
+      align-items: flex-end;
+      margin-left: auto;
+    }
+
+    .toolbar-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .runtime-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .default-controls {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: var(--spacing-sm);
+      flex-wrap: wrap;
+    }
+
+    app-copilot-model-selector {
+      width: min(320px, 100%);
     }
 
     /* Pending Files - Attachment preview area */
@@ -199,9 +296,9 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       display: flex;
       flex-wrap: wrap;
       gap: var(--spacing-sm);
-      margin-bottom: var(--spacing-sm);
-      padding-bottom: var(--spacing-sm);
-      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       animation: fadeIn 0.2s ease-out;
     }
 
@@ -210,9 +307,9 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       align-items: center;
       gap: var(--spacing-xs);
       padding: var(--spacing-xs) var(--spacing-sm);
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 14px;
       font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: 0.02em;
@@ -244,9 +341,9 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       align-items: center;
       gap: var(--spacing-sm);
       padding: 8px 10px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
       transition: all var(--transition-fast);
     }
 
@@ -336,22 +433,22 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       position: relative;
       flex: 1;
       min-width: 0;
-      border-radius: var(--radius-md);
+      border-radius: 18px;
     }
 
     .textarea-wrapper.has-ghost {
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.035);
+      border-radius: 18px;
     }
 
     .message-input {
       width: 100%;
       min-height: 46px;
-      max-height: 200px;
-      padding: var(--spacing-sm) var(--spacing-md);
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
+      max-height: 170px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 18px;
       resize: none;
       line-height: 1.5;
       font-family: var(--font-display);
@@ -368,8 +465,10 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
 
       &:focus {
         outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
+        border-color: rgba(var(--primary-rgb), 0.34);
+        box-shadow:
+          0 0 0 3px rgba(var(--primary-rgb), 0.1),
+          0 18px 36px rgba(0, 0, 0, 0.18);
       }
 
       &:disabled {
@@ -421,9 +520,9 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     .btn-attach {
       width: 46px;
       height: 46px;
-      border-radius: var(--radius-md);
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.07);
       color: var(--text-muted);
       display: flex;
       align-items: center;
@@ -433,8 +532,8 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       cursor: pointer;
 
       &:hover:not(:disabled) {
-        background: var(--bg-hover);
-        border-color: var(--border-color);
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.1);
         color: var(--secondary-color);
       }
 
@@ -453,8 +552,8 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     .btn-send {
       width: 46px;
       height: 46px;
-      border-radius: var(--radius-md);
-      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.95) 0%, var(--primary-hover) 100%);
       border: none;
       color: var(--bg-primary);
       display: flex;
@@ -463,11 +562,11 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       transition: all var(--transition-fast);
       flex-shrink: 0;
       cursor: pointer;
-      box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
+      box-shadow: 0 14px 28px rgba(var(--primary-rgb), 0.18);
 
       &:hover:not(:disabled) {
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
+        box-shadow: 0 18px 34px rgba(var(--primary-rgb), 0.24);
       }
 
       &:disabled {
@@ -478,7 +577,7 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     }
 
     .send-icon {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: bold;
     }
 
@@ -486,14 +585,15 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     .input-hints {
       display: flex;
       justify-content: space-between;
-      margin-top: var(--spacing-sm);
-      padding: 0 var(--spacing-xs);
+      margin-top: 10px;
+      padding: 0 2px;
+      gap: 12px;
     }
 
     .hint {
       font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.03em;
+      font-size: 9px;
+      letter-spacing: 0.02em;
       color: var(--text-muted);
     }
 
@@ -512,9 +612,9 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
     /* Queue Section - Message queue display */
     .queue-section {
       margin-top: var(--spacing-sm);
-      background: rgba(var(--primary-rgb), 0.1);
-      border: 1px solid rgba(var(--primary-rgb), 0.3);
-      border-radius: var(--radius-md);
+      background: rgba(var(--primary-rgb), 0.08);
+      border: 1px solid rgba(var(--primary-rgb), 0.18);
+      border-radius: 18px;
       overflow: hidden;
       animation: fadeIn 0.2s ease-out;
     }
@@ -615,15 +715,16 @@ import type { OutputMessage, InstanceStatus } from '../../../../shared/types/ins
       bottom: 100%;
       left: 0;
       right: 0;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
+      background: rgba(11, 16, 15, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 18px;
       margin-bottom: var(--spacing-sm);
       max-height: 260px;
       overflow-y: auto;
-      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.22);
       z-index: 100;
       animation: fadeInUp 0.15s ease-out;
+      backdrop-filter: blur(18px);
     }
 
     .command-suggestions::-webkit-scrollbar {
@@ -684,6 +785,8 @@ export class InputPanelComponent implements OnDestroy {
   private commandStore = inject(CommandStore);
   private draftService = inject(DraftService);
   private suggestionService = inject(PromptSuggestionService);
+  private perf = inject(PerfInstrumentationService);
+  private providerState = inject(ProviderStateService);
   private filePreviewUrls = new Map<File, string>();
   private textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('textareaRef');
 
@@ -698,6 +801,8 @@ export class InputPanelComponent implements OnDestroy {
   isRespawning = input<boolean>(false);
   outputMessages = input<OutputMessage[]>([]);
   instanceStatus = input<InstanceStatus>('idle');
+  provider = input<InstanceProvider>('claude');
+  currentModel = input<string | undefined>(undefined);
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
@@ -744,6 +849,15 @@ export class InputPanelComponent implements OnDestroy {
     return commands
       .filter(cmd => cmd.name.toLowerCase().startsWith(query))
       .slice(0, 8);
+  });
+
+  selectedProvider = this.providerState.selectedProvider;
+  selectedModel = this.providerState.selectedModel;
+
+  sessionProviderLabel = computed(() => {
+    const p = this.provider();
+    const m = this.currentModel();
+    return m ? `${p} · ${m}` : p;
   });
 
   // Ghost text suggestion state
@@ -847,9 +961,11 @@ export class InputPanelComponent implements OnDestroy {
   }
 
   onInput(event: Event): void {
+    const stopComposer = this.perf.markComposerLatency();
     const textarea = event.target as HTMLTextAreaElement;
     const value = textarea.value;
     this.message.set(value);
+    stopComposer(); // Measure composer latency
 
     // Save draft as user types
     this.draftService.setDraft(this.instanceId(), value);
@@ -1115,5 +1231,13 @@ export class InputPanelComponent implements OnDestroy {
 
   onCancelQueuedMessage(index: number): void {
     this.cancelQueuedMessage.emit(index);
+  }
+
+  onProviderSelected(provider: ProviderType): void {
+    this.providerState.setProvider(provider);
+  }
+
+  onModelSelected(model: string): void {
+    this.providerState.setModel(model);
   }
 }

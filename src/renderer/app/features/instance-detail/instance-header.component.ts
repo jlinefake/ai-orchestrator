@@ -9,6 +9,7 @@ import {
   computed,
   inject,
   effect,
+  signal,
   viewChild,
   ElementRef,
   OnInit,
@@ -18,9 +19,16 @@ import { StatusIndicatorComponent } from '../instance-list/status-indicator.comp
 import { RecentDirectoriesDropdownComponent } from '../../shared/components/recent-directories-dropdown/recent-directories-dropdown.component';
 import { SkillStore } from '../../core/state/skill.store';
 import { HookStore } from '../../core/state/hook.store';
+import { FileIpcService } from '../../core/services/ipc/file-ipc.service';
+import { ElectronIpcService } from '../../core/services/ipc/electron-ipc.service';
 import type { Instance } from '../../core/state/instance.store';
 import { getModelShortName } from '../../../../shared/types/provider.types';
 import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
+
+interface EditorMenuItem {
+  type: string;
+  label: string;
+}
 
 @Component({
   selector: 'app-instance-header',
@@ -52,7 +60,7 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
               (keydown.space)="startEditName.emit()"
             >
               {{ instance().displayName }}
-              <span class="edit-icon">✏️</span>
+              <span class="edit-icon">rename</span>
             </h2>
           }
         </div>
@@ -174,6 +182,53 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
             ⏸ Interrupt
           </button>
         }
+        @if (canShowFileExplorer()) {
+          <button
+            class="btn-action btn-icon"
+            [class.active]="isFileExplorerOpen()"
+            [title]="isFileExplorerOpen() ? 'Hide file browser' : 'Show file browser'"
+            (click)="toggleFileExplorer.emit()"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"/>
+            </svg>
+          </button>
+        }
+        <div class="open-menu-shell">
+          <button
+            class="btn-action btn-open"
+            title="Open workspace"
+            [disabled]="!instance().workingDirectory"
+            (click)="onToggleOpenMenu($event)"
+          >
+            <span>Open</span>
+            <span class="open-caret">▾</span>
+          </button>
+          @if (showOpenMenu()) {
+            <div class="open-menu">
+              <button
+                class="open-menu-item"
+                (click)="openInPreferredEditor()"
+                [disabled]="isLoadingEditors()"
+              >
+                Open in {{ preferredEditorLabel() }}
+              </button>
+              <button
+                class="open-menu-item"
+                (click)="openInSystemFileManager()"
+              >
+                Open in {{ systemFolderLabel() }}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="open-menu-backdrop"
+              aria-label="Close open menu"
+              (click)="showOpenMenu.set(false)"
+            ></button>
+          }
+        </div>
         <button
           class="btn-action"
           title="Restart instance"
@@ -205,9 +260,9 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        gap: var(--spacing-lg);
-        padding-bottom: var(--spacing-md);
-        border-bottom: 1px solid var(--border-subtle);
+        gap: 16px;
+        padding: 2px 2px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       }
 
       .instance-identity {
@@ -218,13 +273,13 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       .name-row {
         display: flex;
         align-items: center;
-        gap: var(--spacing-md);
+        gap: 10px;
       }
 
       .instance-name {
         font-family: var(--font-display);
-        font-size: 20px;
-        font-weight: 700;
+        font-size: clamp(20px, 2.2vw, 24px);
+        font-weight: 600;
         letter-spacing: -0.02em;
         margin: 0;
         color: var(--text-primary);
@@ -234,18 +289,22 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
           display: flex;
           align-items: center;
           gap: var(--spacing-xs);
-          padding: 2px 4px;
-          border-radius: var(--radius-sm);
+          padding: 4px 6px;
+          border-radius: 10px;
           transition: background var(--transition-fast);
 
           &:hover {
-            background: var(--bg-hover);
+            background: rgba(255, 255, 255, 0.03);
           }
 
           .edit-icon {
             opacity: 0;
-            font-size: 14px;
+            font-family: var(--font-mono);
+            font-size: 9px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
             transition: opacity var(--transition-fast);
+            color: var(--text-muted);
           }
 
           &:hover .edit-icon {
@@ -272,16 +331,15 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       .instance-meta {
         display: flex;
         align-items: center;
-        gap: var(--spacing-sm);
-        font-size: 12px;
+        gap: 8px;
+        font-size: 11px;
         color: var(--text-secondary);
-        margin-top: var(--spacing-sm);
+        margin-top: 8px;
         flex-wrap: wrap;
       }
 
       .separator {
-        color: var(--border-color);
-        font-size: 8px;
+        display: none;
       }
 
       .working-dir-btn {
@@ -308,16 +366,16 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       }
 
       .provider-badge {
-        padding: 4px 10px;
-        border: none;
-        border-radius: 12px;
+        padding: 5px 9px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: white;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
       }
 
       /* Inline Model Selector */
@@ -328,13 +386,13 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       }
 
       .model-btn {
-        padding: 4px 10px;
+        padding: 5px 9px;
         border: 1px solid;
-        border-radius: 12px;
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 600;
-        letter-spacing: 0.02em;
+        letter-spacing: 0.04em;
         cursor: pointer;
         transition: all var(--transition-fast);
         display: flex;
@@ -360,15 +418,16 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
         position: absolute;
         top: 100%;
         left: 0;
-        margin-top: 4px;
+        margin-top: 8px;
         min-width: 180px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        background: rgba(11, 16, 15, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 16px;
+        box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
         z-index: 1000;
         max-height: 300px;
         overflow-y: auto;
+        backdrop-filter: blur(18px);
       }
 
       .model-option {
@@ -439,42 +498,35 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       }
 
       .mode-badge {
-        padding: 4px 10px;
-        border: none;
-        border-radius: 12px;
+        padding: 5px 9px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        background: rgba(111, 143, 128, 0.12);
         color: white;
         cursor: pointer;
         transition: all var(--transition-fast);
-        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        box-shadow: none;
 
         &:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+          background: rgba(111, 143, 128, 0.18);
         }
 
         &.plan {
-          background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-          box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+          background: rgba(97, 120, 163, 0.15);
           &:hover {
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+            background: rgba(97, 120, 163, 0.22);
           }
         }
 
         &.review {
-          background: linear-gradient(
-            135deg,
-            var(--primary-color) 0%,
-            var(--primary-hover) 100%
-          );
-          box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
+          background: rgba(var(--primary-rgb), 0.12);
           &:hover {
-            box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
+            background: rgba(var(--primary-rgb), 0.18);
           }
         }
 
@@ -486,33 +538,32 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       }
 
       .yolo-badge {
-        padding: 4px 10px;
-        border: 1px solid var(--border-subtle);
-        border-radius: 12px;
+        padding: 5px 9px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        background: var(--bg-tertiary);
+        background: rgba(255, 255, 255, 0.03);
         color: var(--text-muted);
         cursor: pointer;
         transition: all var(--transition-fast);
 
         &:hover {
-          background: var(--bg-hover);
-          border-color: var(--border-color);
+          background: rgba(255, 255, 255, 0.06);
+          border-color: rgba(255, 255, 255, 0.12);
         }
 
         &.active {
-          background: linear-gradient(135deg, var(--primary-color), #ef4444);
-          border: none;
-          color: var(--bg-primary);
-          box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.4);
-          animation: glow 2s ease-in-out infinite;
+          background: rgba(var(--primary-rgb), 0.12);
+          border-color: rgba(var(--primary-rgb), 0.3);
+          color: var(--primary-color);
+          animation: none;
 
           &:hover {
-            box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.5);
+            background: rgba(var(--primary-rgb), 0.18);
           }
         }
 
@@ -523,58 +574,52 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
       }
 
       .skills-badge {
-        padding: 4px 10px;
-        border-radius: 12px;
+        padding: 5px 9px;
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 600;
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+        background: rgba(97, 120, 163, 0.12);
+        color: #c8d4ff;
+        border: 1px solid rgba(97, 120, 163, 0.18);
       }
 
       .hooks-badge {
-        padding: 4px 10px;
-        border-radius: 12px;
+        padding: 5px 9px;
+        border-radius: 999px;
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 600;
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-        box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
-      }
-
-      @keyframes glow {
-        0%,
-        100% {
-          box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.4);
-        }
-        50% {
-          box-shadow: 0 2px 16px rgba(var(--primary-rgb), 0.6);
-        }
+        background: rgba(var(--primary-rgb), 0.12);
+        color: var(--primary-color);
+        border: 1px solid rgba(var(--primary-rgb), 0.18);
       }
 
       .header-actions {
         display: flex;
-        gap: var(--spacing-xs);
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        padding-top: 2px;
+        position: relative;
       }
 
       .btn-action {
-        padding: var(--spacing-sm) var(--spacing-md);
-        border-radius: var(--radius-md);
+        padding: 8px 12px;
+        border-radius: 14px;
         font-family: var(--font-display);
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.01em;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
         color: var(--text-secondary);
         cursor: pointer;
         transition: all var(--transition-fast);
 
         &:hover:not(:disabled) {
-          background: var(--bg-hover);
-          border-color: var(--border-color);
+          background: rgba(255, 255, 255, 0.06);
+          border-color: rgba(255, 255, 255, 0.1);
           color: var(--text-primary);
         }
 
@@ -584,54 +629,118 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
         }
       }
 
+      .btn-action.btn-icon {
+        width: 36px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .btn-action.btn-icon.active {
+        color: var(--primary-color);
+        border-color: rgba(var(--primary-rgb), 0.22);
+        background: rgba(var(--primary-rgb), 0.1);
+      }
+
+      .open-menu-shell {
+        position: relative;
+      }
+
+      .btn-open {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .open-caret {
+        font-size: 10px;
+        opacity: 0.72;
+      }
+
+      .open-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        min-width: 180px;
+        padding: 6px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(11, 16, 15, 0.96);
+        box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(18px);
+        z-index: 1000;
+      }
+
+      .open-menu-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 11px;
+        border: none;
+        border-radius: 12px;
+        background: transparent;
+        color: var(--text-primary);
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--transition-fast), color var(--transition-fast);
+      }
+
+      .open-menu-item:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .open-menu-item:disabled {
+        opacity: 0.5;
+        cursor: progress;
+      }
+
+      .open-menu-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        background: transparent;
+        border: none;
+      }
+
       .btn-danger {
         color: var(--error-color);
-        border-color: rgba(var(--error-rgb), 0.3);
+        border-color: rgba(var(--error-rgb), 0.22);
 
         &:hover:not(:disabled) {
-          background: rgba(var(--error-rgb), 0.1);
-          border-color: var(--error-color);
-          box-shadow: 0 0 12px rgba(var(--error-rgb), 0.2);
+          background: rgba(var(--error-rgb), 0.12);
+          border-color: rgba(var(--error-rgb), 0.3);
         }
       }
 
       .btn-interrupt {
-        background: rgba(var(--primary-rgb), 0.15);
+        background: rgba(var(--primary-rgb), 0.14);
         color: var(--primary-color);
-        border: 1px solid rgba(var(--primary-rgb), 0.4);
-        animation: pulse 1.5s ease-in-out infinite;
+        border: 1px solid rgba(var(--primary-rgb), 0.22);
+        animation: none;
 
         &:hover:not(:disabled) {
-          background: var(--primary-color);
-          border-color: var(--primary-color);
-          color: var(--bg-primary);
-          box-shadow: 0 0 16px rgba(var(--primary-rgb), 0.5);
-        }
-      }
-
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.7;
+          background: rgba(var(--primary-rgb), 0.2);
+          border-color: rgba(var(--primary-rgb), 0.3);
+          color: var(--primary-hover);
         }
       }
 
       .btn-primary {
         background: linear-gradient(
           135deg,
-          var(--primary-color) 0%,
+          rgba(var(--primary-rgb), 0.94) 0%,
           var(--primary-hover) 100%
         );
         border: none;
         color: var(--bg-primary);
-        box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.3);
+        box-shadow: 0 14px 28px rgba(var(--primary-rgb), 0.16);
 
         &:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.4);
+          box-shadow: 0 18px 32px rgba(var(--primary-rgb), 0.22);
         }
       }
     `
@@ -641,6 +750,8 @@ import type { ModelDisplayInfo } from '../../../../shared/types/provider.types';
 export class InstanceHeaderComponent implements OnInit {
   private skillStore = inject(SkillStore);
   private hookStore = inject(HookStore);
+  private fileIpc = inject(FileIpcService);
+  private electronIpc = inject(ElectronIpcService);
 
   private nameInput = viewChild<ElementRef<HTMLInputElement>>('nameInput');
 
@@ -651,10 +762,16 @@ export class InstanceHeaderComponent implements OnInit {
   showModelDropdown = input(false);
   currentModel = input<string | undefined>(undefined);
   models = input<ModelDisplayInfo[]>([]);
+  canShowFileExplorer = input(false);
+  isFileExplorerOpen = input(false);
 
   // Skills and hooks counts
   activeSkillCount = computed(() => this.skillStore.activeSkillCount());
   enabledHookCount = computed(() => this.hookStore.enabledHookCount());
+  showOpenMenu = signal(false);
+  editorTargets = signal<EditorMenuItem[]>([]);
+  isLoadingEditors = signal(false);
+  private hasLoadedEditorTargets = false;
 
   // Tooltips for badges
   activeSkillsTooltip = computed(() => {
@@ -680,6 +797,14 @@ export class InstanceHeaderComponent implements OnInit {
         }
       }
     });
+
+    effect(() => {
+      if (!this.showOpenMenu()) {
+        return;
+      }
+
+      void this.ensureEditorTargetsLoaded();
+    });
   }
 
   ngOnInit(): void {
@@ -702,6 +827,7 @@ export class InstanceHeaderComponent implements OnInit {
   toggleModelDropdown = output<void>();
   closeModelDropdown = output<void>();
   selectModel = output<string>();
+  toggleFileExplorer = output<void>();
 
   providerDisplayName = computed(() => {
     return this.getProviderDisplayName(this.instance().provider);
@@ -746,6 +872,21 @@ export class InstanceHeaderComponent implements OnInit {
 
   agentModeName = computed(() => {
     return this.getAgentModeName(this.instance().agentId);
+  });
+
+  preferredEditorLabel = computed(() => {
+    return this.editorTargets()[0]?.label || 'Editor';
+  });
+
+  systemFolderLabel = computed(() => {
+    switch (this.electronIpc.platform) {
+      case 'darwin':
+        return 'Finder';
+      case 'win32':
+        return 'Explorer';
+      default:
+        return 'File Manager';
+    }
   });
 
   getProviderDisplayName(provider: string): string {
@@ -811,5 +952,106 @@ export class InstanceHeaderComponent implements OnInit {
       this.saveName.emit(newName);
     }
     this.cancelEditName.emit();
+  }
+
+  onToggleOpenMenu(event: Event): void {
+    event.stopPropagation();
+    this.showOpenMenu.update((current) => !current);
+  }
+
+  async openInPreferredEditor(): Promise<void> {
+    const workingDirectory = this.instance().workingDirectory?.trim();
+    if (!workingDirectory) {
+      return;
+    }
+
+    await this.fileIpc.editorOpenDirectory(workingDirectory);
+    this.showOpenMenu.set(false);
+  }
+
+  async openInSystemFileManager(): Promise<void> {
+    const workingDirectory = this.instance().workingDirectory?.trim();
+    if (!workingDirectory) {
+      return;
+    }
+
+    await this.fileIpc.openPath(workingDirectory);
+    this.showOpenMenu.set(false);
+  }
+
+  private async ensureEditorTargetsLoaded(): Promise<void> {
+    if (this.hasLoadedEditorTargets || this.isLoadingEditors()) {
+      return;
+    }
+
+    this.isLoadingEditors.set(true);
+    try {
+      await this.fileIpc.editorDetect();
+
+      const [defaultResponse, availableResponse] = await Promise.all([
+        this.fileIpc.editorGetDefault(),
+        this.fileIpc.editorGetAvailable(),
+      ]);
+
+      const targets: EditorMenuItem[] = [];
+      const defaultEditor = this.parseEditorRecord(defaultResponse.data);
+      if (defaultEditor?.type) {
+        targets.push({
+          type: defaultEditor.type,
+          label: this.getEditorLabel(defaultEditor.type, defaultEditor.name),
+        });
+      } else if (Array.isArray(availableResponse.data) && availableResponse.data.length > 0) {
+        const firstEditor = this.parseEditorRecord(availableResponse.data[0]);
+        if (firstEditor?.type) {
+          targets.push({
+            type: firstEditor.type,
+            label: this.getEditorLabel(firstEditor.type, firstEditor.name),
+          });
+        }
+      }
+
+      this.editorTargets.set(targets);
+      this.hasLoadedEditorTargets = true;
+    } finally {
+      this.isLoadingEditors.set(false);
+    }
+  }
+
+  private parseEditorRecord(value: unknown): { type: string; name?: string } | null {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    const type = record['type'];
+    if (typeof type !== 'string' || type.length === 0) {
+      return null;
+    }
+
+    return {
+      type,
+      name: typeof record['name'] === 'string' ? record['name'] : undefined,
+    };
+  }
+
+  private getEditorLabel(type: string, name?: string): string {
+    if (name) {
+      return name;
+    }
+
+    switch (type) {
+      case 'vscode':
+        return 'VS Code';
+      case 'vscode-insiders':
+        return 'VS Code Insiders';
+      case 'cursor':
+        return 'Cursor';
+      case 'sublime':
+        return 'Sublime Text';
+      case 'notepad++':
+        return 'Notepad++';
+      default:
+        return type.charAt(0).toUpperCase() + type.slice(1);
+    }
   }
 }

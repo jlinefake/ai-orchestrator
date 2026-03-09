@@ -7,8 +7,9 @@ import { EventEmitter } from 'events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexCliAdapter } from './codex-cli-adapter';
 
-type MockChildProcess = ChildProcess & EventEmitter & {
+type MockChildProcess = Omit<ChildProcess, 'killed'> & EventEmitter & {
   emitClose: (code?: number | null, signal?: string | null) => void;
+  killed: boolean;
   stderr: PassThrough;
   stdin: PassThrough;
   stdout: PassThrough;
@@ -31,7 +32,7 @@ function createMockProcess(): MockChildProcess {
 }
 
 function queueCodexRun(
-  spawnSpy: ReturnType<typeof vi.spyOn>,
+  spawnSpy: { mockReturnValueOnce(value: ChildProcess): unknown },
   options: {
     code?: number;
     stderrLines?: string[];

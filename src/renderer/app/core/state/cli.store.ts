@@ -16,6 +16,37 @@ export interface CliInfo {
 
 export type CliType = 'claude' | 'gemini' | 'codex' | 'copilot';
 
+const BENCHMARK_FALLBACK_CLIS: CliInfo[] = [
+  {
+    name: 'claude',
+    command: 'claude',
+    displayName: 'Claude Code',
+    installed: true,
+    version: 'benchmark',
+  },
+  {
+    name: 'codex',
+    command: 'codex',
+    displayName: 'OpenAI Codex',
+    installed: true,
+    version: 'benchmark',
+  },
+  {
+    name: 'gemini',
+    command: 'gemini',
+    displayName: 'Google Gemini',
+    installed: true,
+    version: 'benchmark',
+  },
+  {
+    name: 'copilot',
+    command: 'copilot',
+    displayName: 'GitHub Copilot',
+    installed: true,
+    version: 'benchmark',
+  },
+];
+
 interface CliState {
   clis: CliInfo[];
   selectedCli: CliType | null;
@@ -109,19 +140,27 @@ export class CliStore {
         }));
       } else {
         console.log('[CliStore] Detection failed or no data:', response);
+        if (this.shouldUseBrowserBenchmarkFallback()) {
+          this.useBrowserBenchmarkFallback();
+        } else {
+          this.state.update((s) => ({
+            ...s,
+            loading: false,
+            initialized: true,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to detect CLIs:', error);
+      if (this.shouldUseBrowserBenchmarkFallback()) {
+        this.useBrowserBenchmarkFallback();
+      } else {
         this.state.update((s) => ({
           ...s,
           loading: false,
           initialized: true,
         }));
       }
-    } catch (error) {
-      console.error('Failed to detect CLIs:', error);
-      this.state.update((s) => ({
-        ...s,
-        loading: false,
-        initialized: true,
-      }));
     }
   }
 
@@ -140,5 +179,25 @@ export class CliStore {
    */
   async refresh(): Promise<void> {
     await this.initialize(true);
+  }
+
+  private shouldUseBrowserBenchmarkFallback(): boolean {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    return params.get('bench') === '1';
+  }
+
+  private useBrowserBenchmarkFallback(): void {
+    console.warn('[CliStore] Using browser benchmark CLI fallback');
+    this.state.update((s) => ({
+      ...s,
+      clis: BENCHMARK_FALLBACK_CLIS,
+      selectedCli: 'claude',
+      loading: false,
+      initialized: true,
+    }));
   }
 }

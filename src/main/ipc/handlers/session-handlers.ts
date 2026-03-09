@@ -29,6 +29,7 @@ import {
   HistoryDeletePayloadSchema,
   HistoryRestorePayloadSchema,
 } from '../../../shared/validation/ipc-schemas';
+import { getConversationHistoryTitle } from '../../../shared/types/history.types';
 import type { ExportedSession } from '../../../shared/types/instance.types';
 import type { InstanceManager } from '../../instance/instance-manager';
 import { getHistoryManager } from '../../history';
@@ -799,6 +800,39 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
     }
   );
 
+  // Archive history entry
+  ipcMain.handle(
+    IPC_CHANNELS.HISTORY_ARCHIVE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<IpcResponse> => {
+      try {
+        const validated = validateIpcPayload(HistoryDeletePayloadSchema, payload, 'HISTORY_ARCHIVE');
+        const archived = await history.archiveEntry(validated.entryId);
+        return {
+          success: archived,
+          error: archived
+            ? undefined
+            : {
+                code: 'HISTORY_NOT_FOUND',
+                message: `History entry ${validated.entryId} not found`,
+                timestamp: Date.now()
+              }
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'HISTORY_ARCHIVE_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
   // Restore conversation as new instance
   // Uses a two-phase approach: try --resume first, fall back to fresh instance
   ipcMain.handle(
@@ -823,7 +857,7 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
 
         const workingDir =
           validated.workingDirectory || data.entry.workingDirectory;
-        const displayName = `${data.entry.displayName} (restored)`;
+        const displayName = getConversationHistoryTitle(data.entry);
         let resumeFailed = false;
 
         // Phase 1: Try to resume the CLI session

@@ -267,26 +267,29 @@ const NAV_GROUPS: NavGroup[] = [
     :host { display: block; }
 
     .sidebar-nav {
-      border-bottom: 1px solid var(--border-color, #2a2a2e);
+      border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+      margin-top: auto;
     }
 
     .nav-toggle {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       width: 100%;
-      padding: 8px 12px;
+      padding: 5px 12px;
       background: none;
       border: none;
       color: var(--text-muted, #9a9aa0);
       cursor: pointer;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      opacity: 0.7;
       transition: all 0.15s ease;
 
       &:hover {
+        opacity: 1;
         color: var(--primary-color, #f59e0b);
         background: rgba(245, 158, 11, 0.04);
       }

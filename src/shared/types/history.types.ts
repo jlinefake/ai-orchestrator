@@ -25,6 +25,9 @@ export interface ConversationHistoryEntry {
   /** When the instance was terminated/ended */
   endedAt: number;
 
+  /** When the thread was archived from the primary workspace index */
+  archivedAt?: number | null;
+
   /** Working directory the instance was running in */
   workingDirectory: string;
 
@@ -59,6 +62,28 @@ export interface ConversationData {
 
   /** All messages from the conversation */
   messages: OutputMessage[];
+}
+
+function normalizeHistoryTitlePart(value: string | null | undefined): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Derive a stable thread title for workspace rails and restored sessions.
+ *
+ * Prefer the first user message so titles stay anchored to the original task
+ * instead of drifting to short follow-up messages like "hi" or "yes".
+ */
+export function getConversationHistoryTitle(
+  entry: Pick<ConversationHistoryEntry, 'displayName' | 'firstUserMessage' | 'lastUserMessage'>
+): string {
+  const candidates = [
+    normalizeHistoryTitlePart(entry.firstUserMessage),
+    normalizeHistoryTitlePart(entry.lastUserMessage),
+    normalizeHistoryTitlePart(entry.displayName),
+  ].filter(Boolean);
+
+  return candidates[0] || 'Untitled thread';
 }
 
 /**

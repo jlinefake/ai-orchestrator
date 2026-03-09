@@ -13,6 +13,7 @@ import type { TodoItem, TodoList, TodoStats, TodoStatus, TodoPriority } from '..
 export class TodoStore implements OnDestroy {
   private ipcService = inject(TodoIpcService);
   private unsubscribe: (() => void) | null = null;
+  private activeLoadRequestId = 0;
 
   // State
   private _currentSessionId = signal<string | null>(null);
@@ -87,6 +88,7 @@ export class TodoStore implements OnDestroy {
   async setSession(sessionId: string | null): Promise<void> {
     if (sessionId === this._currentSessionId()) return;
 
+    this.activeLoadRequestId += 1;
     this._currentSessionId.set(sessionId);
 
     if (!sessionId) {
@@ -101,11 +103,16 @@ export class TodoStore implements OnDestroy {
    * Load TODOs for a session
    */
   async loadTodos(sessionId: string): Promise<void> {
+    const requestId = this.activeLoadRequestId;
     this._loading.set(true);
     this._error.set(null);
 
     try {
       const response = await this.ipcService.todoGetList(sessionId);
+      if (this.isStaleLoad(sessionId, requestId)) {
+        return;
+      }
+
       if (response.success && 'data' in response && response.data) {
         const list = response.data as TodoList;
         this.updateFromList(list);
@@ -114,9 +121,13 @@ export class TodoStore implements OnDestroy {
         this._error.set(errorMsg);
       }
     } catch (err) {
-      this._error.set((err as Error).message);
+      if (!this.isStaleLoad(sessionId, requestId)) {
+        this._error.set((err as Error).message);
+      }
     } finally {
-      this._loading.set(false);
+      if (!this.isStaleLoad(sessionId, requestId)) {
+        this._loading.set(false);
+      }
     }
   }
 
@@ -268,6 +279,11 @@ export class TodoStore implements OnDestroy {
       cancelled: 0,
       percentComplete: 0,
     });
+    this._loading.set(false);
     this._error.set(null);
+  }
+
+  private isStaleLoad(sessionId: string, requestId: number): boolean {
+    return requestId !== this.activeLoadRequestId || sessionId !== this._currentSessionId();
   }
 }

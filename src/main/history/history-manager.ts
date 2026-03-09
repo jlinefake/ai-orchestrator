@@ -220,9 +220,37 @@ export class HistoryManager {
   }
 
   /**
+   * Archive a history entry from the primary project rail without deleting it.
+   */
+  async archiveEntry(entryId: string): Promise<boolean> {
+    const entry = this.index.entries.find((item) => item.id === entryId);
+    if (!entry) {
+      return false;
+    }
+
+    if (entry.archivedAt) {
+      return true;
+    }
+
+    entry.archivedAt = Date.now();
+    this.index.lastUpdated = Date.now();
+    const conversation = await this.loadConversation(entryId);
+    if (conversation) {
+      conversation.entry.archivedAt = entry.archivedAt;
+      await this.saveConversation(entryId, conversation);
+    }
+    await this.saveIndex();
+
+    logger.info('Archived history entry', { entryId });
+    return true;
+  }
+
+  /**
    * Clear all history
    */
   async clearAll(): Promise<void> {
+    await this.createSafetyBackup('clearAll');
+
     // Delete all conversation files
     for (const entry of this.index.entries) {
       const conversationPath = this.getConversationPath(entry.id);
@@ -478,10 +506,50 @@ export class HistoryManager {
     return path.join(this.storageDir, `${entryId}.json.gz`);
   }
 
+  private async createSafetyBackup(reason: 'clearAll'): Promise<string | null> {
+    const files = await fs.promises.readdir(this.storageDir).catch(() => []);
+    const hasConversationFiles = files.some(file => file.endsWith('.json.gz'));
+
+    if (!hasConversationFiles && this.index.entries.length === 0) {
+      return null;
+    }
+
+    const backupDir = path.join(
+      path.dirname(this.storageDir),
+      `${path.basename(this.storageDir)}.bak-${this.formatBackupTimestamp(Date.now())}`
+    );
+
+    await fs.promises.cp(this.storageDir, backupDir, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+
+    logger.info('Created history safety backup', {
+      reason,
+      backupDir,
+      entryCount: this.index.entries.length,
+    });
+
+    return backupDir;
+  }
+
   private ensureStorageDir(): void {
     if (!fs.existsSync(this.storageDir)) {
       fs.mkdirSync(this.storageDir, { recursive: true });
     }
+  }
+
+  private formatBackupTimestamp(timestamp: number): string {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
+    return `${year}${month}${day}-${hours}${minutes}${seconds}-${milliseconds}`;
   }
 
   private truncatePreview(text: string): string {

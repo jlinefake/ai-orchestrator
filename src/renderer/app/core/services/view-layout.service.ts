@@ -11,7 +11,7 @@ export interface ViewLayout {
 }
 
 const DEFAULT_LAYOUT: ViewLayout = {
-  sidebarWidth: 390,
+  sidebarWidth: 320,
   fileExplorerWidth: 260,
 };
 
@@ -37,7 +37,7 @@ export class ViewLayoutService {
 
   /** Update sidebar width with debounced persistence */
   setSidebarWidth(width: number): void {
-    const clamped = Math.max(285, Math.min(600, width));
+    const clamped = Math.max(250, Math.min(460, width));
     this.layout.update(l => ({ ...l, sidebarWidth: clamped }));
     this.debounceSave();
   }
@@ -71,10 +71,13 @@ export class ViewLayoutService {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          sidebarWidth: parsed.sidebarWidth ?? DEFAULT_LAYOUT.sidebarWidth,
-          fileExplorerWidth: parsed.fileExplorerWidth ?? DEFAULT_LAYOUT.fileExplorerWidth,
-        };
+      return {
+        sidebarWidth:
+          parsed.sidebarWidth === 390
+            ? DEFAULT_LAYOUT.sidebarWidth
+            : parsed.sidebarWidth ?? DEFAULT_LAYOUT.sidebarWidth,
+        fileExplorerWidth: parsed.fileExplorerWidth ?? DEFAULT_LAYOUT.fileExplorerWidth,
+      };
       }
 
       // Fall back to individual keys for migration
@@ -82,7 +85,10 @@ export class ViewLayoutService {
       const fileExplorerWidth = localStorage.getItem('file-explorer-width');
 
       return {
-        sidebarWidth: sidebarWidth ? parseInt(sidebarWidth, 10) : DEFAULT_LAYOUT.sidebarWidth,
+        sidebarWidth:
+          sidebarWidth && parseInt(sidebarWidth, 10) !== 390
+            ? parseInt(sidebarWidth, 10)
+            : DEFAULT_LAYOUT.sidebarWidth,
         fileExplorerWidth: fileExplorerWidth ? parseInt(fileExplorerWidth, 10) : DEFAULT_LAYOUT.fileExplorerWidth,
       };
     } catch {

@@ -4,6 +4,7 @@
  */
 
 import { ipcMain, IpcMainInvokeEvent } from 'electron';
+import { z } from 'zod';
 import { IPC_CHANNELS, IpcResponse } from '../../../shared/types/ipc.types';
 import {
   validateIpcPayload,
@@ -32,6 +33,9 @@ export function registerFileHandlers(deps: {
   // ============================================
 
   const editorManager = getExternalEditorManager();
+  const editorSetDefaultPayloadSchema = z.object({
+    editorId: z.string().min(1).max(200),
+  });
 
   // Detect available editors
   ipcMain.handle(
@@ -162,6 +166,44 @@ export function registerFileHandlers(deps: {
     }
   );
 
+  // Set default editor (legacy alias for preferred editor)
+  ipcMain.handle(
+    IPC_CHANNELS.EDITOR_SET_DEFAULT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<IpcResponse> => {
+      try {
+        const validated = validateIpcPayload(editorSetDefaultPayloadSchema, payload, 'EDITOR_SET_DEFAULT');
+        const availableEditors = await editorManager.detectEditors();
+        const selectedEditor = availableEditors.find((editor) =>
+          editor.type === validated.editorId ||
+          editor.name === validated.editorId ||
+          editor.path === validated.editorId
+        );
+
+        if (!selectedEditor) {
+          throw new Error(`Editor not found: ${validated.editorId}`);
+        }
+
+        editorManager.setPreferredEditor({
+          type: selectedEditor.type,
+          path: selectedEditor.path,
+        });
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'EDITOR_SET_DEFAULT_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
   // Get preferred editor
   ipcMain.handle(
     IPC_CHANNELS.EDITOR_GET_PREFERRED,
@@ -174,6 +216,26 @@ export function registerFileHandlers(deps: {
           success: false,
           error: {
             code: 'EDITOR_GET_PREFERRED_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // Get default editor (legacy alias for preferred editor)
+  ipcMain.handle(
+    IPC_CHANNELS.EDITOR_GET_DEFAULT,
+    async (): Promise<IpcResponse> => {
+      try {
+        const editor = editorManager.getPreferredEditor();
+        return { success: true, data: editor };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'EDITOR_GET_DEFAULT_FAILED',
             message: (error as Error).message,
             timestamp: Date.now()
           }

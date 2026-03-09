@@ -10,13 +10,15 @@ import {
   OnDestroy,
   signal,
   computed,
-  HostListener
+  HostListener,
+  effect
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { InstanceStore } from '../../core/state/instance.store';
 import { CliStore } from '../../core/state/cli.store';
 import { SettingsStore } from '../../core/state/settings.store';
 import { AgentStore } from '../../core/state/agent.store';
+import { ElectronIpcService } from '../../core/services/ipc/electron-ipc.service';
 import { KeybindingService } from '../../core/services/keybinding.service';
 import { ViewLayoutService } from '../../core/services/view-layout.service';
 import { InstanceListComponent } from '../instance-list/instance-list.component';
@@ -26,12 +28,11 @@ import { SettingsComponent } from '../settings/settings.component';
 import { HistorySidebarComponent } from '../history/history-sidebar.component';
 import { CommandPaletteComponent } from '../commands/command-palette.component';
 import { FileExplorerComponent } from '../file-explorer/file-explorer.component';
-import { ProviderType } from '../providers/provider-selector.component';
-import { CopilotModelSelectorComponent } from '../providers/copilot-model-selector.component';
 import { ProviderStateService } from '../../core/services/provider-state.service';
 import { SidebarHeaderComponent } from './sidebar-header.component';
 import { SidebarNavComponent } from './sidebar-nav.component';
 import { SidebarFooterComponent } from './sidebar-footer.component';
+import { BrowserPreviewNoticeComponent } from './browser-preview-notice.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -44,10 +45,10 @@ import { SidebarFooterComponent } from './sidebar-footer.component';
     HistorySidebarComponent,
     CommandPaletteComponent,
     FileExplorerComponent,
-    CopilotModelSelectorComponent,
     SidebarHeaderComponent,
     SidebarNavComponent,
-    SidebarFooterComponent
+    SidebarFooterComponent,
+    BrowserPreviewNoticeComponent
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
@@ -59,6 +60,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   cliStore = inject(CliStore);
   settingsStore = inject(SettingsStore);
   agentStore = inject(AgentStore);
+  private electronIpc = inject(ElectronIpcService);
   keybindingService = inject(KeybindingService);
   private viewLayoutService = inject(ViewLayoutService);
   private providerState = inject(ProviderStateService);
@@ -66,7 +68,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   showSettings = signal(false);
   showHistory = signal(false);
   showCommandPalette = signal(false);
+  showControlPlane = signal(false);
   showSidebar = signal(true);
+  showFileExplorer = signal(false);
   // Use shared provider state so instance-detail can access it
   selectedProvider = this.providerState.selectedProvider;
   selectedModel = this.providerState.selectedModel;
@@ -77,10 +81,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
     return instance?.workingDirectory || null;
   });
 
-  // Computed: show Copilot model selector when Copilot is selected and no active instance
-  showCopilotModelSelector = computed(() => {
-    return this.selectedProvider() === 'copilot' && !this.store.selectedInstance();
+  isBenchmarkMode = computed(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    return new URLSearchParams(window.location.search).get('bench') === '1';
   });
+
+  canShowFileExplorer = computed(() =>
+    !!this.store.selectedInstance() && !this.isBenchmarkMode()
+  );
+
+  showBrowserPreview = computed(() =>
+    !this.electronIpc.isElectron && !this.isBenchmarkMode()
+  );
 
   // Sidebar resize state - using ViewLayoutService for persistence
   sidebarWidth = signal(this.viewLayoutService.sidebarWidth);
@@ -89,6 +104,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private resizeStartWidth = 0;
 
   private keybindingCleanup: (() => void)[] = [];
+
+  constructor() {
+    effect(() => {
+      if (!this.canShowFileExplorer()) {
+        this.showFileExplorer.set(false);
+      }
+    });
+  }
 
   onResizeStart(event: MouseEvent): void {
     event.preventDefault();
@@ -103,7 +126,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     const delta = event.clientX - this.resizeStartX;
     const newWidth = Math.max(
-      285,
+      260,
       Math.min(600, this.resizeStartWidth + delta)
     );
     this.sidebarWidth.set(newWidth);
@@ -121,7 +144,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     // Initialize settings first, then CLI detection
     this.settingsStore.initialize().then(() => {
-      this.cliStore.initialize();
+      if (!this.showBrowserPreview()) {
+        this.cliStore.initialize();
+      }
     });
 
     // Register keybinding handlers
@@ -254,20 +279,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  onProviderSelected(provider: ProviderType): void {
-    this.providerState.setProvider(provider);
-  }
-
-  onModelSelected(model: string): void {
-    this.providerState.setModel(model);
-  }
-
   closeAllInstances(): void {
     this.store.terminateAllInstances();
   }
 
-  navigateToVerification(): void {
-    this.router.navigate(['/verification']);
+  toggleControlPlane(): void {
+    this.showControlPlane.update((open) => !open);
+  }
+
+  toggleFileExplorer(): void {
+    if (!this.canShowFileExplorer()) {
+      this.showFileExplorer.set(false);
+      return;
+    }
+
+    this.showFileExplorer.update((open) => !open);
   }
 
   openRlm(): void {

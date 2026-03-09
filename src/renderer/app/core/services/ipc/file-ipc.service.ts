@@ -159,6 +159,13 @@ export class FileIpcService {
   // ============================================
 
   /**
+   * Detect available editors and refresh the preferred editor choice
+   */
+  async editorDetect(): Promise<IpcResponse> {
+    return this.base.invoke('editor:detect');
+  }
+
+  /**
    * Open file in external editor
    */
   async editorOpen(
@@ -167,6 +174,13 @@ export class FileIpcService {
   ): Promise<IpcResponse> {
     if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
     return this.api.editorOpen(filePath, options);
+  }
+
+  /**
+   * Open a directory in the configured editor
+   */
+  async editorOpenDirectory(dirPath: string): Promise<IpcResponse> {
+    return this.base.invoke('editor:open-directory', { dirPath });
   }
 
   /**

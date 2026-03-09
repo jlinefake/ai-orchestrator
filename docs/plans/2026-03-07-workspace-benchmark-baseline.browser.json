@@ -1,0 +1,75 @@
+{
+  "date": "2026-03-07",
+  "environment": {
+    "mode": "renderer-browser-harness",
+    "url": "http://localhost:4567/?bench=1",
+    "runner": "Playwright MCP",
+    "command": "window.__workspaceBench.runWorkspaceBaseline('heavy-markdown', 12)"
+  },
+  "budgets": [
+    {
+      "metric": "thread-switch",
+      "target": 120,
+      "actual": 488.20000000298023,
+      "unit": "ms (p95)"
+    },
+    {
+      "metric": "transcript-paint",
+      "target": 200,
+      "actual": 484.40000000596046,
+      "unit": "ms (p95)"
+    }
+  ],
+  "summaries": [
+    {
+      "metric": "markdown-render",
+      "count": 175,
+      "min": 0,
+      "max": 13.400000005960464,
+      "mean": 1.6822857144900731,
+      "p50": 0.5999999940395355,
+      "p95": 6.700000002980232,
+      "p99": 13
+    },
+    {
+      "metric": "display-items-compute",
+      "count": 25,
+      "min": 0,
+      "max": 245.70000000298023,
+      "mean": 12.663999997973441,
+      "p50": 0.10000000894069672,
+      "p95": 56.400000005960464,
+      "p99": 245.70000000298023
+    },
+    {
+      "metric": "transcript-paint",
+      "count": 25,
+      "min": 39.30000001192093,
+      "max": 523.5,
+      "mean": 157.37199999928475,
+      "p50": 102.29999999701977,
+      "p95": 484.40000000596046,
+      "p99": 523.5
+    },
+    {
+      "metric": "thread-switch",
+      "count": 25,
+      "min": 39.8999999910593,
+      "max": 523.7000000029802,
+      "mean": 157.76,
+      "p50": 102.59999999403954,
+      "p95": 488.20000000298023,
+      "p99": 523.7000000029802
+    },
+    {
+      "metric": "scroll-frame",
+      "count": 48,
+      "min": 3.2999999970197678,
+      "max": 537.2000000029802,
+      "mean": 122.4000000000621,
+      "p50": 78.70000000298023,
+      "p95": 524.9000000059605,
+      "p99": 537.2000000029802
+    }
+  ]
+}

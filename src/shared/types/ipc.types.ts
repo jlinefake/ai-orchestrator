@@ -111,6 +111,7 @@ export const IPC_CHANNELS = {
   // History operations
   HISTORY_LIST: 'history:list',
   HISTORY_LOAD: 'history:load',
+  HISTORY_ARCHIVE: 'history:archive',
   HISTORY_DELETE: 'history:delete',
   HISTORY_RESTORE: 'history:restore',
   HISTORY_CLEAR: 'history:clear',

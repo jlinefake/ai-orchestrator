@@ -38,6 +38,14 @@ export class HistoryIpcService {
   }
 
   /**
+   * Archive a history entry
+   */
+  async archiveHistoryEntry(entryId: string): Promise<IpcResponse> {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.archiveHistoryEntry(entryId);
+  }
+
+  /**
    * Delete a history entry
    */
   async deleteHistoryEntry(entryId: string): Promise<IpcResponse> {

@@ -45,6 +45,16 @@ function toPosixPath(value: string): string {
   return value.split(path.sep).join('/');
 }
 
+function getHomeDir(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require('electron');
+    return app.getPath('home');
+  } catch {
+    return process.env['HOME'] || process.env['USERPROFILE'] || '';
+  }
+}
+
 function dedupePreserveOrder(values: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -195,7 +205,7 @@ async function discoverInstructionDescriptors(
   projectRoot: string,
   customPaths: string[],
 ): Promise<InstructionSourceDescriptor[]> {
-  const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '';
+  const homeDir = getHomeDir();
   const descriptors: InstructionSourceDescriptor[] = [];
 
   if (homeDir) {

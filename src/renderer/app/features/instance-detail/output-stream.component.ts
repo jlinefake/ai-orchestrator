@@ -22,20 +22,26 @@ import { OutputMessage } from '../../core/state/instance.store';
 import type { ThinkingContent } from '../../../../shared/types/instance.types';
 import { MarkdownService } from '../../core/services/markdown.service';
 import { ElectronIpcService } from '../../core/services/ipc';
+import { PerfInstrumentationService } from '../../core/services/perf-instrumentation.service';
 import { MessageAttachmentsComponent } from '../../shared/components/message-attachments/message-attachments.component';
 import { ThoughtProcessComponent } from '../../shared/components/thought-process/thought-process.component';
 import { ToolGroupComponent } from '../../shared/components/tool-group/tool-group.component';
+
+type RenderedMarkdown = ReturnType<MarkdownService['render']>;
 
 /**
  * Represents a grouped display item - either a single message, a group of thinking messages,
  * or a group of consecutive tool use/result messages.
  */
 interface DisplayItem {
+  id: string; // Stable row ID for @for tracking (F4)
   type: 'message' | 'thought-group' | 'tool-group';
   message?: OutputMessage;
+  renderedMessage?: RenderedMarkdown;
   thoughts?: string[];  // Legacy support
   thinking?: ThinkingContent[]; // Structured thinking content
   response?: OutputMessage;
+  renderedResponse?: RenderedMarkdown;
   timestamp?: number;
   toolMessages?: OutputMessage[]; // For tool-group: consecutive tool_use/tool_result messages
   repeatCount?: number; // For collapsed consecutive identical messages
@@ -48,7 +54,7 @@ interface DisplayItem {
   imports: [DatePipe, MessageAttachmentsComponent, ThoughtProcessComponent, ToolGroupComponent],
   template: `
     <div class="output-stream" #container>
-      @for (item of displayItems(); track $index) {
+      @for (item of displayItems(); track item.id) {
         @if (item.type === 'thought-group') {
           <!-- Thought group with collapsible thinking section -->
           <!-- Only render thought-group if there's something to display -->
@@ -114,7 +120,7 @@ interface DisplayItem {
                 <div class="message-content">
                   <div
                     class="markdown-content"
-                    [innerHTML]="renderMarkdown(item.response.content)"
+                    [innerHTML]="item.renderedResponse"
                   ></div>
                   @if (
                     item.response.attachments &&
@@ -210,7 +216,7 @@ interface DisplayItem {
                 } @else {
                   <div
                     class="markdown-content"
-                    [innerHTML]="renderMarkdown(item.message.content)"
+                    [innerHTML]="item.renderedMessage"
                   ></div>
                 }
                 @if (
@@ -265,43 +271,53 @@ interface DisplayItem {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
-        padding: var(--spacing-md);
-        background: var(--bg-secondary);
-        border-radius: var(--radius-md);
+        padding: 4px;
+        background: transparent;
+        border-radius: 22px;
         display: flex;
         flex-direction: column;
-        gap: var(--spacing-md);
+        gap: 8px;
         position: relative;
       }
 
       .message {
-        padding: var(--spacing-md);
-        border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
+        width: min(100%, 920px);
+        padding: 12px 14px;
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+          rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        content-visibility: auto;
+        contain-intrinsic-size: auto 80px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
       }
 
       /* Continuation messages from the same sender — tighter spacing, no top radius */
       .message.continuation {
-        margin-top: calc(-1 * var(--spacing-md) + var(--spacing-xs));
-        border-top-left-radius: var(--radius-sm);
-        border-top-right-radius: var(--radius-sm);
-        padding-top: var(--spacing-sm);
+        margin-top: -6px;
+        border-top-left-radius: 12px;
+        border-top-right-radius: 12px;
+        padding-top: 9px;
       }
 
       .message-user {
-        background: var(--primary-color);
-        color: #1a1a1a;
-        margin-left: var(--spacing-xl);
+        margin-left: auto;
+        background:
+          linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.12)),
+          rgba(255, 255, 255, 0.03);
+        border-color: rgba(var(--primary-rgb), 0.24);
+        color: var(--text-primary);
 
         .message-type,
         .message-time {
-          color: rgba(26, 26, 26, 0.7);
+          color: rgba(243, 239, 229, 0.6);
         }
 
         .markdown-content {
-          color: #1a1a1a;
+          color: var(--text-primary);
 
-          /* Ensure all text elements are black on orange */
+          /* Ensure all text elements inherit the calmer user tint */
           h1,
           h2,
           h3,
@@ -314,42 +330,42 @@ interface DisplayItem {
           em,
           b,
           i {
-            color: #1a1a1a;
+            color: inherit;
           }
 
           ul,
           ol {
-            color: #1a1a1a;
+            color: inherit;
           }
 
           li::marker {
-            color: #1a1a1a;
+            color: rgba(243, 239, 229, 0.72);
           }
 
           a {
-            color: #1a1a1a;
+            color: var(--text-primary);
             text-decoration: underline;
             font-weight: 600;
 
             &:hover {
-              background: rgba(0, 0, 0, 0.1);
+              background: rgba(255, 255, 255, 0.08);
               border-radius: 2px;
             }
           }
 
           .inline-code {
-            background: rgba(0, 0, 0, 0.12);
-            color: #1a1a1a;
-            border-color: rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            color: inherit;
+            border-color: rgba(255, 255, 255, 0.1);
           }
         }
 
         .copy-message-btn {
-          color: rgba(26, 26, 26, 0.6);
+          color: rgba(243, 239, 229, 0.52);
 
           &:hover {
-            color: #1a1a1a;
-            background: rgba(0, 0, 0, 0.1);
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
           }
         }
       }
@@ -384,12 +400,11 @@ interface DisplayItem {
       }
 
       .message-assistant {
-        background: var(--bg-tertiary);
-        margin-right: var(--spacing-xl);
+        margin-right: auto;
       }
 
       .message-system {
-        background: var(--info-bg);
+        background: rgba(var(--info-rgb), 0.08);
         font-size: 13px;
         color: var(--info-color);
       }
@@ -401,8 +416,8 @@ interface DisplayItem {
 
       .message-tool_use,
       .message-tool_result {
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
+        background: rgba(6, 10, 9, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.05);
         font-size: 12px;
       }
 
@@ -420,20 +435,21 @@ interface DisplayItem {
         display: flex;
         align-items: center;
         gap: var(--spacing-sm);
-        margin-bottom: var(--spacing-xs);
-        font-size: 12px;
+        margin-bottom: 8px;
+        font-size: 10px;
       }
 
       .message-type {
         text-transform: uppercase;
         font-weight: 600;
-        letter-spacing: 0.05em;
-        opacity: 0.7;
+        letter-spacing: 0.12em;
+        opacity: 0.58;
+        font-family: var(--font-mono);
       }
 
       .message-time {
         font-family: var(--font-mono);
-        opacity: 0.5;
+        opacity: 0.45;
         margin-left: auto;
       }
 
@@ -480,7 +496,7 @@ interface DisplayItem {
       }
 
       .message-content {
-        line-height: 1.6;
+        line-height: 1.62;
         font-size: var(--output-font-size, 14px);
       }
 
@@ -492,6 +508,9 @@ interface DisplayItem {
         height: 100%;
         color: var(--text-secondary);
         text-align: center;
+        border: 1px dashed rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.02);
       }
 
       .empty-stream .hint {
@@ -504,7 +523,10 @@ interface DisplayItem {
         display: flex;
         flex-direction: column;
         gap: var(--spacing-sm);
-        margin-right: var(--spacing-xl);
+        width: min(100%, 920px);
+        margin-right: auto;
+        content-visibility: auto;
+        contain-intrinsic-size: auto 120px;
       }
 
       .thought-group .message-assistant {
@@ -531,8 +553,8 @@ interface DisplayItem {
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
+        background: rgba(12, 18, 17, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         color: var(--text-secondary);
         cursor: pointer;
         display: flex;
@@ -544,11 +566,11 @@ interface DisplayItem {
         flex-shrink: 0;
 
         &:hover {
-          background: var(--primary-color);
-          border-color: var(--primary-color);
+          background: rgba(var(--primary-rgb), 0.92);
+          border-color: rgba(var(--primary-rgb), 0.92);
           color: var(--bg-primary);
-          transform: scale(1.1);
-          box-shadow: 0 6px 16px rgba(var(--primary-rgb), 0.3);
+          transform: scale(1.05);
+          box-shadow: 0 10px 20px rgba(var(--primary-rgb), 0.24);
         }
 
         svg {
@@ -560,7 +582,7 @@ interface DisplayItem {
         display: flex;
         align-items: center;
         gap: var(--spacing-md);
-        padding: var(--spacing-sm) 0;
+        padding: 6px 0;
         user-select: none;
       }
 
@@ -607,6 +629,7 @@ export class OutputStreamComponent {
 
   private markdownService = inject(MarkdownService);
   private ipc = inject(ElectronIpcService);
+  private perf = inject(PerfInstrumentationService);
 
   /**
    * Shows all messages, consolidating streaming messages with the same ID.
@@ -614,6 +637,7 @@ export class OutputStreamComponent {
    * We display only the accumulated content for streaming messages.
    */
   displayItems = computed<DisplayItem[]>(() => {
+    const startTime = performance.now();
     const messages = this.messages();
     const items: DisplayItem[] = [];
     const seenStreamingIds = new Set<string>();
@@ -653,6 +677,7 @@ export class OutputStreamComponent {
           : msg.content;
 
         items.push({
+          id: `stream-${msg.id}`,
           type: 'message',
           message: {
             ...msg,
@@ -665,6 +690,7 @@ export class OutputStreamComponent {
         if (msg.thinking && msg.thinking.length > 0 && msg.type === 'assistant') {
           // Create a thought-group item with thinking and response
           items.push({
+            id: `thought-${msg.id}`,
             type: 'thought-group',
             thinking: msg.thinking,
             thoughts: msg.thinking.map(t => t.content), // Legacy compat
@@ -674,6 +700,7 @@ export class OutputStreamComponent {
         } else {
           // Regular message without thinking
           items.push({
+            id: `msg-${msg.id}`,
             type: 'message',
             message: msg
           });
@@ -688,6 +715,7 @@ export class OutputStreamComponent {
     const flushToolBuffer = () => {
       if (toolBuffer.length > 0) {
         grouped.push({
+          id: `tools-${toolBuffer[0].id}`,
           type: 'tool-group',
           toolMessages: [...toolBuffer],
           timestamp: toolBuffer[0].timestamp
@@ -751,6 +779,11 @@ export class OutputStreamComponent {
       }
     }
 
+    this.populateRenderedMarkdown(deduped);
+
+    const duration = performance.now() - startTime;
+    this.perf.recordDisplayItemsCompute(messages.length, deduped.length, duration);
+
     return deduped;
   });
 
@@ -770,24 +803,28 @@ export class OutputStreamComponent {
         this.userScrolledUp = false;
         this.showScrollToBottom.set(false);
 
-        // Restore scroll position for the new instance (if we have one saved)
-        setTimeout(() => {
+        // Perf: measure thread switch time and transcript paint
+        const stopSwitch = this.perf.markThreadSwitch(this.previousInstanceId, currentInstanceId);
+        const stopPaint = this.perf.markTranscriptPaint(currentInstanceId, this.messages().length);
+
+        // Restore scroll position for the new instance using rAF for frame alignment
+        requestAnimationFrame(() => {
           const savedPosition = this.scrollPositions.get(currentInstanceId);
           const containerEl = this.container()?.nativeElement;
           if (containerEl) {
             if (savedPosition !== undefined) {
               containerEl.scrollTop = savedPosition;
-              // Check if we should show scroll to bottom button
               const scrollPosition = containerEl.scrollTop + containerEl.clientHeight;
               const scrollHeight = containerEl.scrollHeight;
               this.userScrolledUp = scrollPosition < scrollHeight - 100;
               this.showScrollToBottom.set(scrollPosition < scrollHeight - 50);
             } else {
-              // No saved position - scroll to bottom for new instances
               containerEl.scrollTop = containerEl.scrollHeight;
             }
           }
-        }, 0);
+          stopPaint();
+          stopSwitch();
+        });
 
         this.previousInstanceId = currentInstanceId;
       }
@@ -798,25 +835,18 @@ export class OutputStreamComponent {
       const msgs = this.messages();
       const el = this.container()?.nativeElement;
       if (el && msgs.length > 0) {
-        // Use setTimeout to ensure DOM is updated
-        setTimeout(() => {
+        requestAnimationFrame(() => {
           if (!this.userScrolledUp) {
             el.scrollTop = el.scrollHeight;
           }
-        }, 0);
+        });
       }
     });
 
-    // Setup scroll listener and copy handlers after render
+    // Setup scroll listener and delegated click handler after render
     afterNextRender(() => {
-      this.setupCopyHandlers();
+      this.setupDelegatedClickHandler();
       this.setupScrollListener();
-    });
-
-    // Re-setup copy handlers when messages change
-    effect(() => {
-      this.messages(); // Track message changes
-      setTimeout(() => this.setupCopyHandlers(), 100);
     });
   }
 
@@ -827,18 +857,27 @@ export class OutputStreamComponent {
     const el = this.container()?.nativeElement;
     if (!el) return;
 
+    let lastScrollTime = 0;
+
     el.addEventListener('scroll', () => {
+      // Measure scroll frame timing for perf budget
+      const now = performance.now();
+      if (lastScrollTime > 0) {
+        this.perf.recordScrollFrame(this.instanceId(), now - lastScrollTime, this.messages().length);
+      }
+      lastScrollTime = now;
+
       const scrollPosition = el.scrollTop + el.clientHeight;
       const scrollHeight = el.scrollHeight;
-      const autoScrollThreshold = 100; // Consider "at bottom" for auto-scroll if within 100px
-      const buttonShowThreshold = 50; // Show button after scrolling up just 50px
+      const autoScrollThreshold = 100;
+      const buttonShowThreshold = 50;
 
       const isAtBottom = scrollPosition >= scrollHeight - autoScrollThreshold;
       const shouldShowButton = scrollPosition < scrollHeight - buttonShowThreshold;
 
       this.userScrolledUp = !isAtBottom;
       this.showScrollToBottom.set(shouldShowButton);
-    });
+    }, { passive: true });
   }
 
   /**
@@ -857,14 +896,37 @@ export class OutputStreamComponent {
   }
 
   /**
-   * Setup click handlers for copy buttons and file paths
+   * Setup a single delegated click handler on the container for copy buttons and file paths.
+   * This replaces per-element querySelectorAll scanning that ran every 100ms.
    */
-  private setupCopyHandlers(): void {
+  private setupDelegatedClickHandler(): void {
     const el = this.container()?.nativeElement;
-    if (el) {
-      this.markdownService.setupCopyHandlers(el);
-      this.markdownService.setupFilePathHandlers(el, (filePath) => this.onFilePathClick(filePath));
-    }
+    if (!el) return;
+
+    el.addEventListener('click', (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+
+      // Check for copy button clicks (walk up to find button with data-copy-id)
+      const copyButton = target.closest('[data-copy-id]') as HTMLElement | null;
+      if (copyButton) {
+        const copyId = copyButton.getAttribute('data-copy-id');
+        if (copyId) {
+          this.markdownService.handleCopyClick(copyId);
+        }
+        return;
+      }
+
+      // Check for file path clicks
+      const filePathEl = target.closest('[data-file-path]') as HTMLElement | null;
+      if (filePathEl) {
+        event.preventDefault();
+        event.stopPropagation();
+        const filePath = filePathEl.getAttribute('data-file-path');
+        if (filePath) {
+          this.onFilePathClick(filePath);
+        }
+      }
+    });
   }
 
   /**
@@ -991,29 +1053,59 @@ export class OutputStreamComponent {
     return message.content || '';
   }
 
-  // Memoization cache for rendered markdown - prevents re-rendering on every CD cycle
-  private markdownCache = new Map<string, ReturnType<MarkdownService['render']>>();
-  private readonly MAX_CACHE_SIZE = 100;
+  private populateRenderedMarkdown(items: DisplayItem[]): void {
+    for (const item of items) {
+      item.renderedMessage = undefined;
+      item.renderedResponse = undefined;
 
-  renderMarkdown(content: string): ReturnType<MarkdownService['render']> {
+      if (item.type === 'message' && item.message) {
+        const isToolMessage = item.message.type === 'tool_use' || item.message.type === 'tool_result';
+        if (!isToolMessage && !this.isCompactionBoundary(item.message) && this.hasContent(item.message)) {
+          item.renderedMessage = this.renderMarkdownContent(item.message.content, item.message.id);
+        }
+      }
+
+      if (item.type === 'thought-group' && item.response && this.hasContent(item.response)) {
+        item.renderedResponse = this.renderMarkdownContent(item.response.content, item.response.id);
+      }
+    }
+  }
+
+  // LRU markdown cache - bounded at MAX_CACHE_SIZE entries, MAX_CACHEABLE_LENGTH content size
+  // Keyed by messageId to avoid cache pollution from streaming intermediate strings
+  private markdownCache = new Map<string, { content: string; rendered: RenderedMarkdown }>();
+  private readonly MAX_CACHE_SIZE = 200;
+  private readonly MAX_CACHEABLE_LENGTH = 50_000; // Skip caching very large content
+  private renderMarkdownContent(content: string, messageId?: string): RenderedMarkdown {
     if (!content) return '';
 
-    // Check cache first
-    const cached = this.markdownCache.get(content);
-    if (cached !== undefined) {
-      return cached;
+    const cacheKey = messageId || content;
+
+    // Check cache first — LRU: delete and re-insert to move to end
+    const cached = this.markdownCache.get(cacheKey);
+    if (cached !== undefined && cached.content === content) {
+      this.markdownCache.delete(cacheKey);
+      this.markdownCache.set(cacheKey, cached);
+      return cached.rendered;
     }
 
-    // Render and cache
+    // Render with perf measurement
+    const renderStart = performance.now();
     const rendered = this.markdownService.render(content);
+    this.perf.recordMarkdownRender(content.length, performance.now() - renderStart);
 
-    // Manage cache size - remove oldest entries if too large
-    if (this.markdownCache.size >= this.MAX_CACHE_SIZE) {
-      const firstKey = this.markdownCache.keys().next().value;
-      if (firstKey) this.markdownCache.delete(firstKey);
+    // Cache using messageId key — avoids pollution from intermediate streaming strings.
+    // Skip caching very large content.
+    if (content.length <= this.MAX_CACHEABLE_LENGTH) {
+      // Evict oldest (first) entries if at capacity
+      while (this.markdownCache.size >= this.MAX_CACHE_SIZE) {
+        const firstKey = this.markdownCache.keys().next().value;
+        if (firstKey) this.markdownCache.delete(firstKey);
+        else break;
+      }
+      this.markdownCache.set(cacheKey, { content, rendered });
     }
 
-    this.markdownCache.set(content, rendered);
     return rendered;
   }
 
