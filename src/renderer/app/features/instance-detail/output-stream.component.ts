@@ -54,6 +54,8 @@ interface RenderedDisplayItem extends DisplayItem {
                     [thinkingBlocks]="item.thinking"
                     [label]="getThoughtLabel(item.thoughts || [])"
                     [defaultExpanded]="thinkingDefaultExpanded()"
+                    [instanceId]="instanceId()"
+                    [itemId]="item.id"
                   />
                 }
               }
@@ -124,7 +126,7 @@ interface RenderedDisplayItem extends DisplayItem {
           }
         } @else if (item.type === 'tool-group' && item.toolMessages) {
           <!-- Grouped tool calls in collapsible accordion -->
-          <app-tool-group [toolMessages]="item.toolMessages" />
+          <app-tool-group [toolMessages]="item.toolMessages" [instanceId]="instanceId()" [itemId]="item.id" />
         } @else if (item.message) {
           <!-- Regular message -->
           @if (isCompactionBoundary(item.message)) {

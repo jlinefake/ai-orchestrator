@@ -7,8 +7,9 @@
  * Supports both legacy string[] thoughts and structured ThinkingContent blocks.
  */
 
-import { Component, input, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import type { ThinkingContent } from '../../../../../shared/types/instance.types';
+import { ExpansionStateService } from '../../../features/instance-detail/expansion-state.service';
 
 @Component({
   selector: 'app-thought-process',
@@ -160,8 +161,12 @@ export class ThoughtProcessComponent {
 
   label = input<string>('Thought process');
   defaultExpanded = input<boolean>(false);
+  instanceId = input<string>('');
+  itemId = input<string>('');
 
-  isExpanded = signal(false);
+  private expansionState = inject(ExpansionStateService);
+
+  isExpanded = computed(() => this.expansionState.isExpanded(this.instanceId(), this.itemId()));
 
   /**
    * Computed label that auto-generates from first thinking block if no custom label
@@ -192,12 +197,14 @@ export class ThoughtProcessComponent {
   constructor() {
     // Initialize expanded state from input
     setTimeout(() => {
-      this.isExpanded.set(this.defaultExpanded());
+      if (this.defaultExpanded() && this.instanceId() && this.itemId()) {
+        this.expansionState.setExpanded(this.instanceId(), this.itemId(), true);
+      }
     });
   }
 
   toggle(): void {
-    this.isExpanded.update(v => !v);
+    this.expansionState.toggleExpanded(this.instanceId(), this.itemId());
   }
 
   /**

@@ -5,9 +5,10 @@
  * reducing visual noise in the conversation stream.
  */
 
-import { Component, input, signal, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import type { OutputMessage } from '../../../core/state/instance.store';
+import { ExpansionStateService } from '../../../features/instance-detail/expansion-state.service';
 
 @Component({
   selector: 'app-tool-group',
@@ -169,8 +170,12 @@ import type { OutputMessage } from '../../../core/state/instance.store';
 })
 export class ToolGroupComponent {
   toolMessages = input.required<OutputMessage[]>();
+  instanceId = input<string>('');
+  itemId = input<string>('');
 
-  isExpanded = signal(false);
+  private expansionState = inject(ExpansionStateService);
+
+  isExpanded = computed(() => this.expansionState.isExpanded(this.instanceId(), this.itemId()));
 
   /**
    * Summary label showing tool names, e.g. "Tool calls: Read, Bash, Edit (6)"
@@ -219,7 +224,7 @@ export class ToolGroupComponent {
   });
 
   toggle(): void {
-    this.isExpanded.update(v => !v);
+    this.expansionState.toggleExpanded(this.instanceId(), this.itemId());
   }
 
   getToolName(message: OutputMessage): string {
