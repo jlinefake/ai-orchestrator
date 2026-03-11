@@ -204,11 +204,10 @@ export class DisplayItemProcessor {
   }
 
   private getItemTimestamp(item: DisplayItem): number | null {
-    if (item.type === 'message' && item.message) return item.message.timestamp;
     if (item.timestamp) return item.timestamp;
-    if (item.type === 'tool-group' && item.toolMessages?.[0]) {
-      return item.toolMessages[0].timestamp;
-    }
+    if (item.type === 'message' && item.message) return item.message.timestamp;
+    if (item.response) return item.response.timestamp;
+    if (item.type === 'tool-group' && item.toolMessages?.[0]) return item.toolMessages[0].timestamp;
     return null;
   }
 }

@@ -100,4 +100,44 @@ describe('DisplayItemProcessor', () => {
     processor.process([msg1, msg2]);
     expect(processor.newItemCount).toBe(1);
   });
+
+  it('should handle first-time streaming messages', () => {
+    const msg = makeMsg({
+      id: 'stream1',
+      metadata: { streaming: true, accumulatedContent: 'Hello world' },
+    });
+    const items = processor.process([msg]);
+    expect(items.length).toBe(1);
+    expect(items[0].type).toBe('message');
+    expect(items[0].message?.content).toBe('Hello world');
+  });
+
+  it('should update existing streaming message on duplicate', () => {
+    const msg1 = makeMsg({
+      id: 'stream1',
+      content: 'Hel',
+      metadata: { streaming: true, accumulatedContent: 'Hel' },
+    });
+    processor.process([msg1]);
+
+    const msg2 = makeMsg({
+      id: 'stream1',
+      content: 'Hello world',
+      metadata: { streaming: true, accumulatedContent: 'Hello world' },
+    });
+    const items = processor.process([msg1, msg2]);
+    expect(items.length).toBe(1);
+    expect(items[0].message?.content).toBe('Hello world');
+  });
+
+  it('should merge tool messages across process() calls', () => {
+    const toolUse = makeMsg({ type: 'tool_use', id: 'tu1' });
+    processor.process([toolUse]);
+
+    const toolResult = makeMsg({ type: 'tool_result', id: 'tr1' });
+    const items = processor.process([toolUse, toolResult]);
+    expect(items.length).toBe(1);
+    expect(items[0].type).toBe('tool-group');
+    expect(items[0].toolMessages?.length).toBe(2);
+  });
 });
