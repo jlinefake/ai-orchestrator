@@ -21,10 +21,12 @@ function createAssistantMessage(content: string): OutputMessage {
 
 function createMockInstance(config: InstanceCreateConfig): Instance {
   const now = Date.now();
+  const sessionId = `session-${instanceCounter + 1}`;
   return {
     id: `instance-${++instanceCounter}`,
     displayName: config.displayName || `Instance ${instanceCounter}`,
     createdAt: now,
+    historyThreadId: config.historyThreadId || sessionId,
     parentId: null,
     childrenIds: [],
     supervisorNodeId: '',
@@ -44,7 +46,7 @@ function createMockInstance(config: InstanceCreateConfig): Instance {
     currentActivity: undefined,
     currentTool: undefined,
     processId: null,
-    sessionId: `session-${instanceCounter}`,
+    sessionId,
     workingDirectory: config.workingDirectory,
     yoloMode: config.yoloMode ?? false,
     provider: 'auto',
