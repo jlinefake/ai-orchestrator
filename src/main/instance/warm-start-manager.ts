@@ -59,9 +59,10 @@ export class WarmStartManager {
     try {
       adapter = await this.deps.spawnAdapter(provider, { workingDirectory });
     } catch (err) {
-      logger.warn('Failed to pre-warm process', err instanceof Error ? err : undefined, {
+      logger.warn('Failed to pre-warm process', {
         provider,
         workingDirectory,
+        error: err instanceof Error ? err.message : String(err),
       });
       return;
     }
@@ -133,10 +134,9 @@ export class WarmStartManager {
     if (!enabled && this.warm) {
       // Fire-and-forget — caller does not need to await cleanup.
       this.killCurrent('manager disabled').catch((err: unknown) => {
-        logger.warn(
-          'Error killing warm process on disable',
-          err instanceof Error ? err : undefined,
-        );
+        logger.warn('Error killing warm process on disable', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }
   }
@@ -169,10 +169,9 @@ export class WarmStartManager {
     });
 
     this.killCurrent('TTL expired').catch((err: unknown) => {
-      logger.warn(
-        'Error killing expired warm process',
-        err instanceof Error ? err : undefined,
-      );
+      logger.warn('Error killing expired warm process', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
   }
 
@@ -193,11 +192,11 @@ export class WarmStartManager {
     try {
       await this.deps.killAdapter(adapter);
     } catch (err) {
-      logger.warn(
-        'Error while killing warm process',
-        err instanceof Error ? err : undefined,
-        { provider, reason },
-      );
+      logger.warn('Error while killing warm process', {
+        provider,
+        reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

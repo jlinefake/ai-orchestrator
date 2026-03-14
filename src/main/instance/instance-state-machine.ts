@@ -25,7 +25,7 @@ const UNIVERSAL_TARGETS = new Set<InstanceStatus>(['terminated', 'failed']);
  * Universal targets (terminated, failed) are added dynamically for every
  * non-terminal source state at runtime.
  */
-const TRANSITION_MAP: Readonly<Record<InstanceStatus, ReadonlyArray<InstanceStatus>>> = {
+const TRANSITION_MAP: Readonly<Record<InstanceStatus, readonly InstanceStatus[]>> = {
   initializing:       ['ready', 'error'],
   ready:              ['busy', 'idle', 'hibernating'],
   idle:               ['ready', 'hibernating', 'waiting_for_input'],
@@ -72,7 +72,7 @@ export class InstanceStateMachine {
     if (UNIVERSAL_TARGETS.has(next)) {
       return true;
     }
-    return (TRANSITION_MAP[this._current] as ReadonlyArray<InstanceStatus>).includes(next);
+    return (TRANSITION_MAP[this._current] as readonly InstanceStatus[]).includes(next);
   }
 
   /**

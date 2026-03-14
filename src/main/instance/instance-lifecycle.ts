@@ -49,6 +49,7 @@ import { getPolicyAdapter } from '../observation/policy-adapter';
 import { resolveInstructionStack } from '../core/config/instruction-resolver';
 import { getHibernationManager } from '../process/hibernation-manager';
 import { getSessionContinuityManager } from '../session/session-continuity';
+import { WarmStartManager } from './warm-start-manager';
 
 const logger = getLogger('InstanceLifecycle');
 
@@ -82,6 +83,8 @@ export interface LifecycleDependencies {
   addToOutputBuffer: (instance: Instance, message: OutputMessage) => void;
   clearFirstMessageTracking: (instanceId: string) => void;
   markFirstMessageReceived: (instanceId: string) => void;
+  /** Optional warm-start manager for pre-spawned adapter reuse. */
+  warmStartManager?: WarmStartManager;
 }
 
 // MCP config file for spawned CLI instances (LSP server, etc.)
@@ -550,25 +553,17 @@ export class InstanceLifecycleManager extends EventEmitter {
           mcpConfig: this.getMcpConfig(),
         };
 
-        const adapter = createCliAdapter(resolvedCliType, spawnOptions);
+        // Check for a pre-warmed adapter before spawning fresh.
+        const warmAdapter = this.deps.warmStartManager?.consume(resolvedCliType) as CliAdapter | null ?? null;
 
-        // Set up adapter events
-        this.deps.setupAdapterEvents(instance.id, adapter);
+        let adapter: CliAdapter;
+        if (warmAdapter) {
+          logger.info('Using warm-start adapter (skipping spawn)', { provider: resolvedCliType, instanceId: instance.id });
+          adapter = warmAdapter;
 
-        // Store adapter
-        this.deps.setAdapter(instance.id, adapter);
-
-        if (signal.aborted) {
-          // Clean up the adapter we just registered
-          await adapter.terminate(false).catch(() => { /* ignore */ });
-          this.deps.deleteAdapter(instance.id);
-          return;
-        }
-
-        // Spawn the CLI process
-        try {
-          logger.info('Spawning CLI process', { provider: resolvedCliType });
-          const pid = await adapter.spawn();
+          // Set up adapter events and store the adapter.
+          this.deps.setupAdapterEvents(instance.id, adapter);
+          this.deps.setAdapter(instance.id, adapter);
 
           if (signal.aborted) {
             await adapter.terminate(false).catch(() => { /* ignore */ });
@@ -576,12 +571,12 @@ export class InstanceLifecycleManager extends EventEmitter {
             return;
           }
 
-          instance.processId = pid;
+          // The warm adapter is already spawned; mark the instance as idle.
           instance.status = 'idle';
           this.deps.queueUpdate(instance.id, 'idle', instance.contextUsage);
-          logger.info('CLI spawned successfully', { pid, instanceId: instance.id });
+          logger.info('Warm-start instance ready', { instanceId: instance.id });
 
-          // Send initial prompt if provided
+          // Send initial prompt if provided.
           if (config.initialPrompt) {
             const userMessage = {
               id: generateId(),
@@ -596,22 +591,97 @@ export class InstanceLifecycleManager extends EventEmitter {
               }))
             };
             this.deps.addToOutputBuffer(instance, userMessage);
-            await adapter.sendInput(config.initialPrompt, config.attachments);
+            try {
+              await adapter.sendInput(config.initialPrompt, config.attachments);
+            } catch (error) {
+              instance.status = 'failed';
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              logger.error('Failed to send initial prompt via warm adapter', error instanceof Error ? error : undefined, { errorMessage });
+              const errorOutput = {
+                id: generateId(),
+                timestamp: Date.now(),
+                type: 'error' as const,
+                content: `Failed to initialize ${getCliDisplayName(resolvedCliType)}: ${errorMessage}`
+              };
+              this.deps.addToOutputBuffer(instance, errorOutput);
+              this.deps.queueUpdate(instance.id, 'failed', instance.contextUsage);
+              throw error;
+            }
           }
-        } catch (error) {
-          instance.status = 'failed';
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.error('Failed to spawn/initialize CLI', error instanceof Error ? error : undefined, { errorMessage });
+        } else {
+          adapter = createCliAdapter(resolvedCliType, spawnOptions);
 
-          const errorOutput = {
-            id: generateId(),
-            timestamp: Date.now(),
-            type: 'error' as const,
-            content: `Failed to initialize ${getCliDisplayName(resolvedCliType)}: ${errorMessage}`
-          };
-          this.deps.addToOutputBuffer(instance, errorOutput);
-          this.deps.queueUpdate(instance.id, 'failed', instance.contextUsage);
-          throw error;
+          // Set up adapter events
+          this.deps.setupAdapterEvents(instance.id, adapter);
+
+          // Store adapter
+          this.deps.setAdapter(instance.id, adapter);
+
+          if (signal.aborted) {
+            // Clean up the adapter we just registered
+            await adapter.terminate(false).catch(() => { /* ignore */ });
+            this.deps.deleteAdapter(instance.id);
+            return;
+          }
+
+          // Spawn the CLI process
+          try {
+            logger.info('Spawning CLI process', { provider: resolvedCliType });
+            const pid = await adapter.spawn();
+
+            if (signal.aborted) {
+              await adapter.terminate(false).catch(() => { /* ignore */ });
+              this.deps.deleteAdapter(instance.id);
+              return;
+            }
+
+            instance.processId = pid;
+            instance.status = 'idle';
+            this.deps.queueUpdate(instance.id, 'idle', instance.contextUsage);
+            logger.info('CLI spawned successfully', { pid, instanceId: instance.id });
+
+            // Send initial prompt if provided
+            if (config.initialPrompt) {
+              const userMessage = {
+                id: generateId(),
+                timestamp: Date.now(),
+                type: 'user' as const,
+                content: config.initialPrompt,
+                attachments: config.attachments?.map((a) => ({
+                  name: a.name,
+                  type: a.type,
+                  size: a.size,
+                  data: a.data
+                }))
+              };
+              this.deps.addToOutputBuffer(instance, userMessage);
+              await adapter.sendInput(config.initialPrompt, config.attachments);
+            }
+          } catch (error) {
+            instance.status = 'failed';
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.error('Failed to spawn/initialize CLI', error instanceof Error ? error : undefined, { errorMessage });
+
+            const errorOutput = {
+              id: generateId(),
+              timestamp: Date.now(),
+              type: 'error' as const,
+              content: `Failed to initialize ${getCliDisplayName(resolvedCliType)}: ${errorMessage}`
+            };
+            this.deps.addToOutputBuffer(instance, errorOutput);
+            this.deps.queueUpdate(instance.id, 'failed', instance.contextUsage);
+            throw error;
+          }
+        }
+
+        // After a successful spawn/warm-start, pre-warm a replacement process in
+        // the background for the next createInstance call of the same provider.
+        if (this.deps.warmStartManager) {
+          const wsm = this.deps.warmStartManager;
+          const warmProvider = resolvedCliType;
+          const warmWorkingDir = config.workingDirectory;
+          // Fire and forget — errors are handled inside preWarm.
+          void wsm.preWarm(warmProvider, warmWorkingDir);
         }
 
         // Register with orchestration handler
@@ -1807,9 +1877,23 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       logger.error('Memory critical', undefined, stats as Record<string, unknown>);
       this.emit('memory:critical', stats);
 
+      // Disable warm-start under critical memory pressure to free resources.
+      if (this.deps.warmStartManager) {
+        logger.info('Disabling warm-start due to critical memory pressure');
+        this.deps.warmStartManager.setEnabled(false);
+      }
+
       const settingsAll = this.settings.getAll();
       if (settingsAll.autoTerminateOnMemoryPressure) {
         this.terminateIdleInstances();
+      }
+    });
+
+    this.memoryMonitor.on('normal', () => {
+      // Re-enable warm-start once pressure returns to normal.
+      if (this.deps.warmStartManager) {
+        logger.info('Re-enabling warm-start after memory pressure resolved');
+        this.deps.warmStartManager.setEnabled(true);
       }
     });
 

@@ -29,6 +29,11 @@ import type {
   OutputMessage
 } from '../../shared/types/instance.types';
 import { generateId } from '../../shared/utils/id-generator';
+import {
+  createCliAdapter,
+  resolveCliType,
+  type CliAdapter,
+} from '../cli/adapters/adapter-factory';
 
 import { InstanceStateManager } from './instance-state';
 import { InstanceLifecycleManager } from './instance-lifecycle';
@@ -36,6 +41,7 @@ import { InstanceCommunicationManager } from './instance-communication';
 import { InstanceContextManager } from './instance-context';
 import { InstanceOrchestrationManager } from './instance-orchestration';
 import { InstancePersistenceManager } from './instance-persistence';
+import { WarmStartManager } from './warm-start-manager';
 import { getPermissionManager, type PermissionRequest, type PermissionScope } from '../security/permission-manager';
 import * as path from 'path';
 import type { UserActionRequest } from '../orchestration/orchestration-handler';
@@ -51,6 +57,7 @@ export class InstanceManager extends EventEmitter {
   private context: InstanceContextManager;
   private orchestrationMgr: InstanceOrchestrationManager;
   private persistence: InstancePersistenceManager;
+  private warmStart: WarmStartManager;
 
   // Tracking
   private hasReceivedFirstMessage = new Set<string>();
@@ -59,6 +66,27 @@ export class InstanceManager extends EventEmitter {
 
   constructor() {
     super();
+
+    // Initialize the warm-start manager. The spawnAdapter callback creates a
+    // fresh adapter for the given provider and immediately spawns it so that
+    // the process is ready when the next createInstance() call arrives.
+    this.warmStart = new WarmStartManager({
+      spawnAdapter: async (provider, options) => {
+        const settingsAll = this.settings.getAll();
+        const resolvedCliType = await resolveCliType(
+          provider as Parameters<typeof resolveCliType>[0],
+          settingsAll.defaultCli
+        );
+        const adapter: CliAdapter = createCliAdapter(resolvedCliType, {
+          workingDirectory: options.workingDirectory,
+        });
+        await adapter.spawn();
+        return adapter;
+      },
+      killAdapter: async (adapter) => {
+        await (adapter as CliAdapter).terminate(false);
+      },
+    });
 
     // Initialize sub-managers with dependencies
     this.state = new InstanceStateManager();
@@ -118,7 +146,8 @@ export class InstanceManager extends EventEmitter {
       clearInterrupted: (id) => this.communication.clearInterrupted(id),
       addToOutputBuffer: (inst, msg) => this.communication.addToOutputBuffer(inst, msg),
       clearFirstMessageTracking: (id) => this.hasReceivedFirstMessage.delete(id),
-      markFirstMessageReceived: (id) => this.hasReceivedFirstMessage.add(id)
+      markFirstMessageReceived: (id) => this.hasReceivedFirstMessage.add(id),
+      warmStartManager: this.warmStart,
     });
 
     // Persistence manager needs dependencies
