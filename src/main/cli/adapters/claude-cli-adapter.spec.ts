@@ -74,3 +74,35 @@ describe('ClaudeCliAdapter AskUserQuestion handling', () => {
     expect(onInputRequired).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ClaudeCliAdapter context window seeding', () => {
+  it('seeds the 1M context window before runtime metadata arrives', () => {
+    const adapter = new ClaudeCliAdapter({ model: 'sonnet[1m]' });
+    const onContext = vi.fn();
+    adapter.on('context', onContext);
+    const processCliMessage = (
+      adapter as unknown as { processCliMessage: (message: unknown) => void }
+    ).processCliMessage.bind(adapter);
+
+    expect(adapter.getCapabilities().contextWindow).toBe(1000000);
+
+    processCliMessage({
+      type: 'assistant',
+      timestamp: 789,
+      message: {
+        content: [{ type: 'text', text: 'Working...' }],
+        usage: {
+          input_tokens: 120,
+          output_tokens: 30,
+        },
+      },
+    });
+
+    expect(onContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        used: 150,
+        total: 1000000,
+      })
+    );
+  });
+});

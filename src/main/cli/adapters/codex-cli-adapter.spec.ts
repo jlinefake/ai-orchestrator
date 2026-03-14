@@ -38,7 +38,7 @@ function queueCodexRun(
     stderrLines?: string[];
     stdoutLines?: string[];
   }
-): void {
+): MockChildProcess {
   const proc = createMockProcess();
   spawnSpy.mockReturnValueOnce(proc as unknown as ChildProcess);
   setTimeout(() => {
@@ -54,6 +54,16 @@ function queueCodexRun(
 
     proc.emitClose(options.code ?? 0, null);
   }, 0);
+  return proc;
+}
+
+/** Collect all data written to a PassThrough stream. */
+function collectStdin(proc: MockChildProcess): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    proc.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+    proc.stdin.on('end', () => resolve(Buffer.concat(chunks).toString()));
+  });
 }
 
 describe('CodexCliAdapter', () => {
@@ -96,6 +106,29 @@ describe('CodexCliAdapter', () => {
     expect(response.metadata?.['threadId']).toBe('thread-123');
   });
 
+  it('extracts Codex planning text into thinking blocks', () => {
+    const adapter = new CodexCliAdapter();
+    const planningMessage = `# Crafting a friendly response
+
+I need to respond to the user saying "Hey Codex" in a natural way. I should keep it concise and friendly.
+Hey! I'm here. What do you want to tackle?`;
+
+    const response = adapter.parseOutput([
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_0',
+          type: 'agent_message',
+          text: planningMessage,
+        },
+      }),
+    ].join('\n'));
+
+    expect(response.thinking).toHaveLength(1);
+    expect(response.thinking?.[0].content).toContain('Crafting a friendly response');
+    expect(response.content).toBe(`Hey! I'm here. What do you want to tackle?`);
+  });
+
   it('updates the native session id and resumes on subsequent turns in full-auto mode', async () => {
     const adapter = new CodexCliAdapter({
       approvalMode: 'full-auto',
@@ -116,13 +149,14 @@ describe('CodexCliAdapter', () => {
     expect(first.content).toBe('first');
     expect(adapter.getSessionId()).toBe('thread-abc');
 
-    queueCodexRun(spawnSpy, {
+    const secondProc = queueCodexRun(spawnSpy, {
       stdoutLines: [
         '{"type":"thread.started","thread_id":"thread-abc"}',
         '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"second"}}',
         '{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":6}}',
       ],
     });
+    const secondStdin = collectStdin(secondProc);
 
     const second = await adapter.sendMessage({ role: 'user', content: 'second' });
     expect(second.content).toBe('second');
@@ -133,7 +167,10 @@ describe('CodexCliAdapter', () => {
     expect(firstArgs).not.toContain('resume');
     expect(secondArgs.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
     expect(secondArgs).toContain('thread-abc');
-    expect(secondArgs[secondArgs.length - 1]).toBe('second');
+
+    // Prompt is now written to stdin, not passed as a positional CLI arg
+    const stdinContent = await secondStdin;
+    expect(stdinContent).toBe('second');
   });
 
   it('replays recent conversation instead of using native resume in read-only mode', async () => {
@@ -156,13 +193,14 @@ describe('CodexCliAdapter', () => {
     expect(first.content).toBe('first answer');
     expect(adapter.getRuntimeCapabilities().supportsResume).toBe(false);
 
-    queueCodexRun(spawnSpy, {
+    const secondProc = queueCodexRun(spawnSpy, {
       stdoutLines: [
         '{"type":"thread.started","thread_id":"thread-readonly-2"}',
         '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"second answer"}}',
         '{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":6}}',
       ],
     });
+    const secondStdin = collectStdin(secondProc);
 
     const second = await adapter.sendMessage({ role: 'user', content: 'second question' });
     expect(second.content).toBe('second answer');
@@ -177,7 +215,8 @@ describe('CodexCliAdapter', () => {
     expect(secondArgs).toContain('--sandbox');
     expect(secondArgs).toContain('read-only');
 
-    const secondPrompt = secondArgs[secondArgs.length - 1];
+    // Prompt (with conversation replay) is now written to stdin
+    const secondPrompt = await secondStdin;
     expect(secondPrompt).toContain('[CONVERSATION HISTORY]');
     expect(secondPrompt).toContain('<User>\nfirst question\n</User>');
     expect(secondPrompt).toContain('<Assistant>\nfirst answer\n</Assistant>');
@@ -261,9 +300,10 @@ describe('CodexCliAdapter', () => {
         buildArgs(message: { attachments?: { path?: string; type: string }[]; content: string }): string[];
       }).buildArgs(prepared);
       expect(args).toContain('-i');
-      const prompt = args[args.length - 1];
-      expect(prompt).toContain('[Attached file:');
-      expect(prompt).toContain('notes.txt');
+
+      // File attachment references are embedded in the prepared content (sent via stdin)
+      expect(prepared.content).toContain('[Attached file:');
+      expect(prepared.content).toContain('notes.txt');
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

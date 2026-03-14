@@ -13,8 +13,6 @@ import {
   extractHeaderStyleThinking,
   isOnlyThinking,
   createThinkingBlock,
-  ExtractedContent,
-  ThinkingBlock,
 } from './thinking-extractor';
 
 describe('ThinkingExtractor', () => {
@@ -273,6 +271,18 @@ Here is my answer.`;
       expect(result.cleaned).toContain('Here is my answer');
     });
 
+    it('should extract Codex-style crafting headers and keep the final response', () => {
+      const content = `# Crafting a friendly response
+
+I need to respond to the user saying "Hey Codex" in a natural way. I should keep it concise and friendly.
+Hey! I'm here. What do you want to tackle?`;
+      const result = extractHeaderStyleThinking(content);
+
+      expect(result.extracted).toHaveLength(1);
+      expect(result.extracted[0]).toContain('Crafting a friendly response');
+      expect(result.cleaned).toBe(`Hey! I'm here. What do you want to tackle?`);
+    });
+
     it('should not extract headers from middle of content', () => {
       const content = `Here is my response.
 
@@ -510,6 +520,18 @@ Hi! How can I help?`;
       // Should extract the thinking header and reasoning
       expect(result.hasThinking).toBe(true);
       expect(result.response).toContain('Hi!');
+    });
+
+    it('should hide Codex planning text behind extracted thinking blocks', () => {
+      const content = `# Crafting a friendly response
+
+I need to respond to the user saying "Hey Codex" in a natural way. I should consider using a greeting, but no tools are needed here.
+Hey! I'm here. What do you want to tackle in the orchestrator?`;
+      const result = extractThinkingContent(content);
+
+      expect(result.hasThinking).toBe(true);
+      expect(result.thinking[0].content).toContain('Crafting a friendly response');
+      expect(result.response).toBe(`Hey! I'm here. What do you want to tackle in the orchestrator?`);
     });
 
     it('should handle Claude-style XML thinking', () => {

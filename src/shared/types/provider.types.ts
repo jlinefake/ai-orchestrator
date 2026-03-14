@@ -139,7 +139,9 @@ export const CLAUDE_MODELS = {
   // Current models (bare names → always latest)
   HAIKU: 'haiku',
   SONNET: 'sonnet',
+  SONNET_1M: 'sonnet[1m]',
   OPUS: 'opus',
+  OPUS_1M: 'opus[1m]',
   // Aliases for routing tiers
   FAST: 'haiku',
   BALANCED: 'sonnet',
@@ -211,7 +213,9 @@ export const DEFAULT_MODELS: Record<ProviderType, string> = {
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // Claude current models (bare shorthand keys)
   [CLAUDE_MODELS.SONNET]: { input: 3.0, output: 15.0 },
+  [CLAUDE_MODELS.SONNET_1M]: { input: 3.0, output: 15.0 },
   [CLAUDE_MODELS.OPUS]: { input: 5.0, output: 25.0 },
+  [CLAUDE_MODELS.OPUS_1M]: { input: 5.0, output: 25.0 },
   [CLAUDE_MODELS.HAIKU]: { input: 1.0, output: 5.0 },
   // Claude models (full IDs for API-level pricing lookups)
   'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0 },
@@ -253,7 +257,9 @@ export interface ModelDisplayInfo {
 export const PROVIDER_MODEL_LIST: Record<string, ModelDisplayInfo[]> = {
   claude: [
     { id: CLAUDE_MODELS.OPUS, name: 'Opus (latest)', tier: 'powerful' },
+    { id: CLAUDE_MODELS.OPUS_1M, name: 'Opus (latest, 1M)', tier: 'powerful' },
     { id: CLAUDE_MODELS.SONNET, name: 'Sonnet (latest)', tier: 'balanced' },
+    { id: CLAUDE_MODELS.SONNET_1M, name: 'Sonnet (latest, 1M)', tier: 'balanced' },
     { id: CLAUDE_MODELS.HAIKU, name: 'Haiku (latest)', tier: 'fast' },
   ],
   codex: [
@@ -292,6 +298,33 @@ export const PROVIDER_MODEL_LIST: Record<string, ModelDisplayInfo[]> = {
  */
 export function getModelsForProvider(provider: string): ModelDisplayInfo[] {
   return PROVIDER_MODEL_LIST[provider] ?? [];
+}
+
+/**
+ * Claude Code exposes 1M context variants via the `[1m]` suffix.
+ * Preserve the existing 200k defaults unless the selected model is explicit.
+ */
+export function getProviderModelContextWindow(
+  provider: string,
+  modelId?: string
+): number {
+  const normalizedProvider = provider.trim().toLowerCase();
+  const normalizedModel = modelId?.trim().toLowerCase();
+  const isClaudeProvider =
+    normalizedProvider === 'claude' ||
+    normalizedProvider === 'claude-cli' ||
+    normalizedProvider === 'anthropic' ||
+    normalizedProvider === 'anthropic-api';
+
+  if (!isClaudeProvider) {
+    return 200000;
+  }
+
+  if (normalizedModel?.endsWith('[1m]')) {
+    return 1000000;
+  }
+
+  return 200000;
 }
 
 /**

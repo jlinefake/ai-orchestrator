@@ -29,6 +29,7 @@ import type { RecentDirectoryEntry } from '../../../../shared/types/recent-direc
 
 const ORDER_STORAGE_KEY = 'instance-list-order';
 const PINNED_HISTORY_STORAGE_KEY = 'instance-list-pinned-history';
+const SEEN_HISTORY_THREADS_STORAGE_KEY = 'instance-list-seen-history-threads';
 const SORT_MODE_STORAGE_KEY = 'instance-list-sort-mode';
 const NO_WORKSPACE_KEY = '__no_workspace__';
 type HistorySortMode = 'last-interacted' | 'created';
@@ -66,6 +67,11 @@ interface ProjectGroup {
 interface ProjectPathGroupIndex {
   group: ProjectGroup;
   index: number;
+}
+
+interface RailChangeSummary {
+  additions: number;
+  deletions: number;
 }
 
 @Component({
@@ -130,7 +136,6 @@ interface ProjectPathGroupIndex {
         @for (group of projectGroups(); track group.key) {
           <section
             class="project-group"
-            [class.selected]="group.hasSelectedInstance"
             [class.project-draggable]="canDragProject(group)"
             cdkDrag
             [cdkDragData]="group"
@@ -141,7 +146,11 @@ interface ProjectPathGroupIndex {
               <span class="project-drag-meta">{{ group.sessionCount }} sessions</span>
             </div>
             <div class="project-group-placeholder" *cdkDragPlaceholder></div>
-            <div class="project-header-row" [class.expanded]="group.isExpanded">
+            <div
+              class="project-header-row"
+              [class.expanded]="group.isExpanded"
+              [class.has-selected-instance]="group.hasSelectedInstance"
+            >
               <button
                 type="button"
                 class="project-header"
@@ -163,9 +172,6 @@ interface ProjectPathGroupIndex {
                         <span class="project-title-count">: {{ group.sessionCount }}</span>
                       }
                     </div>
-                    @if (group.hasSelectedInstance) {
-                      <span class="project-selected-pill">Current</span>
-                    }
                     @if (group.isPinned) {
                       <span class="project-pinned-pill">Pinned</span>
                     }
@@ -174,19 +180,6 @@ interface ProjectPathGroupIndex {
                     }
                   </div>
                   <span class="project-subtitle" [title]="group.subtitle">{{ group.subtitle }}</span>
-                </div>
-                <div class="project-meta">
-                  @if (shouldShowProjectStateChip(group)) {
-                    <span
-                      class="project-state-chip"
-                      [class.project-state-working]="group.projectStateTone === 'working'"
-                      [class.project-state-attention]="group.projectStateTone === 'attention'"
-                      [class.project-state-connecting]="group.projectStateTone === 'connecting'"
-                      [class.project-state-ready]="group.projectStateTone === 'ready'"
-                    >
-                      {{ getProjectStateDisplayLabel(group) }}
-                    </span>
-                  }
                 </div>
               </button>
               <div class="project-actions" [class.visible]="openProjectMenuKey() === group.key">
@@ -304,6 +297,7 @@ interface ProjectPathGroupIndex {
                           [isLastChild]="item.isLastChild"
                           [parentChain]="item.parentChain"
                           [isSelected]="selectedId() === item.instance.id"
+                          [lastActivityLabel]="selectedId() === item.instance.id ? formatRelativeTime(item.instance.lastActivity) : null"
                           [isDraggable]="item.depth === 0"
                           (instanceSelect)="onSelectInstance($event)"
                           (terminate)="onTerminateInstance($event)"
@@ -346,18 +340,79 @@ interface ProjectPathGroupIndex {
                             [attr.aria-label]="'Restore ' + getHistoryTitle(entry)"
                             (click)="onRestoreHistory(entry.id)"
                           >
-                            <span class="history-entry-title">
-                              {{ getHistoryPreviewTitle(entry) }}
+                            <span class="history-entry-title-row">
+                              <span
+                                class="history-entry-provider-badge"
+                                [style.color]="getHistoryProviderVisual(entry).color"
+                                [title]="getHistoryProviderVisual(entry).label"
+                              >
+                                @switch (getHistoryProviderVisual(entry).icon) {
+                                  @case ('anthropic') {
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M12 1.75c.48 0 .87.39.87.87v4.04a.87.87 0 1 1-1.74 0V2.62c0-.48.39-.87.87-.87Z"/>
+                                      <path d="M17.88 3.33c.41.24.55.77.32 1.19l-2.02 3.5a.87.87 0 1 1-1.5-.87l2.02-3.5a.87.87 0 0 1 1.18-.32Z"/>
+                                      <path d="M21.82 7.47c.24.41.1.95-.32 1.18L18 10.67a.87.87 0 0 1-.87-1.5l3.5-2.02a.87.87 0 0 1 1.19.32Z"/>
+                                      <path d="M22.25 12c0 .48-.39.87-.87.87h-4.04a.87.87 0 1 1 0-1.74h4.04c.48 0 .87.39.87.87Z"/>
+                                      <path d="M20.67 17.88a.87.87 0 0 1-1.18.32l-3.5-2.02a.87.87 0 1 1 .87-1.5l3.5 2.02c.41.24.55.77.31 1.18Z"/>
+                                      <path d="M16.53 21.82a.87.87 0 0 1-1.18-.32l-2.02-3.5a.87.87 0 1 1 1.5-.87l2.02 3.5c.24.41.1.95-.32 1.19Z"/>
+                                      <path d="M12 22.25a.87.87 0 0 1-.87-.87v-4.04a.87.87 0 1 1 1.74 0v4.04c0 .48-.39.87-.87.87Z"/>
+                                      <path d="M7.47 20.67a.87.87 0 0 1-.32-1.18l2.02-3.5a.87.87 0 1 1 1.5.87l-2.02 3.5a.87.87 0 0 1-1.18.31Z"/>
+                                      <path d="M3.33 16.53a.87.87 0 0 1 .32-1.18l3.5-2.02a.87.87 0 1 1 .87 1.5l-3.5 2.02a.87.87 0 0 1-1.19-.32Z"/>
+                                      <path d="M1.75 12c0-.48.39-.87.87-.87h4.04a.87.87 0 1 1 0 1.74H2.62a.87.87 0 0 1-.87-.87Z"/>
+                                      <path d="M3.33 7.47a.87.87 0 0 1 1.18-.32l3.5 2.02a.87.87 0 1 1-.87 1.5l-3.5-2.02a.87.87 0 0 1-.31-1.18Z"/>
+                                      <path d="M7.47 3.33c.41-.24.95-.1 1.18.32l2.02 3.5a.87.87 0 1 1-1.5.87l-2.02-3.5a.87.87 0 0 1 .32-1.19Z"/>
+                                      <circle cx="12" cy="12" r="1.65"/>
+                                    </svg>
+                                  }
+                                  @case ('openai') {
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.985 5.985 0 0 0 .517 4.91 6.046 6.046 0 0 0 6.51 2.9A6.065 6.065 0 0 0 19.02 19.81a5.985 5.985 0 0 0 3.998-2.9 6.046 6.046 0 0 0-.736-7.09z"/>
+                                    </svg>
+                                  }
+                                  @case ('google') {
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                                    </svg>
+                                  }
+                                  @case ('github') {
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                                    </svg>
+                                  }
+                                  @default {
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                                      <path d="M12 3.5 14.5 8l5 .7-3.6 3.5.9 4.9L12 14.9 7.2 17l.9-4.8L4.5 8.7 9.5 8 12 3.5Z"/>
+                                    </svg>
+                                  }
+                                }
+                              </span>
+                              <span class="history-entry-title">
+                                {{ getHistoryPreviewTitle(entry) }}
+                              </span>
                             </span>
                           </button>
                         </div>
                         <div class="history-entry-meta">
-                          <span
-                            class="history-entry-time"
-                            [title]="historySortMode() === 'created' ? 'Created' : 'Last interacted'"
-                          >
-                            {{ formatHistoryTime(entry) }}
-                          </span>
+                          @if (getHistoryChangeSummary(entry); as changeSummary) {
+                            <div class="history-entry-diff" title="Changes in this completed session">
+                              <span class="history-entry-diff-additions">
+                                +{{ changeSummary.additions }}
+                              </span>
+                              <span class="history-entry-diff-deletions">
+                                -{{ changeSummary.deletions }}
+                              </span>
+                            </div>
+                          } @else {
+                            <span
+                              class="history-entry-time"
+                              [title]="historySortMode() === 'created' ? 'Created' : 'Last interacted'"
+                            >
+                              {{ formatHistoryTime(entry) }}
+                            </span>
+                          }
                           <button
                             type="button"
                             class="history-entry-action"
@@ -553,10 +608,6 @@ interface ProjectPathGroupIndex {
       cursor: default;
     }
 
-    .project-group.selected {
-      background: rgba(var(--primary-rgb), 0.03);
-    }
-
     .project-header {
       flex: 1 1 auto;
       min-width: 0;
@@ -582,10 +633,24 @@ interface ProjectPathGroupIndex {
     .project-header-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      align-items: flex-start;
+      align-items: center;
       gap: 6px;
       width: 100%;
       min-width: 0;
+      border-radius: 14px;
+      transition: background var(--transition-fast), box-shadow var(--transition-fast);
+      /* Establish stacking context above .project-items so the dropdown menu
+         (inside .project-menu-anchor) paints above instance rows below.
+         CDK drag-drop creates stacking contexts on siblings via transform. */
+      position: relative;
+      z-index: 1;
+    }
+
+    .project-header-row.has-selected-instance {
+      background:
+        linear-gradient(90deg, rgba(var(--primary-rgb), 0.08), rgba(255, 255, 255, 0.015)),
+        rgba(255, 255, 255, 0.015);
+      box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.08);
     }
 
     .project-copy {
@@ -649,18 +714,6 @@ interface ProjectPathGroupIndex {
       font-variant-numeric: tabular-nums;
     }
 
-    .project-selected-pill {
-      padding: 1px 6px;
-      border-radius: 999px;
-      background: rgba(var(--secondary-rgb), 0.12);
-      color: var(--secondary-color);
-      font-family: var(--font-mono);
-      font-size: 8px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      flex-shrink: 0;
-    }
-
     .project-pinned-pill {
       padding: 1px 6px;
       border-radius: 999px;
@@ -695,16 +748,6 @@ interface ProjectPathGroupIndex {
       text-overflow: ellipsis;
     }
 
-    .project-meta {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      flex: 0 1 auto;
-      min-width: 0;
-      overflow: hidden;
-    }
-
     .project-actions {
       display: flex;
       align-items: center;
@@ -729,15 +772,15 @@ interface ProjectPathGroupIndex {
     }
 
     .project-action-btn {
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       padding: 0;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      background: rgba(255, 255, 255, 0.02);
+      border-radius: 6px;
+      border: none;
+      background: transparent;
       color: var(--text-muted);
       cursor: pointer;
       transition: all var(--transition-fast);
@@ -747,9 +790,7 @@ interface ProjectPathGroupIndex {
     .project-action-btn:focus-visible {
       outline: none;
       color: var(--text-primary);
-      border-color: rgba(var(--primary-rgb), 0.22);
-      background: rgba(var(--primary-rgb), 0.12);
-      box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.14);
+      background: rgba(255, 255, 255, 0.06);
     }
 
     .project-action-btn:disabled {
@@ -760,8 +801,7 @@ interface ProjectPathGroupIndex {
     .project-action-btn:hover,
     .project-action-btn.active {
       color: var(--text-primary);
-      border-color: rgba(var(--primary-rgb), 0.2);
-      background: rgba(var(--primary-rgb), 0.1);
+      background: rgba(255, 255, 255, 0.06);
     }
 
     .project-action-btn svg {
@@ -822,41 +862,6 @@ interface ProjectPathGroupIndex {
     .project-menu-item:hover {
       background: rgba(255, 255, 255, 0.05);
       color: var(--text-primary);
-    }
-
-    .project-state-chip {
-      min-width: 0;
-      max-width: 92px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      color: rgba(188, 198, 184, 0.86);
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      line-height: 1.2;
-      flex-shrink: 1;
-    }
-
-    .project-state-working {
-      color: var(--secondary-color);
-    }
-
-    .project-state-attention {
-      color: var(--warning-color);
-    }
-
-    .project-state-connecting {
-      color: rgba(180, 208, 255, 0.88);
-    }
-
-    .project-state-ready {
-      color: rgba(212, 233, 190, 0.92);
     }
 
     .project-empty {
@@ -939,13 +944,13 @@ interface ProjectPathGroupIndex {
       display: flex;
       flex-direction: column;
       gap: 1px;
-      padding: 4px 0 4px 8px;
+      padding: 0 0 0 28px;
     }
 
     .project-history-items.with-divider {
-      margin-top: 2px;
-      padding-top: 4px;
-      border-top: 1px solid rgba(255, 255, 255, 0.035);
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
     }
 
     .history-entry {
@@ -1031,6 +1036,8 @@ interface ProjectPathGroupIndex {
 
     .history-entry-title {
       display: block;
+      flex: 1 1 auto;
+      min-width: 0;
       font-family: var(--font-body);
       font-size: 13px;
       font-weight: 500;
@@ -1052,6 +1059,8 @@ interface ProjectPathGroupIndex {
     .history-entry-main {
       width: 100%;
       min-width: 0;
+      display: flex;
+      align-items: center;
       padding: 0;
       border: none;
       background: transparent;
@@ -1060,6 +1069,29 @@ interface ProjectPathGroupIndex {
       cursor: pointer;
       border-radius: 6px;
       transition: color var(--transition-fast);
+    }
+
+    .history-entry-title-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .history-entry-provider-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.92;
+    }
+
+    .history-entry-provider-badge svg {
+      width: 14px;
+      height: 14px;
     }
 
     .history-entry-main:focus-visible {
@@ -1116,6 +1148,25 @@ interface ProjectPathGroupIndex {
       letter-spacing: 0;
       text-transform: uppercase;
       color: rgba(168, 176, 164, 0.78);
+    }
+
+    .history-entry-diff {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .history-entry-diff-additions {
+      color: var(--success-color);
+    }
+
+    .history-entry-diff-deletions {
+      color: var(--error-color);
     }
 
     .drag-wrapper {
@@ -1216,6 +1267,8 @@ export class InstanceListComponent {
   historySortMode = signal<HistorySortMode>(this.loadSortMode());
   openProjectMenuKey = signal<string | null>(null);
   preferredEditorLabel = signal('Editor');
+  seenHistoryThreads = signal<Record<string, number>>(this.loadSeenHistoryThreads());
+  lastVisitedHistoryThreadId = signal<string | null>(null);
   selectedId = this.store.selectedInstanceId;
   readonly systemFileManagerLabel = this.getSystemFileManagerLabel();
   private projectMenuTrigger: HTMLButtonElement | null = null;
@@ -1254,8 +1307,10 @@ export class InstanceListComponent {
       const subtitle = this.getProjectSubtitle(root.workingDirectory);
       const projectMatches = !!filter && this.matchesProjectText(title, subtitle, filter);
       const rawHistoryItems = historyByProject.get(projectKey) ?? [];
+      const existingGroup = groups.get(projectKey);
+      const historyLookupItems = existingGroup?.historyItems ?? rawHistoryItems;
       const historyByThreadId = new Map(
-        rawHistoryItems.map((entry) => [this.getHistoryThreadId(entry), entry])
+        historyLookupItems.map((entry) => [this.getHistoryThreadId(entry), entry])
       );
       const liveItems = this.buildVisibleItems(
         root,
@@ -1282,7 +1337,8 @@ export class InstanceListComponent {
           .map((item) => this.getInstanceThreadId(item.instance))
           .filter((threadId): threadId is string => threadId.trim().length > 0)
       );
-      const historyItems = rawHistoryItems.filter(
+      const historySourceItems = existingGroup?.historyItems ?? rawHistoryItems;
+      const historyItems = historySourceItems.filter(
         (entry) => !liveThreadIds.has(this.getHistoryThreadId(entry))
       );
 
@@ -1292,7 +1348,7 @@ export class InstanceListComponent {
 
       const recentDirectory = recentDirectoriesByKey.get(projectKey);
       const draftInfo = this.getProjectDraftInfo(root.workingDirectory);
-      const group = groups.get(projectKey) ?? {
+      const group = existingGroup ?? {
         key: projectKey,
         path: root.workingDirectory?.trim() || null,
         title: recentDirectory?.displayName || title,
@@ -1311,6 +1367,7 @@ export class InstanceListComponent {
         liveItems: [],
         historyItems: [],
       };
+      const previousHistoryCount = group.historyItems.length;
 
       group.liveItems.push(...liveItems);
       group.createdAt = Math.max(
@@ -1326,7 +1383,7 @@ export class InstanceListComponent {
       group.hasDraft = group.hasDraft || draftInfo.hasDraft;
       group.draftUpdatedAt = group.draftUpdatedAt ?? draftInfo.draftUpdatedAt;
       Object.assign(group, this.getProjectStateSummary(group.liveItems, group.historyItems, group.hasDraft));
-      group.sessionCount += historyItems.length;
+      group.sessionCount += historyItems.length - previousHistoryCount;
       groups.set(projectKey, group);
       historyByProject.delete(projectKey);
       recentDirectoriesByKey.delete(projectKey);
@@ -1428,6 +1485,8 @@ export class InstanceListComponent {
         return;
       }
 
+      this.lastVisitedHistoryThreadId.set(this.getInstanceThreadId(selected));
+
       const projectKey = this.getProjectKey(selected.workingDirectory);
       this.collapsedProjectKeys.update((current) => {
         if (!current.has(projectKey)) {
@@ -1487,6 +1546,27 @@ export class InstanceListComponent {
       if (removedRoot) {
         void this.historyStore.loadHistory();
       }
+    });
+
+    effect(() => {
+      const historyEntries = this.historyStore.entries().filter((entry) => !entry.archivedAt);
+      if (historyEntries.length === 0) {
+        return;
+      }
+
+      const liveThreadIds = new Set(
+        this.store.instances()
+          .map((instance) => this.getInstanceThreadId(instance))
+          .filter((threadId): threadId is string => threadId.trim().length > 0)
+      );
+      const latestHistoryEntries = this.getLatestHistoryEntriesByThread(historyEntries);
+      const lastVisitedThreadId = this.lastVisitedHistoryThreadId();
+      const seenEntries = Array.from(latestHistoryEntries.values()).filter((entry) => {
+        const threadId = this.getHistoryThreadId(entry);
+        return liveThreadIds.has(threadId) || threadId === lastVisitedThreadId;
+      });
+
+      this.markHistoryEntriesSeen(seenEntries);
     });
   }
 
@@ -1709,6 +1789,9 @@ export class InstanceListComponent {
       const entry = this.historyStore.entries().find((item) => item.id === entryId);
       const result = await this.historyStore.restoreEntry(entryId, entry?.workingDirectory);
       if (result.success && result.instanceId) {
+        if (entry) {
+          this.markHistoryEntriesSeen([entry]);
+        }
         // Populate restored messages into the new instance's output buffer.
         // The instance:created event may carry outputBuffer, but this explicit
         // call acts as a safety net against IPC race conditions (the event
@@ -2139,6 +2222,87 @@ export class InstanceListComponent {
     }
   }
 
+  private loadSeenHistoryThreads(): Record<string, number> {
+    try {
+      const saved = localStorage.getItem(SEEN_HISTORY_THREADS_STORAGE_KEY);
+      if (!saved) {
+        return {};
+      }
+
+      const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {};
+      }
+
+      const next: Record<string, number> = {};
+      for (const [threadId, endedAt] of Object.entries(parsed)) {
+        if (!threadId.trim()) {
+          continue;
+        }
+        if (typeof endedAt === 'number' && Number.isFinite(endedAt)) {
+          next[threadId] = endedAt;
+        }
+      }
+
+      return next;
+    } catch {
+      return {};
+    }
+  }
+
+  private saveSeenHistoryThreads(seenThreads: Record<string, number>): void {
+    try {
+      const entries = Object.entries(seenThreads).filter(
+        ([threadId, endedAt]) => threadId.trim().length > 0 && Number.isFinite(endedAt)
+      );
+      if (entries.length === 0) {
+        localStorage.removeItem(SEEN_HISTORY_THREADS_STORAGE_KEY);
+        return;
+      }
+
+      localStorage.setItem(
+        SEEN_HISTORY_THREADS_STORAGE_KEY,
+        JSON.stringify(Object.fromEntries(entries))
+      );
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+
+  private markHistoryEntriesSeen(
+    entries: readonly Pick<ConversationHistoryEntry, 'historyThreadId' | 'sessionId' | 'id' | 'endedAt'>[]
+  ): void {
+    if (entries.length === 0) {
+      return;
+    }
+
+    this.seenHistoryThreads.update((current) => {
+      let next: Record<string, number> | null = null;
+
+      for (const entry of entries) {
+        const threadId = this.getHistoryThreadId(entry);
+        if (!threadId.trim() || !Number.isFinite(entry.endedAt)) {
+          continue;
+        }
+
+        const seenEndedAt = (next ?? current)[threadId] ?? 0;
+        if (seenEndedAt >= entry.endedAt) {
+          continue;
+        }
+
+        next ??= { ...current };
+        next[threadId] = entry.endedAt;
+      }
+
+      if (!next) {
+        return current;
+      }
+
+      this.saveSeenHistoryThreads(next);
+      return next;
+    });
+  }
+
   isRestoringHistory(entryId: string): boolean {
     return this.restoringHistoryIds().has(entryId);
   }
@@ -2170,6 +2334,57 @@ export class InstanceListComponent {
     return this.truncateRailText(this.getHistoryTitle(entry));
   }
 
+  isHistoryThreadSeen(
+    entry: Pick<ConversationHistoryEntry, 'historyThreadId' | 'sessionId' | 'id' | 'endedAt'>
+  ): boolean {
+    const seenEndedAt = this.seenHistoryThreads()[this.getHistoryThreadId(entry)] ?? 0;
+    return seenEndedAt >= entry.endedAt;
+  }
+
+  getHistoryChangeSummary(entry: ConversationHistoryEntry): RailChangeSummary | null {
+    if (this.isHistoryThreadSeen(entry)) {
+      return null;
+    }
+
+    if (!entry.changeSummary) {
+      return null;
+    }
+
+    const additions = Number(entry.changeSummary.additions ?? 0);
+    const deletions = Number(entry.changeSummary.deletions ?? 0);
+
+    if (!Number.isFinite(additions) || !Number.isFinite(deletions)) {
+      return null;
+    }
+    if (additions === 0 && deletions === 0) {
+      return null;
+    }
+
+    return {
+      additions,
+      deletions,
+    };
+  }
+
+  getHistoryProviderVisual(entry: ConversationHistoryEntry): {
+    icon: 'anthropic' | 'openai' | 'google' | 'github' | 'generic';
+    color: string;
+    label: string;
+  } {
+    switch (entry.provider) {
+      case 'claude':
+        return { icon: 'anthropic', color: '#D97706', label: 'Claude' };
+      case 'codex':
+        return { icon: 'openai', color: '#10A37F', label: 'Codex' };
+      case 'gemini':
+        return { icon: 'google', color: '#4285F4', label: 'Gemini' };
+      case 'copilot':
+        return { icon: 'github', color: '#6e40c9', label: 'Copilot' };
+      default:
+        return { icon: 'generic', color: 'rgba(214, 221, 208, 0.76)', label: 'AI session' };
+    }
+  }
+
   formatRelativeTime(timestamp: number): string {
     const diff = Date.now() - timestamp;
     const minute = 60_000;
@@ -2193,21 +2408,6 @@ export class InstanceListComponent {
     return this.formatRelativeTime(this.getHistorySortTimestamp(entry, this.historySortMode()));
   }
 
-  shouldShowProjectStateChip(group: ProjectGroup): boolean {
-    return group.projectStateTone !== 'history';
-  }
-
-  getProjectStateDisplayLabel(group: ProjectGroup): string {
-    switch (group.projectStateLabel) {
-      case 'Awaiting input':
-        return 'Waiting';
-      case 'Draft ready':
-        return 'Draft';
-      default:
-        return group.projectStateLabel;
-    }
-  }
-
   getProjectDraftTitle(group: ProjectGroup): string {
     if (!group.draftUpdatedAt) {
       return 'Draft saved';
@@ -2225,6 +2425,22 @@ export class InstanceListComponent {
     }
 
     return instance.displayName;
+  }
+
+  private getLatestHistoryEntriesByThread(
+    entries: readonly ConversationHistoryEntry[]
+  ): Map<string, ConversationHistoryEntry> {
+    const latestEntries = new Map<string, ConversationHistoryEntry>();
+
+    for (const entry of entries) {
+      const threadId = this.getHistoryThreadId(entry);
+      const current = latestEntries.get(threadId);
+      if (!current || entry.endedAt > current.endedAt) {
+        latestEntries.set(threadId, entry);
+      }
+    }
+
+    return latestEntries;
   }
 
   private getHistoryThreadId(

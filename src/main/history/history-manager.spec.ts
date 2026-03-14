@@ -197,6 +197,7 @@ describe('HistoryManager', () => {
       workingDirectory: '/tmp/central-auth',
       yoloMode: false,
       provider: 'claude',
+      currentModel: 'opus',
       outputBuffer: [
         {
           id: 'message-user-1',
@@ -224,6 +225,8 @@ describe('HistoryManager', () => {
     const firstEntry = manager.getEntries()[0];
     expect(firstEntry?.sessionId).toBe('session-original');
     expect(firstEntry?.historyThreadId).toBe('thread-central-auth');
+    expect(firstEntry?.provider).toBe('claude');
+    expect(firstEntry?.currentModel).toBe('opus');
 
     const fallbackCopy: Instance = {
       ...firstInstance,
@@ -250,6 +253,8 @@ describe('HistoryManager', () => {
     expect(entries[0]?.sessionId).toBe('session-fallback-copy');
     expect(entries[0]?.historyThreadId).toBe('thread-central-auth');
     expect(entries[0]?.messageCount).toBe(3);
+    expect(entries[0]?.provider).toBe('claude');
+    expect(entries[0]?.currentModel).toBe('opus');
 
     const storageFiles = fs
       .readdirSync(path.join(userDataDir, 'conversation-history'))

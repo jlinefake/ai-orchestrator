@@ -161,6 +161,14 @@ export class OrchestrationHandler extends EventEmitter {
   private commandParseBuffers = new Map<string, string>();
 
   /**
+   * Rate limiter: tracks recent command executions per instance to prevent feedback loops.
+   * Key: instanceId, Value: array of { signature, timestamp }.
+   */
+  private recentCommands = new Map<string, { signature: string; timestamp: number }[]>();
+  private static readonly COMMAND_DEDUP_WINDOW_MS = 30_000;
+  private static readonly MAX_COMMANDS_PER_WINDOW = 10;
+
+  /**
    * Register an instance for orchestration
    */
   registerInstance(
@@ -182,6 +190,7 @@ export class OrchestrationHandler extends EventEmitter {
   unregisterInstance(instanceId: string): void {
     this.contexts.delete(instanceId);
     this.commandParseBuffers.delete(instanceId);
+    this.recentCommands.delete(instanceId);
 
     // Best-effort cleanup: drop any pending user actions for this instance.
     // Otherwise they can linger if an instance is terminated while awaiting input.
@@ -282,7 +291,7 @@ export class OrchestrationHandler extends EventEmitter {
   }
 
   /**
-   * Execute an orchestrator command
+   * Execute an orchestrator command (with rate limiting and dedup)
    */
   private executeCommand(
     instanceId: string,
@@ -292,6 +301,38 @@ export class OrchestrationHandler extends EventEmitter {
     if (!ctx) {
       logger.warn('No orchestration context for instance', { instanceId });
       return;
+    }
+
+    // Rate limiting: prevent feedback loops from runaway command execution.
+    // Read-only commands (get_children, get_task_status, etc.) are exempt.
+    const isReadOnly = ['get_children', 'get_task_status', 'get_child_output', 'get_child_summary', 'get_child_artifacts', 'get_child_section'].includes(command.action);
+    if (!isReadOnly) {
+      const now = Date.now();
+      const signature = this.computeCommandSignature(command);
+      const recent = this.recentCommands.get(instanceId) || [];
+
+      // Prune expired entries
+      const active = recent.filter(
+        (entry) => now - entry.timestamp < OrchestrationHandler.COMMAND_DEDUP_WINDOW_MS
+      );
+
+      // Check for duplicate command within the dedup window
+      if (active.some((entry) => entry.signature === signature)) {
+        logger.warn('Duplicate command suppressed (dedup)', { action: command.action, instanceId, signature });
+        return;
+      }
+
+      // Check global rate limit per instance
+      if (active.length >= OrchestrationHandler.MAX_COMMANDS_PER_WINDOW) {
+        logger.warn('Command rate limit exceeded', { action: command.action, instanceId, count: active.length });
+        this.injectResponse(instanceId, command.action, false, {
+          error: `Rate limit exceeded: ${active.length} commands in the last ${OrchestrationHandler.COMMAND_DEDUP_WINDOW_MS / 1000}s. Wait before issuing more commands.`,
+        });
+        return;
+      }
+
+      active.push({ signature, timestamp: now });
+      this.recentCommands.set(instanceId, active);
     }
 
     logger.info('Executing orchestrator command', { action: command.action, instanceId });
@@ -361,6 +402,29 @@ export class OrchestrationHandler extends EventEmitter {
       case 'consensus_query':
         this.handleConsensusQuery(instanceId, command);
         break;
+    }
+  }
+
+  /**
+   * Compute a stable signature for a command for deduplication purposes.
+   * Commands with the same action and key parameters produce the same signature.
+   */
+  private computeCommandSignature(command: OrchestratorCommand): string {
+    switch (command.action) {
+      case 'spawn_child':
+        return `spawn_child:${command.task.slice(0, 100)}:${command.name || ''}:${command.provider || ''}`;
+      case 'message_child':
+        return `message_child:${command.childId}:${command.message.slice(0, 80)}`;
+      case 'terminate_child':
+        return `terminate_child:${command.childId}`;
+      case 'consensus_query':
+        return `consensus_query:${command.question.slice(0, 100)}:${(command.providers || []).join(',')}`;
+      case 'request_user_action':
+        return `request_user_action:${command.requestType}:${command.title}`;
+      case 'call_tool':
+        return `call_tool:${command.toolId}:${JSON.stringify(command.args || '').slice(0, 80)}`;
+      default:
+        return `${command.action}:${JSON.stringify(command).slice(0, 120)}`;
     }
   }
 

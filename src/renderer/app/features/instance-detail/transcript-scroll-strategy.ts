@@ -84,7 +84,8 @@ export class TranscriptScrollStrategy implements VirtualScrollStrategy {
   /** Clear height cache (e.g., on instance switch) */
   clearCache(): void {
     this.heightCache.clear();
-    this.dataLength = 0;
+    this.updateTotalContentSize();
+    this.updateRenderedRange();
   }
 
   private getItemHeight(index: number): number {

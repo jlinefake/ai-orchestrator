@@ -272,11 +272,12 @@ interface WelcomeProjectContext {
         display: flex;
         flex-direction: column;
         flex: 1;
-        width: min(1440px, calc(100vw - 40px));
+        width: 100%;
         min-height: 0;
         overflow: hidden;
-        margin: 0 auto;
-        padding: 0 12px;
+        margin: 0;
+        padding: 0 16px;
+        box-sizing: border-box;
         gap: 10px;
         position: relative;
         z-index: 1;

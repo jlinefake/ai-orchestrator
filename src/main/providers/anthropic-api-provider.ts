@@ -32,7 +32,11 @@ import type {
   ProviderSessionOptions,
   ProviderAttachment,
 } from '../../shared/types/provider.types';
-import { MODEL_PRICING, CLAUDE_MODELS } from '../../shared/types/provider.types';
+import {
+  MODEL_PRICING,
+  CLAUDE_MODELS,
+  getProviderModelContextWindow
+} from '../../shared/types/provider.types';
 import type {
   OutputMessage,
   InstanceStatus,
@@ -202,7 +206,7 @@ export class AnthropicApiProvider extends BaseProvider {
       messages: [],
       systemPrompt,
       contextTokens: 0,
-      maxContextTokens: 200000, // Default for Claude models
+      maxContextTokens: getProviderModelContextWindow('anthropic-api', this.model),
       compactionAttempted: false,
     };
 

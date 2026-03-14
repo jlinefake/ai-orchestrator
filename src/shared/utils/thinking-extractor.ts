@@ -37,13 +37,47 @@ const XML_THINKING_PATTERN =
 // Bracket-style tags: [THINKING]...[/THINKING]
 const BRACKET_THINKING_PATTERN = /\[THINKING\]([\s\S]*?)\[\/THINKING\]/gi;
 
-// Header-style: **Header** or # Header followed by content until separator or response transition
-// This pattern matches:
-// 1. Bold header (**text**) or markdown header (# text, ## text, ### text)
-// 2. Followed by one or more paragraphs
-// 3. Until we hit a separator (---) or a response transition word/phrase
-const HEADER_PATTERN =
-  /^(?:\*\*([^*]+)\*\*|#{1,3}\s+(.+))\n\n([\s\S]+?)(?=\n---|\n\n(?:Answer:|Response:|Here's|Hi!|Hello|Sure,|I |The |This |That |Yes|No|Okay|OK|Let me|Here is|Here are|Based on|In summary|To summarize|In conclusion)|\n\n\n|$)/gm;
+const HEADER_START_PATTERN = /^(?:\*\*([^*]+)\*\*|#{1,3}\s+(.+))\n\n([\s\S]*)$/;
+
+const THINKING_HEADER_INDICATORS = [
+  'handling',
+  'analyzing',
+  'processing',
+  'thinking',
+  'reasoning',
+  'planning',
+  'considering',
+  'evaluating',
+  'understanding',
+  'examining',
+  'reviewing',
+  'crafting',
+  'drafting',
+  'composing',
+  'preparing',
+  'formulating',
+  'responding',
+];
+
+const META_REASONING_PATTERNS = [
+  /\bi need to\b/i,
+  /\bi should\b/i,
+  /\bi have to\b/i,
+  /\bi'll\b/i,
+  /\bi will\b/i,
+  /\brespond to the user\b/i,
+  /\brespond with\b/i,
+  /\buser (?:just )?(?:said|says|asked|is asking|wants|needs)\b/i,
+  /\bno tools? (?:are|is) needed\b/i,
+  /\bkeep it (?:concise|brief|short|simple|straightforward|friendly)\b/i,
+  /\bsimple response could be\b/i,
+  /\backnowledge\b/i,
+  /\bconsider using\b/i,
+];
+
+const RESPONSE_START_PATTERNS = [
+  /^(?:Answer:|Response:|Here's|Hi!|Hello|Hey!|Hey,|Sure,|Yes\b|No\b|Okay\b|OK\b|Let me\b|I'll\b|I can\b|Here is\b|Here are\b|Based on\b|In summary\b|To summarize\b|In conclusion\b)/i,
+];
 
 /**
  * Main extraction function - handles all formats
@@ -172,65 +206,115 @@ export function extractHeaderStyleThinking(content: string): {
   cleaned: string;
   extracted: string[];
 } {
-  const extracted: string[] = [];
-
-  // Reset regex state
-  HEADER_PATTERN.lastIndex = 0;
-
-  // Only extract if the content starts with a header pattern
-  // This prevents extracting legitimate headers from mid-response
-  const startsWithHeader =
-    /^(?:\*\*[^*]+\*\*|#{1,3}\s+.+)\n\n/.test(content.trim());
-
-  if (!startsWithHeader) {
+  const trimmed = content.trim();
+  const headerMatch = trimmed.match(HEADER_START_PATTERN);
+  if (!headerMatch) {
     return { cleaned: content, extracted: [] };
   }
 
-  const cleaned = content.replace(
-    HEADER_PATTERN,
-    (match, boldHeader, hashHeader, body) => {
-      const header = boldHeader || hashHeader;
-      if (header && body && body.trim()) {
-        // Don't extract if this looks like a legitimate section
-        // Check if the header is one of the common "thinking" indicators
-        const thinkingIndicators = [
-          'handling',
-          'analyzing',
-          'processing',
-          'thinking',
-          'reasoning',
-          'planning',
-          'considering',
-          'evaluating',
-          'understanding',
-          'examining',
-          'reviewing',
-        ];
+  const header = (headerMatch[1] || headerMatch[2] || '').trim();
+  const body = (headerMatch[3] || '').trim();
+  if (!header || !body) {
+    return { cleaned: content, extracted: [] };
+  }
 
-        const headerLower = header.toLowerCase().trim();
-        const isThinkingHeader = thinkingIndicators.some(
-          (indicator) =>
-            headerLower.includes(indicator) ||
-            headerLower.startsWith('step') ||
-            headerLower.startsWith('first') ||
-            headerLower.startsWith('next')
-        );
+  const split = splitHeaderThinkingBody(body);
+  if (!split) {
+    return { cleaned: content, extracted: [] };
+  }
 
-        // Only extract if the header is a known thinking indicator.
-        // Previously this used OR with isShortReasoning, which caused
-        // legitimate short responses starting with bold/hash headers
-        // (e.g. "**Note**\n\nI cannot help with that.") to be silently
-        // consumed as "thinking" — making messages disappear from the UI.
-        if (isThinkingHeader) {
-          extracted.push(`${header}\n\n${body.trim()}`);
-          return '';
-        }
-      }
-      return match;
-    }
+  const isThinkingHeader = looksLikeThinkingHeader(header);
+  const isMetaReasoning = looksLikeMetaReasoning(split.thinking);
+
+  // Only extract when we have a strong signal that the first block is model
+  // reasoning. This avoids swallowing legitimate user-facing markdown sections.
+  if (!isThinkingHeader && !isMetaReasoning) {
+    return { cleaned: content, extracted: [] };
+  }
+
+  return {
+    cleaned: split.response,
+    extracted: [`${header}\n\n${split.thinking}`],
+  };
+}
+
+function looksLikeThinkingHeader(header: string): boolean {
+  const headerLower = header.toLowerCase().trim();
+  return THINKING_HEADER_INDICATORS.some(
+    (indicator) =>
+      headerLower.includes(indicator) ||
+      headerLower.startsWith('step') ||
+      headerLower.startsWith('first') ||
+      headerLower.startsWith('next')
   );
+}
 
-  return { cleaned, extracted };
+function looksLikeMetaReasoning(text: string): boolean {
+  return META_REASONING_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function looksLikeResponseStart(text: string): boolean {
+  return RESPONSE_START_PATTERNS.some((pattern) => pattern.test(text.trim()));
+}
+
+function splitHeaderThinkingBody(body: string): { response: string; thinking: string } | null {
+  const normalized = body.replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const separatorMatch = normalized.match(/^([\s\S]+?)\n---+\s*\n+([\s\S]+)$/);
+  if (separatorMatch) {
+    const thinking = separatorMatch[1].trim();
+    const response = separatorMatch[2].trim();
+    if (thinking) {
+      return { thinking, response };
+    }
+  }
+
+  const paragraphs = normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length >= 2) {
+    for (let index = 1; index < paragraphs.length; index += 1) {
+      const candidate = paragraphs[index];
+      if (looksLikeResponseStart(candidate)) {
+        return {
+          thinking: paragraphs.slice(0, index).join('\n\n'),
+          response: paragraphs.slice(index).join('\n\n'),
+        };
+      }
+    }
+
+    if (looksLikeMetaReasoning(paragraphs[0]) && !looksLikeMetaReasoning(paragraphs[1])) {
+      return {
+        thinking: paragraphs[0],
+        response: paragraphs.slice(1).join('\n\n'),
+      };
+    }
+  }
+
+  const lines = normalized.split('\n');
+  for (let index = 1; index < lines.length; index += 1) {
+    const candidate = lines[index].trim();
+    if (!candidate || !looksLikeResponseStart(candidate)) {
+      continue;
+    }
+
+    const thinking = lines.slice(0, index).join('\n').trim();
+    const response = lines.slice(index).join('\n').trim();
+    if (thinking) {
+      return { thinking, response };
+    }
+  }
+
+  if (looksLikeMetaReasoning(normalized)) {
+    return { thinking: normalized, response: '' };
+  }
+
+  return null;
 }
 
 /**

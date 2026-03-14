@@ -295,6 +295,26 @@ describe('AnthropicApiProvider', () => {
       );
     });
 
+    it('uses a 1M context total for explicit Claude 1M models', async () => {
+      const explicitModelProvider = new AnthropicApiProvider(config);
+      const contextHandler = vi.fn();
+      explicitModelProvider.on('context', contextHandler);
+
+      await explicitModelProvider.initialize({
+        sessionId: 'test-session',
+        workingDirectory: '/test',
+        model: 'sonnet[1m]',
+      });
+
+      await explicitModelProvider.sendMessage('Hello');
+
+      expect(contextHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          total: 1000000,
+        })
+      );
+    });
+
     it('emits idle status after completion', async () => {
       const statusHandler = vi.fn();
       provider.on('status', statusHandler);

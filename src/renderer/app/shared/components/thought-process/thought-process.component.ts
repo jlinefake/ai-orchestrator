@@ -18,7 +18,7 @@ import { ExpansionStateService } from '../../../features/instance-detail/expansi
     <div class="thought-process" [class.expanded]="isExpanded()">
       <button class="thought-header" (click)="toggle()">
         <span class="thought-icon">{{ isExpanded() ? '▼' : '▶' }}</span>
-        <span class="thought-label">Thought: {{ displayLabel() }}</span>
+        <span class="thought-label">{{ label() }}</span>
         @if (thinkingBlocks()?.length) {
           <span class="thought-count">({{ thinkingBlocks()!.length }})</span>
         }
@@ -179,32 +179,6 @@ export class ThoughtProcessComponent {
   private expansionState = inject(ExpansionStateService);
 
   isExpanded = computed(() => this.expansionState.isExpanded(this.instanceId(), this.itemId()));
-
-  /**
-   * Computed label that auto-generates from first thinking block if no custom label
-   */
-  displayLabel = computed(() => {
-    if (this.label() !== 'Thought process') {
-      return this.label();
-    }
-
-    // Generate label from first thinking block
-    const blocks = this.thinkingBlocks();
-    if (blocks?.length) {
-      const firstContent = blocks[0].content;
-      const firstLine = firstContent.split('\n')[0].trim();
-      return firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
-    }
-
-    // Legacy: generate from string thoughts
-    const thoughtsList = this.thoughts();
-    if (thoughtsList?.length) {
-      const firstLine = thoughtsList[0].split('\n')[0].trim();
-      return firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
-    }
-
-    return 'Thought process';
-  });
 
   constructor() {
     // Initialize expanded state from input

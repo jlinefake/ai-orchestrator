@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   getConversationHistoryTitle,
+  inferConversationHistoryProvider,
+  normalizeConversationHistoryEntryProvider,
   type ConversationHistoryEntry,
 } from './history.types';
 
@@ -60,5 +62,74 @@ describe('history title helpers', () => {
         })
       )
     ).toBe('Plan the smoke test');
+  });
+});
+
+describe('history provider helpers', () => {
+  it('keeps an explicit provider when one is already stored', () => {
+    expect(
+      inferConversationHistoryProvider(
+        makeEntry({
+          provider: 'gemini',
+          sessionId: 'session-1',
+        })
+      )
+    ).toBe('gemini');
+  });
+
+  it('infers the provider from a legacy restore identifier prefix', () => {
+    expect(
+      inferConversationHistoryProvider(
+        makeEntry({
+          sessionId: 'codex-1772759207884-oc6cdv',
+        })
+      )
+    ).toBe('codex');
+  });
+
+  it('infers the provider from a stored model identifier', () => {
+    expect(
+      inferConversationHistoryProvider(
+        makeEntry({
+          currentModel: 'gpt-5.3-codex',
+        })
+      )
+    ).toBe('codex');
+  });
+
+  it('infers the provider from a direct greeting in legacy titles', () => {
+    expect(
+      inferConversationHistoryProvider(
+        makeEntry({
+          firstUserMessage: 'Hey Gemini!',
+          lastUserMessage: 'Hey Gemini!',
+          displayName: 'Instance 1771720410089',
+        })
+      )
+    ).toBe('gemini');
+  });
+
+  it('defaults ambiguous legacy entries to Claude', () => {
+    expect(
+      inferConversationHistoryProvider(
+        makeEntry({
+          displayName: 'claude-orchestrator',
+          firstUserMessage: 'Can you use your LSP server?',
+          lastUserMessage: 'yes',
+        })
+      )
+    ).toBe('claude');
+  });
+
+  it('normalizes legacy entries by backfilling the inferred provider', () => {
+    expect(
+      normalizeConversationHistoryEntryProvider(
+        makeEntry({
+          sessionId: 'codex-1772541540596-7j0hhg',
+        })
+      )
+    ).toMatchObject({
+      provider: 'codex',
+    });
   });
 });

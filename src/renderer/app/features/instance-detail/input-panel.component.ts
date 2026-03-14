@@ -131,15 +131,6 @@ import type {
 
       <!-- Input area -->
       <div class="input-row">
-        <button
-          class="btn-attach"
-          [disabled]="disabled()"
-          (click)="onAddFiles()"
-          title="Add files"
-        >
-          <span class="attach-icon">+</span>
-        </button>
-
         <div class="textarea-wrapper" [class.has-ghost]="showGhostText()">
           @if (showGhostText()) {
             <div class="ghost-text" aria-hidden="true">
@@ -156,34 +147,49 @@ import type {
             (keydown)="onKeyDown($event)"
             (focus)="onFocus()"
             (blur)="onBlur()"
-            rows="1"
+            rows="5"
             #textareaRef
           ></textarea>
         </div>
 
-        <button
-          class="btn-send"
-          [disabled]="disabled() || !canSend()"
-          (click)="onSend()"
-          title="Send message (Enter)"
-        >
-          <span class="send-icon">↑</span>
-        </button>
-      </div>
+        <div class="composer-footer">
+          <div class="composer-actions-left">
+            <button
+              class="btn-attach"
+              [disabled]="disabled()"
+              (click)="onAddFiles()"
+              title="Add files"
+            >
+              <span class="attach-icon">+</span>
+            </button>
+          </div>
 
-      <div class="input-hints">
-        @if (showGhostText()) {
-          <span class="hint hint-ghost">Tab or → to accept suggestion</span>
-        } @else {
-          <span class="hint">Press Enter to send, Shift+Enter for new line</span>
-        }
-        @if (isRespawning()) {
-          <span class="hint hint-respawning">Resuming session...</span>
-        } @else if (isBusy()) {
-          <span class="hint hint-interrupt">Press Esc to interrupt</span>
-        } @else {
-          <span class="hint">Type / for commands, Cmd+K for palette</span>
-        }
+          <div class="input-hints">
+            @if (showGhostText()) {
+              <span class="hint hint-ghost">Tab or → to accept suggestion</span>
+            } @else {
+              <span class="hint">Press Enter to send, Shift+Enter for new line</span>
+            }
+            @if (isRespawning()) {
+              <span class="hint hint-respawning">Resuming session...</span>
+            } @else if (isBusy()) {
+              <span class="hint hint-interrupt">Press Esc to interrupt</span>
+            } @else {
+              <span class="hint">Type / for commands, Cmd+K for palette</span>
+            }
+          </div>
+
+          <div class="composer-actions-right">
+            <button
+              class="btn-send"
+              [disabled]="disabled() || !canSend()"
+              (click)="onSend()"
+              title="Send message (Enter)"
+            >
+              <span class="send-icon">↑</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       @if (queuedMessages().length > 0) {
@@ -416,43 +422,55 @@ import type {
     /* Input Row - Message input area */
     .input-row {
       display: flex;
-      gap: var(--spacing-sm);
-      align-items: center;
-      min-height: 46px;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 180px;
     }
 
     /* Textarea Wrapper - Container for ghost text overlay */
     .textarea-wrapper {
       position: relative;
-      display: flex;
-      align-items: stretch;
+      display: block;
       flex: 1;
       min-width: 0;
-      border-radius: 18px;
+      min-height: clamp(148px, 20vh, 220px);
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 26px;
+      overflow: hidden;
+      transition: all var(--transition-fast);
+      box-sizing: border-box;
     }
 
     .textarea-wrapper.has-ghost {
       background: rgba(255, 255, 255, 0.035);
-      border-radius: 18px;
+    }
+
+    .textarea-wrapper:focus-within {
+      border-color: rgba(var(--primary-rgb), 0.26);
+      box-shadow:
+        0 0 0 3px rgba(var(--primary-rgb), 0.08),
+        0 18px 36px rgba(0, 0, 0, 0.16);
     }
 
     .message-input {
       width: 100%;
-      min-height: 46px;
-      max-height: 170px;
-      padding: 12px 14px;
-      background: rgba(255, 255, 255, 0.035);
-      border: 1px solid rgba(255, 255, 255, 0.07);
-      border-radius: 18px;
+      min-height: clamp(148px, 20vh, 220px);
+      max-height: min(40vh, 520px);
+      padding: 20px 22px;
+      background: transparent;
+      border: none;
+      border-radius: 26px;
       resize: none;
       line-height: 1.5;
       font-family: var(--font-display);
-      font-size: 14px;
+      font-size: 15px;
       color: var(--text-primary);
-      transition: all var(--transition-fast);
+      transition: color var(--transition-fast);
       position: relative;
       z-index: 2;
       box-sizing: border-box;
+      overflow-y: auto;
 
       &::placeholder {
         color: var(--text-muted);
@@ -460,10 +478,7 @@ import type {
 
       &:focus {
         outline: none;
-        border-color: rgba(var(--primary-rgb), 0.34);
-        box-shadow:
-          0 0 0 3px rgba(var(--primary-rgb), 0.1),
-          0 18px 36px rgba(0, 0, 0, 0.18);
+        box-shadow: none;
       }
 
       &:disabled {
@@ -483,14 +498,14 @@ import type {
       left: 0;
       right: 0;
       bottom: 0;
-      padding: var(--spacing-sm) var(--spacing-md);
+      padding: 20px 22px;
       pointer-events: none;
       z-index: 1;
       overflow: hidden;
       white-space: pre-wrap;
       word-break: break-word;
       font-family: var(--font-display);
-      font-size: 14px;
+      font-size: 15px;
       line-height: 1.5;
       border: 1px solid transparent; /* Match textarea border space */
       box-sizing: border-box;
@@ -512,10 +527,28 @@ import type {
     }
 
     /* Action Buttons - Attach and Send */
+    .composer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 28px;
+      padding: 0 4px;
+      min-width: 0;
+    }
+
+    .composer-actions-left,
+    .composer-actions-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
     .btn-attach {
-      width: 28px;
-      height: 46px;
-      padding: 0;
+      width: auto;
+      height: auto;
+      padding: 0 6px 0 0;
       border-radius: 0;
       background: transparent;
       border: none;
@@ -524,11 +557,10 @@ import type {
       align-items: center;
       justify-content: center;
       transition: all var(--transition-fast);
-      flex-shrink: 0;
       cursor: pointer;
 
       &:hover:not(:disabled) {
-        background: transparent;
+        background: rgba(255, 255, 255, 0.05);
         color: var(--text-primary);
       }
 
@@ -539,58 +571,63 @@ import type {
     }
 
     .attach-icon {
-      font-size: 30px;
+      display: block;
+      font-size: 22px;
       font-weight: 300;
       line-height: 1;
-      transform: translateY(-1px);
+      transform: translateY(-2px);
     }
 
     .btn-send {
-      width: 46px;
-      height: 46px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.95) 0%, var(--primary-hover) 100%);
-      border: none;
-      color: var(--bg-primary);
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: rgba(var(--primary-rgb), 0.1);
+      border: 1px solid rgba(var(--primary-rgb), 0.16);
+      color: rgba(243, 239, 229, 0.86);
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all var(--transition-fast);
-      flex-shrink: 0;
       cursor: pointer;
-      box-shadow: 0 14px 28px rgba(var(--primary-rgb), 0.18);
 
       &:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 18px 34px rgba(var(--primary-rgb), 0.24);
+        background: rgba(var(--primary-rgb), 0.15);
+        border-color: rgba(var(--primary-rgb), 0.24);
+        color: var(--text-primary);
       }
 
       &:disabled {
-        opacity: 0.3;
+        opacity: 0.35;
         cursor: not-allowed;
-        transform: none;
       }
     }
 
     .send-icon {
       font-size: 16px;
-      font-weight: bold;
+      font-weight: 600;
+      line-height: 1;
     }
 
     /* Input Hints - Keyboard shortcuts */
     .input-hints {
       display: flex;
       justify-content: space-between;
-      margin-top: 10px;
-      padding: 0 2px;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
       gap: 12px;
+      white-space: nowrap;
     }
 
     .hint {
       font-family: var(--font-mono);
       font-size: 9px;
       letter-spacing: 0.02em;
+      line-height: 1;
       color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .hint-interrupt {
@@ -992,8 +1029,8 @@ export class InputPanelComponent implements OnDestroy {
 
     requestAnimationFrame(() => {
       this.resizeScheduled = false;
-      // Only set height once to minimize reflow
-      const newHeight = Math.min(textarea.scrollHeight, 200);
+      const maxHeight = Math.min(window.innerHeight * 0.38, 520);
+      const newHeight = Math.min(textarea.scrollHeight, maxHeight);
       if (textarea.style.height !== `${newHeight}px`) {
         textarea.style.height = 'auto';
         textarea.style.height = `${newHeight}px`;

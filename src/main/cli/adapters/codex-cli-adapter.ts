@@ -289,9 +289,8 @@ export class CodexCliAdapter extends BaseCliAdapter {
       args.push(this.sessionId);
     }
 
-    if (message.content) {
-      args.push(message.content);
-    }
+    // Prompt is written to stdin in executePreparedMessage, not as a positional arg.
+    // Modern Codex CLI reads from stdin ("Reading prompt from stdin...").
 
     return args;
   }
@@ -517,7 +516,11 @@ export class CodexCliAdapter extends BaseCliAdapter {
 
       this.process = process;
 
+      // Write the prompt to stdin — modern Codex CLI reads from stdin, not positional args
       if (process.stdin) {
+        if (message.content) {
+          process.stdin.write(message.content);
+        }
         process.stdin.end();
       }
 

@@ -30,7 +30,8 @@ import { generateId } from '../../../shared/utils/id-generator';
 import { extractThinkingContent } from '../../../shared/utils/thinking-extractor';
 import {
   MODEL_PRICING,
-  CLAUDE_MODELS
+  CLAUDE_MODELS,
+  getProviderModelContextWindow
 } from '../../../shared/types/provider.types';
 
 const logger = getLogger('ClaudeCliAdapter');
@@ -91,7 +92,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
   /** Map tool_use ids to tool metadata for robust permission-denial parsing */
   private toolUseContexts = new Map<string, { name: string; input: Record<string, unknown> }>();
   /** Cached context window from last result message for accurate streaming percentage */
-  private lastKnownContextWindow = 200000;
+  private lastKnownContextWindow: number;
 
   constructor(options: ClaudeCliSpawnOptions = {}) {
     const config: CliAdapterConfig = {
@@ -105,6 +106,7 @@ export class ClaudeCliAdapter extends BaseCliAdapter {
 
     this.spawnOptions = options;
     this.sessionId = options.sessionId || generateId();
+    this.lastKnownContextWindow = getProviderModelContextWindow('claude-cli', options.model);
     this.parser = new NdjsonParser();
   }
 

@@ -120,6 +120,8 @@ export class HistoryManager {
         originalInstanceId: instance.id,
         parentId: instance.parentId,
         sessionId: instance.sessionId,
+        provider: instance.provider,
+        currentModel: instance.currentModel,
       };
 
       // Create conversation data

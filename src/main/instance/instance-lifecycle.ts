@@ -15,7 +15,13 @@ import {
 } from '../cli/adapters/adapter-factory';
 import type { CliType } from '../cli/cli-detection';
 import type { AdapterRuntimeCapabilities } from '../cli/adapters/base-cli-adapter';
-import { getModelsForProvider, isModelTier, looksLikeCodexModelId, resolveModelForTier } from '../../shared/types/provider.types';
+import {
+  getModelsForProvider,
+  getProviderModelContextWindow,
+  isModelTier,
+  looksLikeCodexModelId,
+  resolveModelForTier
+} from '../../shared/types/provider.types';
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getHistoryManager } from '../history';
 import { getMemoryMonitor, getOutputStorageManager } from '../memory';
@@ -465,6 +471,11 @@ export class InstanceLifecycleManager extends EventEmitter {
     }
 
     instance.currentModel = resolvedModel;
+    instance.contextUsage = {
+      ...instance.contextUsage,
+      total: getProviderModelContextWindow(resolvedCliType, resolvedModel),
+      percentage: 0
+    };
 
     logger.info('Resolved model for instance', {
       configOverride: config.modelOverride,
@@ -686,6 +697,8 @@ export class InstanceLifecycleManager extends EventEmitter {
       throw new Error(`Instance ${instanceId} not found`);
     }
 
+    const cliType = await this.resolveCliTypeForInstance(instance);
+
     // Terminate existing adapter
     const oldAdapter = this.deps.getAdapter(instanceId);
     if (oldAdapter) {
@@ -698,16 +711,13 @@ export class InstanceLifecycleManager extends EventEmitter {
     instance.outputBuffer = [];
     instance.contextUsage = {
       used: 0,
-      total: LIMITS.DEFAULT_MAX_CONTEXT_TOKENS,
+      total: getProviderModelContextWindow(cliType, instance.currentModel),
       percentage: 0
     };
     instance.totalTokensUsed = 0;
 
     // Reset first message tracking
     this.deps.clearFirstMessageTracking(instanceId);
-
-    // Create new adapter
-    const cliType = await this.resolveCliTypeForInstance(instance);
 
     const spawnOptions: UnifiedSpawnOptions = {
       sessionId: newSessionId,
@@ -1041,7 +1051,6 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
     }
 
     // Update instance state
-    instance.currentModel = newModel;
     instance.status = 'initializing';
 
     // Resolve agent and permissions (same as toggleYoloMode)
@@ -1059,17 +1068,40 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
     // Validate model against provider before passing it
     let validatedModel: string | undefined = newModel;
     if (cliType !== 'claude') {
+      if (isModelTier(newModel)) {
+        validatedModel = resolveModelForTier(newModel, cliType);
+      }
+
       const providerModels = getModelsForProvider(cliType);
-      const allowCodexDynamicModel = cliType === 'codex' && looksLikeCodexModelId(newModel);
-      if (providerModels.length > 0 && !providerModels.some(m => m.id === newModel) && !allowCodexDynamicModel) {
+      const modelToValidate = validatedModel;
+      const allowCodexDynamicModel =
+        modelToValidate !== undefined &&
+        cliType === 'codex' &&
+        looksLikeCodexModelId(modelToValidate);
+      if (
+        modelToValidate !== undefined &&
+        providerModels.length > 0 &&
+        !providerModels.some(m => m.id === modelToValidate) &&
+        !allowCodexDynamicModel
+      ) {
         logger.warn('Model not valid for target provider during changeModel, using provider default', {
-          model: newModel,
+          model: modelToValidate,
           provider: cliType,
           fallbackModel: 'provider-default',
         });
         validatedModel = undefined;
       }
     }
+
+    instance.currentModel = validatedModel;
+    const contextTotal = getProviderModelContextWindow(cliType, validatedModel);
+    instance.contextUsage = {
+      ...instance.contextUsage,
+      total: contextTotal,
+      percentage: contextTotal > 0
+        ? Math.min((instance.contextUsage.used / contextTotal) * 100, 100)
+        : 0
+    };
 
     const spawnOptions: UnifiedSpawnOptions = {
       sessionId: instance.sessionId,

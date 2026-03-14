@@ -290,6 +290,12 @@ interface EditorMenuItem {
         gap: 10px;
       }
 
+      .name-row app-status-indicator {
+        position: relative;
+        top: 7px;
+        flex-shrink: 0;
+      }
+
       .instance-name {
         font-family: var(--font-display);
         font-size: clamp(16px, 1.75vw, 21px);
@@ -576,6 +582,7 @@ interface EditorMenuItem {
 
       .header-actions {
         display: flex;
+        align-items: center;
         gap: 6px;
         flex-wrap: wrap;
         justify-content: flex-end;
@@ -583,21 +590,25 @@ interface EditorMenuItem {
       }
 
       .btn-action {
-        padding: 7px 11px;
-        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 2px;
+        min-height: 28px;
+        border-radius: 0;
         font-family: var(--font-display);
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.01em;
-        background: rgba(255, 255, 255, 0.025);
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        line-height: 1;
+        white-space: nowrap;
+        background: transparent;
+        border: none;
         color: var(--text-secondary);
         cursor: pointer;
-        transition: all var(--transition-fast);
+        transition: color var(--transition-fast), opacity var(--transition-fast);
 
         &:hover:not(:disabled) {
-          background: rgba(255, 255, 255, 0.05);
-          border-color: rgba(255, 255, 255, 0.1);
           color: var(--text-primary);
         }
 
@@ -608,18 +619,13 @@ interface EditorMenuItem {
       }
 
       .btn-action.btn-icon {
-        width: 34px;
-        height: 34px;
+        width: auto;
+        height: auto;
         padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
       }
 
       .btn-action.btn-icon.active {
         color: var(--primary-color);
-        border-color: rgba(var(--primary-rgb), 0.22);
-        background: rgba(var(--primary-rgb), 0.08);
       }
 
       .open-menu-shell {
@@ -688,39 +694,25 @@ interface EditorMenuItem {
 
       .btn-danger {
         color: var(--error-color);
-        border-color: rgba(var(--error-rgb), 0.18);
 
         &:hover:not(:disabled) {
-          background: rgba(var(--error-rgb), 0.1);
-          border-color: rgba(var(--error-rgb), 0.26);
+          color: #ff7d72;
         }
       }
 
       .btn-interrupt {
-        background: rgba(var(--primary-rgb), 0.12);
         color: var(--primary-color);
-        border-color: rgba(var(--primary-rgb), 0.18);
 
         &:hover:not(:disabled) {
-          background: rgba(var(--primary-rgb), 0.18);
-          border-color: rgba(var(--primary-rgb), 0.24);
           color: var(--primary-hover);
         }
       }
 
       .btn-primary {
-        background: linear-gradient(
-          135deg,
-          rgba(var(--primary-rgb), 0.9) 0%,
-          var(--primary-hover) 100%
-        );
-        border: none;
-        color: var(--bg-primary);
-        box-shadow: 0 10px 22px rgba(var(--primary-rgb), 0.14);
+        color: var(--primary-color);
 
         &:hover:not(:disabled) {
-          transform: translateY(-1px);
-          box-shadow: 0 14px 26px rgba(var(--primary-rgb), 0.18);
+          color: var(--primary-hover);
         }
       }
 
@@ -749,6 +741,10 @@ interface EditorMenuItem {
 
         .name-row {
           gap: 8px;
+        }
+
+        .name-row app-status-indicator {
+          top: 5px;
         }
 
         .instance-name {

@@ -15,10 +15,11 @@ import {
   signal,
   ChangeDetectionStrategy,
   afterNextRender,
-  DestroyRef
+  DestroyRef,
+  ElementRef,
+  untracked
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { ScrollingModule, CdkVirtualScrollViewport, VIRTUAL_SCROLL_STRATEGY } from '@angular/cdk/scrolling';
 import { OutputMessage } from '../../core/state/instance.store';
 import { MarkdownService } from '../../core/services/markdown.service';
 import { ElectronIpcService } from '../../core/services/ipc';
@@ -27,7 +28,6 @@ import { MessageAttachmentsComponent } from '../../shared/components/message-att
 import { ThoughtProcessComponent } from '../../shared/components/thought-process/thought-process.component';
 import { ToolGroupComponent } from '../../shared/components/tool-group/tool-group.component';
 import { DisplayItemProcessor, DisplayItem } from './display-item-processor.service';
-import { TranscriptScrollStrategy } from './transcript-scroll-strategy';
 
 type RenderedMarkdown = ReturnType<MarkdownService['render']>;
 
@@ -40,11 +40,7 @@ interface RenderedDisplayItem extends DisplayItem {
 @Component({
   selector: 'app-output-stream',
   standalone: true,
-  imports: [DatePipe, MessageAttachmentsComponent, ThoughtProcessComponent, ToolGroupComponent, ScrollingModule],
-  providers: [
-    TranscriptScrollStrategy,
-    { provide: VIRTUAL_SCROLL_STRATEGY, useExisting: TranscriptScrollStrategy },
-  ],
+  imports: [DatePipe, MessageAttachmentsComponent, ThoughtProcessComponent, ToolGroupComponent],
   template: `
     @if (displayItems().length === 0) {
       <div class="empty-stream">
@@ -52,10 +48,9 @@ interface RenderedDisplayItem extends DisplayItem {
         <p class="hint">Start a conversation</p>
       </div>
     } @else {
-      <cdk-virtual-scroll-viewport class="output-stream" #container>
-        <div *cdkVirtualFor="let item of displayItems(); let i = index; trackBy: trackByItemId"
-             class="transcript-item"
-             [attr.data-item-index]="i">
+      <div class="output-stream" #container>
+        @for (item of displayItems(); track item.id; let i = $index) {
+          <div class="transcript-item" [attr.data-item-index]="i">
           @if (item.type === 'thought-group') {
             @if (hasThoughtGroupContent(item)) {
               <div class="thought-group">
@@ -64,7 +59,6 @@ interface RenderedDisplayItem extends DisplayItem {
                     <app-thought-process
                       [thoughts]="item.thoughts || []"
                       [thinkingBlocks]="item.thinking"
-                      [label]="getThoughtLabel(item.thoughts || [])"
                       [defaultExpanded]="thinkingDefaultExpanded()"
                       [instanceId]="instanceId()"
                       [itemId]="item.id"
@@ -72,7 +66,8 @@ interface RenderedDisplayItem extends DisplayItem {
                   }
                 }
                 @if (item.response && hasContent(item.response)) {
-                  <div class="message message-assistant" [class.continuation]="item.showHeader === false">
+                  <div class="message message-assistant" [class.continuation]="item.showHeader === false"
+                    [title]="item.response.timestamp | date: 'HH:mm:ss'">
                     @if (item.showHeader !== false) {
                       <div class="message-header">
                         <span class="message-type">{{ getProviderDisplayName(provider()) }}</span>
@@ -110,15 +105,17 @@ interface RenderedDisplayItem extends DisplayItem {
                 <div class="boundary-line"></div>
               </div>
             } @else if (hasContent(item.message)) {
-              <div class="message" [class]="'message-' + item.message.type" [class.continuation]="item.showHeader === false">
-                @if (item.showHeader !== false) {
+              <div class="message" [class]="'message-' + item.message.type"
+                [class.continuation]="item.showHeader === false"
+                [title]="item.message.timestamp | date: 'HH:mm:ss'">
+                @if (item.showHeader !== false && item.message.type !== 'user') {
                   <div class="message-header">
                     <span class="message-type">{{ formatType(item.message.type) }}</span>
                     @if (item.repeatCount && item.repeatCount > 1) {
                       <span class="repeat-badge">&times;{{ item.repeatCount }}</span>
                     }
                     <span class="message-time">{{ item.message.timestamp | date: 'HH:mm:ss' }}</span>
-                    @if (item.message.type === 'user' || item.message.type === 'assistant') {
+                    @if (item.message.type === 'assistant') {
                       <button class="copy-message-btn" [class.copied]="isMessageCopied(item.message.id)"
                         (click)="copyMessageContent(item.message.content, item.message.id)"
                         title="Copy to clipboard">
@@ -151,8 +148,18 @@ interface RenderedDisplayItem extends DisplayItem {
               </div>
             }
           }
-        </div>
-      </cdk-virtual-scroll-viewport>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- Scroll to top button -->
+    @if (showScrollToTop()) {
+      <button class="scroll-to-top-btn" (click)="scrollToTop()" title="Scroll to top">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+      </button>
     }
 
     <!-- Scroll to bottom button -->
@@ -173,7 +180,8 @@ interface RenderedDisplayItem extends DisplayItem {
         position: relative;
       }
 
-      cdk-virtual-scroll-viewport.output-stream {
+      /* #7: Anchor content to bottom when conversation is short */
+      .output-stream {
         flex: 1;
         min-height: 0;
         height: 100%;
@@ -183,13 +191,15 @@ interface RenderedDisplayItem extends DisplayItem {
         background: transparent;
         border-radius: 18px;
         position: relative;
+        display: flex;
+        flex-direction: column;
+        /* Use margin-top:auto on first child instead of justify-content:flex-end
+           to anchor short content to bottom without breaking scroll */
       }
 
-      :host ::ng-deep .cdk-virtual-scroll-content-wrapper {
-        width: 100%;
-        max-width: 100%;
-        min-width: 0;
-        box-sizing: border-box;
+      /* Push content to bottom when conversation is short */
+      .transcript-item:first-child {
+        margin-top: auto;
       }
 
       .transcript-item {
@@ -198,126 +208,37 @@ interface RenderedDisplayItem extends DisplayItem {
         box-sizing: border-box;
       }
 
+      /* #1: Tighter vertical spacing */
       .message {
         width: 100%;
         max-width: none;
         min-width: 0;
         box-sizing: border-box;
-        padding: 8px 0;
+        padding: 2px 0;
         border-radius: 0;
         background: transparent;
         border: none;
         box-shadow: none;
-        margin-bottom: 10px;
+        margin-bottom: 4px;
       }
 
-      /* Continuation messages from the same sender — tighter spacing, no top radius */
+      /* #4: Continuation messages tuck tight */
       .message.continuation {
-        margin-top: -8px;
+        margin-top: -2px;
         padding-top: 0;
       }
 
+      /* #2: User messages — no background, right-aligned plain text */
       .message-user {
-        width: 100%;
+        width: fit-content;
+        max-width: 85%;
         margin-left: auto;
-        padding: 12px 14px;
-        border-radius: 20px;
-        background:
-          linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.12)),
-          rgba(255, 255, 255, 0.03);
-        border-color: rgba(var(--primary-rgb), 0.24);
-        border: 1px solid rgba(var(--primary-rgb), 0.24);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-        color: var(--text-primary);
-
-        .message-type,
-        .message-time {
-          color: rgba(243, 239, 229, 0.6);
-        }
-
-        .markdown-content {
-          color: var(--text-primary);
-
-          /* Ensure all text elements inherit the calmer user tint */
-          h1,
-          h2,
-          h3,
-          h4,
-          h5,
-          h6,
-          p,
-          li,
-          strong,
-          em,
-          b,
-          i {
-            color: inherit;
-          }
-
-          ul,
-          ol {
-            color: inherit;
-          }
-
-          li::marker {
-            color: rgba(243, 239, 229, 0.72);
-          }
-
-          a {
-            color: var(--text-primary);
-            text-decoration: underline;
-            font-weight: 600;
-
-            &:hover {
-              background: rgba(255, 255, 255, 0.08);
-              border-radius: 2px;
-            }
-          }
-
-          .inline-code {
-            background: rgba(255, 255, 255, 0.08);
-            color: inherit;
-            border-color: rgba(255, 255, 255, 0.1);
-          }
-        }
-
-        .copy-message-btn {
-          color: rgba(243, 239, 229, 0.52);
-
-          &:hover {
-            color: var(--text-primary);
-            background: rgba(255, 255, 255, 0.08);
-          }
-        }
-      }
-
-      /* Text selection for user messages - needs ::ng-deep to pierce shadow DOM */
-      :host ::ng-deep .message-user {
-        *::selection {
-          background: rgba(0, 0, 0, 0.35) !important;
-          color: #fff !important;
-        }
-
-        *::-moz-selection {
-          background: rgba(0, 0, 0, 0.35) !important;
-          color: #fff !important;
-        }
-      }
-
-      /* File attachment chip styling inside user messages */
-      :host ::ng-deep .message-user app-message-attachments .file-attachment {
-        background: rgba(0, 0, 0, 0.15);
-        border-color: rgba(0, 0, 0, 0.2);
-      }
-
-      :host ::ng-deep .message-user app-message-attachments .file-name,
-      :host ::ng-deep .message-user app-message-attachments .file-size {
-        color: #1a1a1a;
-      }
-
-      :host ::ng-deep .message-user app-message-attachments .file-attachment:hover {
-        background: rgba(0, 0, 0, 0.25);
-        border-color: rgba(0, 0, 0, 0.3);
+        padding: 4px 0;
+        text-align: right;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        color: var(--text-secondary);
       }
 
       .message-assistant {
@@ -325,32 +246,37 @@ interface RenderedDisplayItem extends DisplayItem {
         color: var(--text-primary);
       }
 
+      /* #6: System messages — constrained width, centered */
       .message-system {
-        width: 100%;
-        padding: 10px 12px;
-        background: rgba(var(--info-rgb), 0.08);
-        border: 1px solid rgba(var(--info-rgb), 0.14);
-        border-radius: 14px;
-        font-size: 13px;
+        width: fit-content;
+        max-width: 90%;
+        margin: 4px auto;
+        padding: 8px 14px;
+        background: rgba(var(--info-rgb), 0.06);
+        border: 1px solid rgba(var(--info-rgb), 0.10);
+        border-radius: 12px;
+        font-size: 12px;
         color: var(--info-color);
       }
 
       .message-error {
-        width: 100%;
-        padding: 10px 12px;
+        width: fit-content;
+        max-width: 90%;
+        margin: 4px auto;
+        padding: 8px 14px;
         background: var(--error-bg);
         border: 1px solid rgba(var(--error-rgb), 0.16);
-        border-radius: 14px;
+        border-radius: 12px;
         color: var(--error-color);
       }
 
       .message-tool_use,
       .message-tool_result {
         width: 100%;
-        padding: 10px 12px;
+        padding: 8px 10px;
         background: rgba(6, 10, 9, 0.72);
         border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 16px;
+        border-radius: 12px;
         font-size: 12px;
       }
 
@@ -364,12 +290,13 @@ interface RenderedDisplayItem extends DisplayItem {
         line-height: 1.2;
       }
 
+      /* #5: Assistant label — smaller, subtler */
       .message-header {
         display: flex;
         align-items: center;
         gap: var(--spacing-sm);
         min-width: 0;
-        margin-bottom: 6px;
+        margin-bottom: 2px;
         font-size: 9px;
       }
 
@@ -377,23 +304,32 @@ interface RenderedDisplayItem extends DisplayItem {
         text-transform: uppercase;
         font-weight: 600;
         letter-spacing: 0.14em;
-        opacity: 0.46;
+        opacity: 0.36;
         font-family: var(--font-mono);
+        font-size: 8px;
       }
 
+      /* #3: Timestamps hidden by default, shown on hover */
       .message-time {
         font-family: var(--font-mono);
-        opacity: 0.32;
+        opacity: 0;
         margin-left: auto;
+        font-size: 9px;
+        transition: opacity var(--transition-fast);
+      }
+
+      .message:hover .message-time,
+      .thought-group:hover .message-time {
+        opacity: 0.32;
       }
 
       .copy-message-btn {
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 28px;
-        height: 28px;
-        padding: 0 6px;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 4px;
         background: transparent;
         border: none;
         border-radius: var(--radius-sm);
@@ -455,16 +391,17 @@ interface RenderedDisplayItem extends DisplayItem {
         margin-top: var(--spacing-xs);
       }
 
+      /* #1: Tighter thought-group spacing */
       .thought-group {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 4px;
         width: 100%;
         max-width: none;
         min-width: 0;
         box-sizing: border-box;
         margin-right: auto;
-        margin-bottom: 12px;
+        margin-bottom: 4px;
       }
 
       .thought-group .message-assistant {
@@ -483,12 +420,12 @@ interface RenderedDisplayItem extends DisplayItem {
         }
       }
 
+      .scroll-to-top-btn,
       .scroll-to-bottom-btn {
         position: absolute;
-        bottom: 20px;
         right: 20px;
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         background: rgba(12, 18, 17, 0.92);
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -515,11 +452,19 @@ interface RenderedDisplayItem extends DisplayItem {
         }
       }
 
+      .scroll-to-top-btn {
+        top: 20px;
+      }
+
+      .scroll-to-bottom-btn {
+        bottom: 20px;
+      }
+
       .compaction-boundary {
         display: flex;
         align-items: center;
         gap: var(--spacing-md);
-        padding: 6px 0;
+        padding: 4px 0;
         user-select: none;
       }
 
@@ -553,13 +498,16 @@ export class OutputStreamComponent {
   showThinking = input<boolean>(true);
   thinkingDefaultExpanded = input<boolean>(false);
 
-  container = viewChild<CdkVirtualScrollViewport>('container');
+  container = viewChild<ElementRef<HTMLDivElement>>('container');
 
   // Scroll state - stored per instance
+  protected showScrollToTop = signal(false);
   protected showScrollToBottom = signal(false);
   private userScrolledUp = false;
   private scrollPositions = new Map<string, number>(); // instanceId -> scrollOffset
   private previousInstanceId: string | null = null;
+  private lastAutoScrollInstanceId: string | null = null;
+  private lastAutoScrollSignature = '';
 
   protected copiedMessageId = signal<string | null>(null);
   private copyResetTimer: number | null = null;
@@ -567,12 +515,8 @@ export class OutputStreamComponent {
   private markdownService = inject(MarkdownService);
   private ipc = inject(ElectronIpcService);
   private perf = inject(PerfInstrumentationService);
-  private scrollStrategy = inject(TranscriptScrollStrategy);
   private destroyRef = inject(DestroyRef);
   private displayItemProcessor = new DisplayItemProcessor();
-
-  private resizeObserver: ResizeObserver | null = null;
-  private observeItemsFrame: number | null = null;
 
   /**
    * Shows all messages, consolidating streaming messages with the same ID.
@@ -602,47 +546,24 @@ export class OutputStreamComponent {
     return items as RenderedDisplayItem[];
   });
 
-  trackByItemId(_index: number, item: RenderedDisplayItem): string {
-    return item.id;
-  }
-
   constructor() {
-    // Notify scroll strategy about data length changes and set type hints for new items
-    effect(() => {
-      const items = this.displayItems();
-      this.scrollStrategy.setDataLength(items.length);
-
-      const newCount = this.displayItemProcessor.newItemCount;
-      if (newCount > 0) {
-        const startIdx = items.length - newCount;
-        for (let i = startIdx; i < items.length; i++) {
-          this.scrollStrategy.setItemTypeHint(i, items[i].type);
-        }
-      }
-    });
-
-    effect(() => {
-      this.displayItems();
-      if (this.container()) {
-        this.scheduleRenderedItemObservation();
-      }
-    });
-
     // Handle instance changes - save/restore scroll position
     effect(() => {
       const currentInstanceId = this.instanceId();
-      const vp = this.container();
+      const viewport = untracked(() => this.getViewportElement());
 
-      if (this.previousInstanceId && this.previousInstanceId !== currentInstanceId && vp) {
+      if (this.previousInstanceId && this.previousInstanceId !== currentInstanceId && viewport) {
         // Save scroll position for the previous instance
-        this.scrollPositions.set(this.previousInstanceId, vp.measureScrollOffset());
+        this.scrollPositions.set(this.previousInstanceId, viewport.scrollTop);
       }
 
       if (currentInstanceId !== this.previousInstanceId) {
-        // Instance changed - reset scroll state and strategy cache
+        // Instance changed - reset scroll state
         this.userScrolledUp = false;
+        this.showScrollToTop.set(false);
         this.showScrollToBottom.set(false);
-        this.scrollStrategy.clearCache();
+        this.lastAutoScrollInstanceId = currentInstanceId;
+        this.lastAutoScrollSignature = this.getMessageSignature(this.messages());
 
         // Perf: measure thread switch time and transcript paint
         const stopSwitch = this.perf.markThreadSwitch(this.previousInstanceId, currentInstanceId);
@@ -651,18 +572,17 @@ export class OutputStreamComponent {
         // Restore scroll position for the new instance using rAF for frame alignment
         requestAnimationFrame(() => {
           const savedPosition = this.scrollPositions.get(currentInstanceId);
-          const viewport = this.container();
-          if (viewport) {
+          const nextViewport = this.getViewportElement();
+          if (nextViewport) {
             if (savedPosition !== undefined) {
-              viewport.scrollToOffset(savedPosition);
-              const scrollOffset = viewport.measureScrollOffset();
-              const viewportSize = viewport.getViewportSize();
-              const totalSize = viewport.measureRenderedContentSize();
-              const distanceFromBottom = totalSize - scrollOffset - viewportSize;
+              nextViewport.scrollTop = savedPosition;
+              const distanceFromBottom =
+                nextViewport.scrollHeight - nextViewport.scrollTop - nextViewport.clientHeight;
               this.userScrolledUp = distanceFromBottom > 100;
+              this.showScrollToTop.set(savedPosition > 50);
               this.showScrollToBottom.set(distanceFromBottom > 50);
             } else {
-              viewport.scrollToOffset(viewport.measureRenderedContentSize());
+              nextViewport.scrollTop = nextViewport.scrollHeight;
             }
           }
           stopPaint();
@@ -675,44 +595,33 @@ export class OutputStreamComponent {
 
     // Auto-scroll to bottom when new messages arrive (only if user hasn't scrolled up)
     effect(() => {
+      const currentInstanceId = this.instanceId();
       const msgs = this.messages();
-      const vp = this.container();
-      if (vp && msgs.length > 0) {
-        requestAnimationFrame(() => {
-          if (!this.userScrolledUp) {
-            vp.scrollToOffset(vp.measureRenderedContentSize() + 999999);
-          }
-        });
+      const signature = this.getMessageSignature(msgs);
+      const previousInstanceId = this.lastAutoScrollInstanceId;
+      const previousSignature = this.lastAutoScrollSignature;
+
+      this.lastAutoScrollInstanceId = currentInstanceId;
+      this.lastAutoScrollSignature = signature;
+
+      if (!msgs.length || previousInstanceId !== currentInstanceId || previousSignature === signature) {
+        return;
       }
+
+      requestAnimationFrame(() => {
+        const viewport = this.getViewportElement();
+        if (viewport && !this.userScrolledUp) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
+      });
     });
 
-    // Setup scroll listener, delegated click handler, and ResizeObserver after render
+    // Setup scroll listener and delegated click handler after render
     afterNextRender(() => {
       const clickBinding = this.setupDelegatedClickHandler();
       const scrollBinding = this.setupScrollListener();
 
-      this.resizeObserver = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const el = entry.target as HTMLElement;
-          const indexStr = el.getAttribute('data-item-index');
-          if (indexStr) {
-            const index = parseInt(indexStr, 10);
-            if (index >= 0) {
-              this.scrollStrategy.setItemHeight(index, this.measureTranscriptItemHeight(el));
-            }
-          }
-        }
-      });
-
-      this.observeRenderedItems();
-
       this.destroyRef.onDestroy(() => {
-        this.resizeObserver?.disconnect();
-        if (this.observeItemsFrame !== null) {
-          cancelAnimationFrame(this.observeItemsFrame);
-          this.observeItemsFrame = null;
-        }
-
         if (clickBinding) {
           clickBinding.element.removeEventListener('click', clickBinding.listener);
         }
@@ -728,60 +637,13 @@ export class OutputStreamComponent {
     });
   }
 
-  private scheduleRenderedItemObservation(): void {
-    if (this.observeItemsFrame !== null) {
-      cancelAnimationFrame(this.observeItemsFrame);
-    }
-
-    this.observeItemsFrame = requestAnimationFrame(() => {
-      this.observeItemsFrame = null;
-      this.observeRenderedItems();
-    });
-  }
-
-  private observeRenderedItems(): void {
-    const vp = this.container();
-    if (!vp || !this.resizeObserver) return;
-
-    const viewportEl = vp.elementRef.nativeElement as HTMLElement;
-    const transcriptItems = Array.from(viewportEl.querySelectorAll<HTMLElement>('.transcript-item'));
-
-    this.resizeObserver.disconnect();
-
-    for (const item of transcriptItems) {
-      const indexStr = item.getAttribute('data-item-index');
-      if (indexStr) {
-        const index = parseInt(indexStr, 10);
-        if (index >= 0) {
-          this.scrollStrategy.setItemHeight(index, this.measureTranscriptItemHeight(item));
-        }
-      }
-      this.resizeObserver.observe(item);
-    }
-  }
-
-  private measureTranscriptItemHeight(item: HTMLElement): number {
-    const firstChild = item.firstElementChild as HTMLElement | null;
-    if (!firstChild) {
-      return Math.ceil(item.getBoundingClientRect().height);
-    }
-
-    const rect = firstChild.getBoundingClientRect();
-    const styles = getComputedStyle(firstChild);
-    const marginTop = parseFloat(styles.marginTop) || 0;
-    const marginBottom = parseFloat(styles.marginBottom) || 0;
-    return Math.ceil(rect.height + marginTop + marginBottom);
-  }
-
   /**
    * Setup scroll event listener to detect user scrolling.
    * Returns the element and bound listener so the caller can remove it on destroy.
    */
   private setupScrollListener(): { element: HTMLElement; listener: EventListener } | null {
-    const vp = this.container();
-    if (!vp) return null;
-
-    const el = vp.elementRef.nativeElement as HTMLElement;
+    const el = this.getViewportElement();
+    if (!el) return null;
     let lastScrollTime = 0;
 
     const listener: EventListener = () => {
@@ -792,16 +654,19 @@ export class OutputStreamComponent {
       }
       lastScrollTime = now;
 
-      const scrollOffset = vp.measureScrollOffset();
-      const viewportSize = vp.getViewportSize();
-      const totalSize = vp.measureRenderedContentSize();
+      const scrollOffset = el.scrollTop;
+      const viewportSize = el.clientHeight;
+      const totalSize = el.scrollHeight;
       const autoScrollThreshold = 100;
       const buttonShowThreshold = 50;
 
       const distanceFromBottom = totalSize - scrollOffset - viewportSize;
+      const distanceFromTop = scrollOffset;
 
       this.userScrolledUp = distanceFromBottom > autoScrollThreshold;
+      this.showScrollToTop.set(distanceFromTop > buttonShowThreshold);
       this.showScrollToBottom.set(distanceFromBottom > buttonShowThreshold);
+      this.scrollPositions.set(this.instanceId(), scrollOffset);
     };
 
     el.addEventListener('scroll', listener, { passive: true });
@@ -809,15 +674,26 @@ export class OutputStreamComponent {
   }
 
   /**
+   * Scroll to the top of the container
+   */
+  scrollToTop(): void {
+    const el = this.getViewportElement();
+    if (!el) return;
+
+    el.scrollTo({ top: 0, behavior: 'smooth' });
+    this.showScrollToTop.set(false);
+  }
+
+  /**
    * Scroll to the bottom of the container
    */
   scrollToBottom(): void {
-    const vp = this.container();
-    if (vp) {
-      vp.scrollToOffset(vp.measureScrollOffset() + 999999, 'smooth');
-      this.userScrolledUp = false;
-      this.showScrollToBottom.set(false);
-    }
+    const el = this.getViewportElement();
+    if (!el) return;
+
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    this.userScrolledUp = false;
+    this.showScrollToBottom.set(false);
   }
 
   /**
@@ -826,10 +702,8 @@ export class OutputStreamComponent {
    * Returns the element and bound listener so the caller can remove it on destroy.
    */
   private setupDelegatedClickHandler(): { element: HTMLElement; listener: EventListener } | null {
-    const vp = this.container();
-    if (!vp) return null;
-
-    const el = vp.elementRef.nativeElement as HTMLElement;
+    const el = this.getViewportElement();
+    if (!el) return null;
 
     const listener: EventListener = (event: Event) => {
       const mouseEvent = event as MouseEvent;
@@ -1039,21 +913,18 @@ export class OutputStreamComponent {
     return rendered;
   }
 
-  /**
-   * Generate a label for the thought process section
-   */
-  getThoughtLabel(thoughts: string[]): string {
-    if (thoughts.length === 0) return 'Thought process';
+  private getViewportElement(): HTMLDivElement | null {
+    return this.container()?.nativeElement ?? null;
+  }
 
-    // Try to create a short summary from the first thought
-    const firstThought = thoughts[0];
-    const firstSentence = firstThought.split(/[.!?\n]/)[0].trim();
-
-    if (firstSentence.length > 60) {
-      return firstSentence.slice(0, 57) + '...';
-    }
-
-    return firstSentence || 'Thought process';
+  private getMessageSignature(messages: OutputMessage[]): string {
+    const lastMessage = messages[messages.length - 1];
+    return [
+      messages.length,
+      lastMessage?.id ?? '',
+      lastMessage?.timestamp ?? '',
+      lastMessage?.content?.length ?? 0
+    ].join(':');
   }
 
 }

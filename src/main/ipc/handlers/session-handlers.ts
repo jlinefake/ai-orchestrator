@@ -30,8 +30,11 @@ import {
   HistoryDeletePayloadSchema,
   HistoryRestorePayloadSchema,
 } from '../../../shared/validation/ipc-schemas';
-import { getConversationHistoryTitle } from '../../../shared/types/history.types';
-import type { ExportedSession } from '../../../shared/types/instance.types';
+import {
+  getConversationHistoryTitle,
+  inferConversationHistoryProvider,
+} from '../../../shared/types/history.types';
+import type { ExportedSession, InstanceProvider, OutputMessage } from '../../../shared/types/instance.types';
 import type { InstanceManager } from '../../instance/instance-manager';
 import { getHistoryManager } from '../../history';
 import { getSessionArchiveManager } from '../../session/session-archive';
@@ -42,6 +45,20 @@ import { generateId } from '../../../shared/utils/id-generator';
 import { getLogger } from '../../logging/logger';
 
 const logger = getLogger('SessionHandlers');
+
+function getProviderDisplayName(provider: InstanceProvider): string {
+  switch (provider) {
+    case 'codex':
+      return 'Codex';
+    case 'gemini':
+      return 'Gemini';
+    case 'copilot':
+      return 'Copilot';
+    case 'claude':
+    default:
+      return 'Claude';
+  }
+}
 
 interface SessionHandlersDeps {
   instanceManager: InstanceManager;
@@ -861,6 +878,8 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
         const displayName = getConversationHistoryTitle(data.entry);
         const historyThreadId =
           data.entry.historyThreadId || data.entry.sessionId || data.entry.id;
+        const restoreProvider = inferConversationHistoryProvider(data.entry);
+        const restoreModel = data.entry.currentModel?.trim() || undefined;
         let resumeFailed = false;
 
         // Phase 1: Try to resume the CLI session
@@ -871,7 +890,9 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
             historyThreadId,
             sessionId: data.entry.sessionId,
             resume: true,
-            initialOutputBuffer: data.messages
+            initialOutputBuffer: data.messages,
+            provider: restoreProvider,
+            modelOverride: restoreModel
           });
 
           // Wait for a definitive signal rather than a fixed timeout.
@@ -884,16 +905,14 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
           const resumeAlive = await new Promise<boolean>((resolve) => {
             const timeout = setTimeout(() => {
               cleanup();
-              // Timeout with no signal — check final state
               const inst = instanceManager.getInstance(instance.id);
-              const alive = !!inst && inst.status !== 'error' && inst.status !== 'terminated';
-              logger.warn('History restore: resume check timed out', {
+              logger.warn('History restore: resume confirmation timed out', {
                 instanceId: instance.id,
                 status: inst?.status,
                 contextUsed: inst?.contextUsage?.used,
-                alive
+                provider: restoreProvider
               });
-              resolve(alive);
+              resolve(false);
             }, RESUME_TIMEOUT_MS);
 
             const poll = setInterval(() => {
@@ -936,8 +955,8 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
               success: true,
               data: {
                 instanceId: instance.id,
-                restoredMessages: data.messages,
-                resumed: true
+                restoredMessages: instance.outputBuffer,
+                restoreMode: 'native-resume'
               }
             };
           }
@@ -975,31 +994,37 @@ export function registerSessionHandlers(deps: SessionHandlersDeps): void {
             workingDirectory: workingDir,
             displayName,
             historyThreadId,
-            initialOutputBuffer: data.messages
+            initialOutputBuffer: data.messages,
+            provider: restoreProvider,
+            modelOverride: restoreModel
             // No resume, no sessionId — fresh session
           });
 
+          const providerName = getProviderDisplayName(restoreProvider);
+
           // Add a system message informing the user that CLI context was lost
-          const systemMessage = {
+          const systemMessage: OutputMessage = {
             id: generateId(),
             timestamp: Date.now(),
             type: 'system' as const,
             content:
-              'Previous CLI session could not be restored. Your conversation history is displayed above, but Claude does not have this context. You may need to re-summarize what you were working on.'
+              `Previous ${providerName} CLI session could not be restored. Your conversation history is displayed above, but ${providerName} does not have this context. You may need to re-summarize what you were working on.`
           };
           instance.outputBuffer.push(systemMessage);
+          const restoredMessages: OutputMessage[] = [...data.messages, systemMessage];
 
           logger.info('History restore: created fresh instance with restored messages', {
             instanceId: instance.id,
-            messageCount: data.messages.length
+            messageCount: restoredMessages.length,
+            provider: restoreProvider
           });
 
           return {
             success: true,
             data: {
               instanceId: instance.id,
-              restoredMessages: data.messages,
-              resumed: false
+              restoredMessages,
+              restoreMode: 'replay-fallback'
             }
           };
         }

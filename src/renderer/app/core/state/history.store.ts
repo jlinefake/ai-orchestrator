@@ -4,7 +4,12 @@
 
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { HistoryIpcService } from '../services/ipc/history-ipc.service';
-import type { ConversationHistoryEntry, ConversationData } from '../../../../shared/types/history.types';
+import type {
+  ConversationHistoryEntry,
+  ConversationData,
+  HistoryRestoreMode,
+} from '../../../../shared/types/history.types';
+import { normalizeConversationHistoryEntryProvider as normalizeHistoryEntryProvider } from '../../../../shared/types/history.types';
 
 interface HistoryState {
   entries: ConversationHistoryEntry[];
@@ -90,9 +95,10 @@ export class HistoryStore {
       };
 
       if (response.success && response.data) {
+        const normalizedEntries = response.data.map(entry => normalizeHistoryEntryProvider(entry));
         this.state.update(s => ({
           ...s,
-          entries: response.data!,
+          entries: normalizedEntries,
           loading: false,
         }));
       } else {
@@ -125,12 +131,16 @@ export class HistoryStore {
       };
 
       if (response.success && response.data) {
+        const normalizedConversation: ConversationData = {
+          ...response.data,
+          entry: normalizeHistoryEntryProvider(response.data.entry),
+        };
         this.state.update(s => ({
           ...s,
           loading: false,
-          selectedConversation: response.data!,
+          selectedConversation: normalizedConversation,
         }));
-        return response.data;
+        return normalizedConversation;
       } else {
         this.state.update(s => ({
           ...s,
@@ -226,7 +236,7 @@ export class HistoryStore {
     success: boolean;
     instanceId?: string;
     restoredMessages?: unknown[];
-    resumed?: boolean;
+    restoreMode?: HistoryRestoreMode;
     error?: string;
   }> {
     this.state.update(s => ({ ...s, loading: true }));
@@ -234,7 +244,11 @@ export class HistoryStore {
     try {
       const response = await this.ipc.restoreHistory(entryId, workingDirectory) as {
         success: boolean;
-        data?: { instanceId: string; restoredMessages: unknown[]; resumed?: boolean };
+        data?: {
+          instanceId: string;
+          restoredMessages: unknown[];
+          restoreMode?: HistoryRestoreMode;
+        };
         error?: { message: string };
       };
 
@@ -245,7 +259,7 @@ export class HistoryStore {
           success: true,
           instanceId: response.data.instanceId,
           restoredMessages: response.data.restoredMessages,
-          resumed: response.data.resumed ?? true,
+          restoreMode: response.data.restoreMode,
         };
       } else {
         return {

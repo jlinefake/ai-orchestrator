@@ -261,18 +261,19 @@ Use \`request_user_action\` for approvals, mode switches, and questions:
 | approve_action | Confirming a specific action | — |
 | ask_questions | Getting user input | questions[] |
 
-Example:
-${ORCHESTRATION_MARKER_START}
+Example (wrap with the command markers shown above):
+\`\`\`json
 {"action": "request_user_action", "requestType": "ask_questions", "title": "Clarifying Questions", "message": "I need some information:", "questions": ["What framework?", "What database?"]}
-${ORCHESTRATION_MARKER_END}
+\`\`\`
 
 ### Multi-Model Consensus
 
 Use \`consensus_query\` when you need high-confidence answers or want to validate reasoning across multiple AI providers. Do NOT use for simple lookups or when already confident.
 
-${ORCHESTRATION_MARKER_START}
+Example (wrap with the command markers shown above):
+\`\`\`json
 {"action": "consensus_query", "question": "Your question here", "context": "Optional context"}
-${ORCHESTRATION_MARKER_END}
+\`\`\`
 
 Options: \`providers\` (default: all), \`strategy\` ("majority"|"weighted"|"all"), \`timeout\` (seconds, default: 60)
 

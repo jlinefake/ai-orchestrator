@@ -727,6 +727,18 @@ export class InstanceCommunicationManager extends EventEmitter {
         return;
       }
 
+      if (this.isStatelessExecAdapter(adapter)) {
+        logger.info('Ignoring per-turn process exit for stateless exec adapter', {
+          instanceId,
+          adapter: adapter.getName(),
+          code,
+          signal,
+          status: instance.status,
+        });
+        this.interruptedInstances.delete(instanceId);
+        return;
+      }
+
       // Check if this was an interrupted instance that needs respawning
       if (this.interruptedInstances.has(instanceId)) {
         logger.info('Instance was interrupted, will respawn with --resume', { instanceId });

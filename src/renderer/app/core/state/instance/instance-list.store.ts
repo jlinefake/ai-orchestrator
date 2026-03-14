@@ -348,6 +348,9 @@ export class InstanceListStore {
    */
   deserializeInstance(data: unknown): Instance {
     const d = data as Record<string, unknown>;
+    const currentModel =
+      typeof d['currentModel'] === 'string' ? d['currentModel'] : undefined;
+
     return {
       id: d['id'] as string,
       displayName: d['displayName'] as string,
@@ -357,7 +360,10 @@ export class InstanceListStore {
       childrenIds: (d['childrenIds'] as string[]) || [],
       agentId: (d['agentId'] as string) || 'build',
       agentMode: (d['agentMode'] as 'build' | 'plan' | 'review') || 'build',
-      provider: (d['provider'] as Instance['provider']) || 'claude',
+      // Older restores and some legacy payloads can arrive without provider.
+      // Recover it from model/session identifiers instead of silently
+      // repainting Gemini/Codex threads as Claude.
+      provider: this.inferInstanceProvider(d),
       status: d['status'] as InstanceStatus,
       contextUsage: (d['contextUsage'] as Instance['contextUsage']) || {
         used: 0,
@@ -365,11 +371,90 @@ export class InstanceListStore {
         percentage: 0,
       },
       lastActivity: d['lastActivity'] as number,
+      currentActivity:
+        typeof d['currentActivity'] === 'string'
+          ? d['currentActivity']
+          : undefined,
+      currentTool:
+        typeof d['currentTool'] === 'string' ? d['currentTool'] : undefined,
       sessionId: d['sessionId'] as string,
       workingDirectory: d['workingDirectory'] as string,
       yoloMode: (d['yoloMode'] as boolean) ?? false,
+      currentModel,
       outputBuffer: (d['outputBuffer'] as OutputMessage[]) || [],
     };
+  }
+
+  private inferInstanceProvider(data: Record<string, unknown>): Instance['provider'] {
+    const explicitProvider = data['provider'];
+    if (this.isInstanceProvider(explicitProvider)) {
+      return explicitProvider;
+    }
+
+    return (
+      this.inferProviderFromModel(data['currentModel'])
+      || this.inferProviderFromIdentifier(data['historyThreadId'])
+      || this.inferProviderFromIdentifier(data['sessionId'])
+      || this.inferProviderFromIdentifier(data['id'])
+      || 'claude'
+    );
+  }
+
+  private inferProviderFromModel(model: unknown): Instance['provider'] | undefined {
+    if (typeof model !== 'string') {
+      return undefined;
+    }
+
+    const normalized = model.trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (normalized.startsWith('gemini')) return 'gemini';
+    if (normalized.startsWith('copilot')) return 'copilot';
+    if (
+      normalized.startsWith('gpt-')
+      || normalized.includes('codex')
+      || normalized === 'o3'
+    ) {
+      return 'codex';
+    }
+    if (
+      normalized.startsWith('claude')
+      || normalized === 'opus'
+      || normalized === 'sonnet'
+      || normalized === 'haiku'
+    ) {
+      return 'claude';
+    }
+
+    return undefined;
+  }
+
+  private inferProviderFromIdentifier(value: unknown): Instance['provider'] | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (normalized.startsWith('gemini-')) return 'gemini';
+    if (normalized.startsWith('codex-')) return 'codex';
+    if (normalized.startsWith('copilot-')) return 'copilot';
+    if (normalized.startsWith('claude-')) return 'claude';
+
+    return undefined;
+  }
+
+  private isInstanceProvider(value: unknown): value is Instance['provider'] {
+    return value === 'claude'
+      || value === 'codex'
+      || value === 'gemini'
+      || value === 'copilot'
+      || value === 'ollama';
   }
 
   /**

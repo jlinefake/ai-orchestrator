@@ -420,6 +420,12 @@ vi.mock('../../../shared/types/error-recovery.types', () => ({
 // ---------------------------------------------------------------------------
 vi.mock('../../../shared/types/provider.types', () => ({
   getModelsForProvider: vi.fn().mockReturnValue([]),
+  getProviderModelContextWindow: vi.fn((provider: string, model?: string) =>
+    provider === 'claude' && model?.endsWith('[1m]') ? 1000000 : 200000
+  ),
+  isModelTier: vi.fn().mockReturnValue(false),
+  looksLikeCodexModelId: vi.fn().mockReturnValue(false),
+  resolveModelForTier: vi.fn().mockReturnValue(undefined),
 }));
 
 // ---------------------------------------------------------------------------
@@ -745,6 +751,16 @@ describe('InstanceManager', () => {
       expect(instance.depth).toBe(0);
       expect(instance.parentId).toBeNull();
     });
+
+    it('seeds a 1M context total for explicit Claude 1M models', async () => {
+      const instance = await manager.createInstance({
+        workingDirectory: TEST_WORKING_DIR,
+        modelOverride: 'sonnet[1m]',
+      });
+
+      expect(instance.currentModel).toBe('sonnet[1m]');
+      expect(instance.contextUsage.total).toBe(1000000);
+    });
   });
 
   // =========================================================================
@@ -926,6 +942,22 @@ describe('InstanceManager', () => {
     it('calls stopTimeoutChecker on the task manager', () => {
       manager.destroy();
       expect(mockTaskManager.stopTimeoutChecker).toHaveBeenCalled();
+    });
+  });
+
+  describe('changeModel', () => {
+    it('reseeds context totals when switching to a 1M Claude model', async () => {
+      const instance = await manager.createInstance({
+        workingDirectory: TEST_WORKING_DIR,
+        modelOverride: 'sonnet',
+      });
+
+      expect(instance.contextUsage.total).toBe(200000);
+
+      const updated = await manager.changeModel(instance.id, 'sonnet[1m]');
+
+      expect(updated.currentModel).toBe('sonnet[1m]');
+      expect(updated.contextUsage.total).toBe(1000000);
     });
   });
 });
