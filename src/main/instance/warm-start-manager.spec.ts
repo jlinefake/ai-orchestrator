@@ -130,6 +130,35 @@ describe('WarmStartManager', () => {
       expect(manager.hasWarm('claude')).toBe(true);
     });
 
+    it('returns null when workingDirectory does not match and keeps the warm process', async () => {
+      const fakeAdapter = { id: 'my-adapter' };
+      const deps = makeDeps({
+        spawnAdapter: vi.fn().mockResolvedValue(fakeAdapter),
+      });
+      const manager = new WarmStartManager(deps);
+      await manager.preWarm('claude', '/project-a');
+
+      const result = manager.consume('claude', '/project-b');
+
+      expect(result).toBeNull();
+      // Warm process should still be held
+      expect(manager.hasWarm('claude', '/project-a')).toBe(true);
+    });
+
+    it('returns the adapter when provider AND workingDirectory both match', async () => {
+      const fakeAdapter = { id: 'my-adapter' };
+      const deps = makeDeps({
+        spawnAdapter: vi.fn().mockResolvedValue(fakeAdapter),
+      });
+      const manager = new WarmStartManager(deps);
+      await manager.preWarm('claude', '/project');
+
+      const result = manager.consume('claude', '/project');
+
+      expect(result).toBe(fakeAdapter);
+      expect(manager.hasWarm('claude')).toBe(false);
+    });
+
     it('returns null when there is no warm process', () => {
       const deps = makeDeps();
       const manager = new WarmStartManager(deps);
@@ -181,6 +210,31 @@ describe('WarmStartManager', () => {
       await manager.preWarm('claude', '/project');
 
       expect(manager.hasWarm('codex')).toBe(false);
+    });
+
+    it('returns true when provider and workingDirectory both match', async () => {
+      const deps = makeDeps();
+      const manager = new WarmStartManager(deps);
+      await manager.preWarm('claude', '/project');
+
+      expect(manager.hasWarm('claude', '/project')).toBe(true);
+    });
+
+    it('returns false when provider matches but workingDirectory does not', async () => {
+      const deps = makeDeps();
+      const manager = new WarmStartManager(deps);
+      await manager.preWarm('claude', '/project-a');
+
+      expect(manager.hasWarm('claude', '/project-b')).toBe(false);
+    });
+
+    it('returns true when provider matches and no workingDirectory filter given', async () => {
+      const deps = makeDeps();
+      const manager = new WarmStartManager(deps);
+      await manager.preWarm('claude', '/project');
+
+      // Without workingDirectory arg, only provider is checked
+      expect(manager.hasWarm('claude')).toBe(true);
     });
   });
 

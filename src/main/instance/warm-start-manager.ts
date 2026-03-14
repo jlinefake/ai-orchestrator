@@ -89,13 +89,15 @@ export class WarmStartManager {
   }
 
   /**
-   * Consume the warm process if it matches `provider`.
+   * Consume the warm process if it matches `provider` and optionally
+   * `workingDirectory`.
    *
    * Returns the opaque adapter handle on a match (and clears the warm slot).
-   * Returns null when there is no warm process or the provider does not match
-   * (the warm process is retained in the mismatch case).
+   * Returns null when there is no warm process, the provider does not match,
+   * or the workingDirectory does not match (the warm process is retained in
+   * all mismatch cases).
    */
-  consume(provider: string): unknown | null {
+  consume(provider: string, workingDirectory?: string): unknown | null {
     if (!this.warm) {
       return null;
     }
@@ -108,19 +110,30 @@ export class WarmStartManager {
       return null;
     }
 
+    if (workingDirectory && this.warm.workingDirectory !== workingDirectory) {
+      logger.debug('Warm process workingDirectory mismatch — keeping warm process', {
+        wanted: workingDirectory,
+        have: this.warm.workingDirectory,
+      });
+      return null;
+    }
+
     const { adapter, expiryTimer } = this.warm;
     clearTimeout(expiryTimer);
     this.warm = null;
 
-    logger.info('Consumed warm process', { provider });
+    logger.info('Consumed warm process', { provider, workingDirectory });
     return adapter;
   }
 
   /**
-   * Returns true when a warm process exists for the given provider.
+   * Returns true when a warm process exists for the given provider and
+   * optionally the given workingDirectory.
    */
-  hasWarm(provider: string): boolean {
-    return this.warm !== null && this.warm.provider === provider;
+  hasWarm(provider: string, workingDirectory?: string): boolean {
+    if (this.warm === null || this.warm.provider !== provider) return false;
+    if (workingDirectory && this.warm.workingDirectory !== workingDirectory) return false;
+    return true;
   }
 
   /**

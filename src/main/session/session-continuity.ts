@@ -486,19 +486,19 @@ export class SessionContinuityManager extends EventEmitter {
     // Apply resume options
     const resumedState: SessionState = { ...state };
 
-    if (!options.restoreMessages) {
+    if (options.restoreMessages === false) {
       resumedState.conversationHistory = [];
     }
 
-    if (!options.restoreContext) {
+    if (options.restoreContext === false) {
       resumedState.contextUsage = { used: 0, total: state.contextUsage.total };
     }
 
-    if (!options.restoreTasks) {
+    if (options.restoreTasks === false) {
       resumedState.pendingTasks = [];
     }
 
-    if (!options.restoreEnvironment) {
+    if (options.restoreEnvironment === false) {
       resumedState.environmentVariables = {};
     }
 

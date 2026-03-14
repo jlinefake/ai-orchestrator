@@ -934,7 +934,7 @@ export class InstanceLifecycleManager extends EventEmitter {
 
         if (sessionState && sessionState.conversationHistory.length > 0) {
           // Restore recent messages into the output buffer so the UI can show them.
-          const restored = sessionState.conversationHistory.slice(-20).map((entry, idx) => ({
+          const restored = sessionState.conversationHistory.slice(-50).map((entry, idx) => ({
             id: `restored-${idx}-${Date.now()}`,
             timestamp: entry.timestamp,
             type: (entry.role === 'user' ? 'user'
@@ -942,7 +942,7 @@ export class InstanceLifecycleManager extends EventEmitter {
               : 'system') as OutputMessage['type'],
             content: entry.content,
           }));
-          instance.outputBuffer = [...restored, ...instance.outputBuffer];
+          instance.outputBuffer = restored;
         }
 
         if (signal.aborted) return;
@@ -974,8 +974,8 @@ export class InstanceLifecycleManager extends EventEmitter {
         // Remove from HibernationManager tracking.
         getHibernationManager().markAwoken(instanceId);
 
-        instance.status = 'idle';
-        this.deps.queueUpdate(instanceId, 'idle', instance.contextUsage);
+        instance.status = 'ready';
+        this.deps.queueUpdate(instanceId, 'ready', instance.contextUsage);
         logger.info('Instance woken successfully', { instanceId, pid });
       } catch (error) {
         instance.status = 'failed';
@@ -1782,7 +1782,11 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
             displayName: instance.displayName,
             idleMinutes
           });
-          this.terminateInstance(instance.id, true);
+          void this.terminateInstance(instance.id, true).catch((err) =>
+            logger.error('Auto-terminate failed', err instanceof Error ? err : undefined, {
+              instanceId: instance.id
+            })
+          );
         }
       }
     });
