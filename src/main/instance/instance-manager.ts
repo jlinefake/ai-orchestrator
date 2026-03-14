@@ -511,6 +511,24 @@ export class InstanceManager extends EventEmitter {
       throw new Error(`Instance ${instanceId} not found`);
     }
 
+    // If the instance is still initializing in the background, wait for it to
+    // finish before sending any user input. A 30s timeout guards against a
+    // hung init process.
+    if (instance.readyPromise) {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Instance initialization timed out')), 30_000)
+      );
+      try {
+        await Promise.race([instance.readyPromise, timeoutPromise]);
+      } catch (error) {
+        instance.abortController?.abort();
+        throw error;
+      }
+      if (instance.status === 'failed') {
+        throw new Error('Instance initialization failed');
+      }
+    }
+
     if (await this.maybeHandleSwitchModeReply(instanceId, message)) {
       return;
     }

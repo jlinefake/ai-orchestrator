@@ -238,14 +238,24 @@ export class InstanceLifecycleManager extends EventEmitter {
   // ============================================
 
   /**
-   * Create a new instance
+   * Create a new instance.
+   *
+   * Phase 1 (synchronous, <5ms): build the instance object, register it in the
+   * store and supervisor tree, then return immediately.
+   *
+   * Phase 2 (background async): load instructions, resolve provider/model,
+   * build the system prompt, spawn the CLI adapter, and send the initial
+   * prompt. `instance.readyPromise` resolves (or rejects) when Phase 2 is
+   * done. `sendInput()` awaits this promise before sending any user input.
    */
   async createInstance(config: InstanceCreateConfig): Promise<Instance> {
     logger.info('Creating instance', { config });
     const sessionId = config.sessionId || generateId();
     const historyThreadId = config.historyThreadId || sessionId;
 
-    // Resolve agent profile (built-in + optional markdown-defined)
+    // Resolve agent profile (built-in + optional markdown-defined).
+    // This is async but lightweight (registry lookup); it is needed to
+    // populate agentId / agentMode on the instance object before we return.
     const resolvedAgent = await getAgentRegistry().resolveAgent(
       config.workingDirectory,
       config.agentId || null
@@ -292,6 +302,12 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Resolve termination policy
     const terminationPolicy: TerminationPolicy = config.terminationPolicy || 'terminate-children';
 
+    // =========================================================================
+    // Phase 1: build and register the instance object, then return immediately.
+    // =========================================================================
+
+    const abortController = new AbortController();
+
     // Create instance object
     const instance: Instance = {
       id: generateId(),
@@ -337,6 +353,8 @@ export class InstanceLifecycleManager extends EventEmitter {
       communicationTokens: new Map(),
       subscribedTo: [],
 
+      abortController,
+
       totalTokensUsed: 0,
       requestCount: 0,
       errorCount: 0,
@@ -351,7 +369,7 @@ export class InstanceLifecycleManager extends EventEmitter {
       });
     }
 
-    // Store instance
+    // Store instance so UI renders immediately
     this.deps.setInstance(instance);
 
     // If has parent, update parent's children list
@@ -375,190 +393,251 @@ export class InstanceLifecycleManager extends EventEmitter {
     instance.supervisorNodeId = supervisorNodeId;
     instance.workerNodeId = workerNodeId;
 
-    // Initialize RLM
-    await this.deps.initializeRlm(instance);
+    // Emit creation event immediately with 'initializing' status so the UI
+    // can render the instance card without waiting for the heavy init below.
+    logger.debug('Emitting instance:created event (initializing)', { instanceId: instance.id });
+    this.emit('created', this.deps.serializeForIpc(instance));
 
-    // Ingest initial output buffer to RLM
-    if (config.initialOutputBuffer && config.initialOutputBuffer.length > 0) {
-      this.deps.ingestInitialOutputToRlm(instance, config.initialOutputBuffer);
-    }
+    // =========================================================================
+    // Phase 2: heavy async init runs in the background.
+    // All callers that need the instance to be fully ready must await
+    // instance.readyPromise (sendInput does this automatically).
+    // =========================================================================
 
-    // Get disallowed tools based on agent permissions + print-mode-incompatible tools
-    const disallowedTools = [...getDisallowedTools(resolvedAgent.permissions), ...PRINT_MODE_INCOMPATIBLE_TOOLS];
+    // Attach a no-op rejection handler so that if Phase 2 fails before
+    // sendInput() gets a chance to await it, we don't emit an unhandled
+    // rejection. The error is still observable via sendInput().
+    const backgroundInit = (async () => {
+      const { signal } = abortController;
+      try {
+        if (signal.aborted) return;
 
-    // Load instruction hierarchy (skip for child instances to reduce token overhead)
-    const instructionPrompts = instance.depth === 0
-      ? await this.loadPromptHierarchy(instance.workingDirectory)
-      : [];
+        // Initialize RLM
+        await this.deps.initializeRlm(instance);
 
-    // Build system prompt with instruction content prepended
-    let systemPrompt = resolvedAgent.systemPrompt || '';
-    if (instructionPrompts.length > 0) {
-      const instructionSection = instructionPrompts.join('\n\n---\n\n');
-      systemPrompt = `${instructionSection}\n\n---\n\n${systemPrompt}`;
-      logger.info('Prepended instruction prompts to system prompt', { count: instructionPrompts.length });
-    }
+        if (signal.aborted) return;
 
-    // Inject observation memory context (learned reflections from past sessions)
-    try {
-      const observationContext = await getPolicyAdapter().buildObservationContext(
-        systemPrompt,
-        instance.id,
-        config.initialPrompt
-      );
-      if (observationContext) {
-        systemPrompt = `${observationContext}\n\n---\n\n${systemPrompt}`;
-        logger.info('Injected observation memory context into system prompt');
-      }
-    } catch (err) {
-      logger.warn('Failed to inject observation context', { error: err instanceof Error ? err.message : String(err) });
-    }
+        // Ingest initial output buffer to RLM
+        if (config.initialOutputBuffer && config.initialOutputBuffer.length > 0) {
+          this.deps.ingestInitialOutputToRlm(instance, config.initialOutputBuffer);
+        }
 
-    // Resolve CLI provider type
-    const settingsAll = this.settings.getAll();
-    logger.debug('Resolving provider', {
-      requested: config.provider,
-      default: settingsAll.defaultCli
-    });
-    const resolvedCliType = await resolveCliType(
-      config.provider,
-      settingsAll.defaultCli
-    );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CliType (cli-detection) vs CliType (settings) mismatch
-    instance.provider = resolvedCliType as any;
-    logger.info('Resolved CLI provider', {
-      cliType: resolvedCliType,
-      displayName: getCliDisplayName(resolvedCliType)
-    });
+        // Get disallowed tools based on agent permissions + print-mode-incompatible tools
+        const disallowedTools = [...getDisallowedTools(resolvedAgent.permissions), ...PRINT_MODE_INCOMPATIBLE_TOOLS];
 
-    // Resolve model: explicit override > agent override > settings default
-    const settingsModel = settingsAll.defaultModel;
-    let resolvedModel = config.modelOverride || resolvedAgent.modelOverride || settingsModel || undefined;
+        // Load instruction hierarchy (skip for child instances to reduce token overhead)
+        const instructionPrompts = instance.depth === 0
+          ? await this.loadPromptHierarchy(instance.workingDirectory)
+          : [];
 
-    // Validate model against the target provider's supported models.
-    // If the model is a tier name (fast/balanced/powerful), resolve it to a concrete ID.
-    // If the model isn't recognized (e.g., a model from another provider), drop it
-    // so the provider uses its own default rather than failing with ModelNotFound.
-    if (resolvedModel && resolvedCliType !== 'claude') {
-      // First: resolve tier names to concrete model IDs
-      if (isModelTier(resolvedModel)) {
-        const tierResolved = resolveModelForTier(resolvedModel, resolvedCliType);
-        logger.info('Resolved model tier to provider-specific model', {
-          tier: resolvedModel,
-          provider: resolvedCliType,
-          resolvedModel: tierResolved || 'provider-default',
+        if (signal.aborted) return;
+
+        // Build system prompt with instruction content prepended
+        let systemPrompt = resolvedAgent.systemPrompt || '';
+        if (instructionPrompts.length > 0) {
+          const instructionSection = instructionPrompts.join('\n\n---\n\n');
+          systemPrompt = `${instructionSection}\n\n---\n\n${systemPrompt}`;
+          logger.info('Prepended instruction prompts to system prompt', { count: instructionPrompts.length });
+        }
+
+        // Inject observation memory context (learned reflections from past sessions)
+        try {
+          const observationContext = await getPolicyAdapter().buildObservationContext(
+            systemPrompt,
+            instance.id,
+            config.initialPrompt
+          );
+          if (observationContext) {
+            systemPrompt = `${observationContext}\n\n---\n\n${systemPrompt}`;
+            logger.info('Injected observation memory context into system prompt');
+          }
+        } catch (err) {
+          logger.warn('Failed to inject observation context', { error: err instanceof Error ? err.message : String(err) });
+        }
+
+        if (signal.aborted) return;
+
+        // Resolve CLI provider type
+        const settingsAll = this.settings.getAll();
+        logger.debug('Resolving provider', {
+          requested: config.provider,
+          default: settingsAll.defaultCli
         });
-        resolvedModel = tierResolved;
-      }
+        const resolvedCliType = await resolveCliType(
+          config.provider,
+          settingsAll.defaultCli
+        );
 
-      // Then: validate concrete model IDs against the provider's model list
-      if (resolvedModel) {
-        const providerModels = getModelsForProvider(resolvedCliType);
-        if (providerModels.length > 0) {
-          const isValid = providerModels.some(m => m.id === resolvedModel);
-          const allowCodexDynamicModel = resolvedCliType === 'codex' && looksLikeCodexModelId(resolvedModel);
-          if (!isValid && !allowCodexDynamicModel) {
-            logger.warn('Model not valid for target provider, using provider default', {
-              model: resolvedModel,
+        if (signal.aborted) return;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- CliType (cli-detection) vs CliType (settings) mismatch
+        instance.provider = resolvedCliType as any;
+        logger.info('Resolved CLI provider', {
+          cliType: resolvedCliType,
+          displayName: getCliDisplayName(resolvedCliType)
+        });
+
+        // Resolve model: explicit override > agent override > settings default
+        const settingsModel = settingsAll.defaultModel;
+        let resolvedModel = config.modelOverride || resolvedAgent.modelOverride || settingsModel || undefined;
+
+        // Validate model against the target provider's supported models.
+        // If the model is a tier name (fast/balanced/powerful), resolve it to a concrete ID.
+        // If the model isn't recognized (e.g., a model from another provider), drop it
+        // so the provider uses its own default rather than failing with ModelNotFound.
+        if (resolvedModel && resolvedCliType !== 'claude') {
+          // First: resolve tier names to concrete model IDs
+          if (isModelTier(resolvedModel)) {
+            const tierResolved = resolveModelForTier(resolvedModel, resolvedCliType);
+            logger.info('Resolved model tier to provider-specific model', {
+              tier: resolvedModel,
               provider: resolvedCliType,
-              validModels: providerModels.map(m => m.id),
-              fallbackModel: 'provider-default',
+              resolvedModel: tierResolved || 'provider-default',
             });
-            resolvedModel = undefined;
+            resolvedModel = tierResolved;
+          }
+
+          // Then: validate concrete model IDs against the provider's model list
+          if (resolvedModel) {
+            const providerModels = getModelsForProvider(resolvedCliType);
+            if (providerModels.length > 0) {
+              const isValid = providerModels.some(m => m.id === resolvedModel);
+              const allowCodexDynamicModel = resolvedCliType === 'codex' && looksLikeCodexModelId(resolvedModel);
+              if (!isValid && !allowCodexDynamicModel) {
+                logger.warn('Model not valid for target provider, using provider default', {
+                  model: resolvedModel,
+                  provider: resolvedCliType,
+                  validModels: providerModels.map(m => m.id),
+                  fallbackModel: 'provider-default',
+                });
+                resolvedModel = undefined;
+              }
+            }
           }
         }
-      }
-    }
 
-    instance.currentModel = resolvedModel;
-    instance.contextUsage = {
-      ...instance.contextUsage,
-      total: getProviderModelContextWindow(resolvedCliType, resolvedModel),
-      percentage: 0
-    };
-
-    logger.info('Resolved model for instance', {
-      configOverride: config.modelOverride,
-      agentOverride: resolvedAgent.modelOverride,
-      settingsDefault: settingsModel,
-      resolved: resolvedModel,
-    });
-
-    // Allow all tools by default — don't pass --allowedTools unless explicitly configured.
-    // Tool restrictions are handled via --disallowedTools from agent permission profiles.
-    const defaultAllowedTools = undefined;
-
-    // Create CLI adapter - use resolved model
-    const modelOverride = resolvedModel;
-    const spawnOptions: UnifiedSpawnOptions = {
-      sessionId: instance.sessionId,
-      workingDirectory: config.workingDirectory,
-      systemPrompt: systemPrompt,
-      model: modelOverride,
-      yoloMode: instance.yoloMode,
-      allowedTools: defaultAllowedTools,
-      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      resume: config.resume,
-      mcpConfig: this.getMcpConfig(),
-    };
-
-    const adapter = createCliAdapter(resolvedCliType, spawnOptions);
-
-    // Set up adapter events
-    this.deps.setupAdapterEvents(instance.id, adapter);
-
-    // Store adapter
-    this.deps.setAdapter(instance.id, adapter);
-
-    // Spawn the CLI process
-    try {
-      logger.info('Spawning CLI process', { provider: resolvedCliType });
-      const pid = await adapter.spawn();
-      instance.processId = pid;
-      instance.status = 'idle';
-      logger.info('CLI spawned successfully', { pid, instanceId: instance.id });
-
-      // Send initial prompt if provided
-      if (config.initialPrompt) {
-        const userMessage = {
-          id: generateId(),
-          timestamp: Date.now(),
-          type: 'user' as const,
-          content: config.initialPrompt,
-          attachments: config.attachments?.map((a) => ({
-            name: a.name,
-            type: a.type,
-            size: a.size,
-            data: a.data
-          }))
+        instance.currentModel = resolvedModel;
+        instance.contextUsage = {
+          ...instance.contextUsage,
+          total: getProviderModelContextWindow(resolvedCliType, resolvedModel),
+          percentage: 0
         };
-        this.deps.addToOutputBuffer(instance, userMessage);
-        await adapter.sendInput(config.initialPrompt, config.attachments);
+
+        logger.info('Resolved model for instance', {
+          configOverride: config.modelOverride,
+          agentOverride: resolvedAgent.modelOverride,
+          settingsDefault: settingsModel,
+          resolved: resolvedModel,
+        });
+
+        // Allow all tools by default — don't pass --allowedTools unless explicitly configured.
+        // Tool restrictions are handled via --disallowedTools from agent permission profiles.
+        const defaultAllowedTools = undefined;
+
+        // Create CLI adapter - use resolved model
+        const modelOverride = resolvedModel;
+        const spawnOptions: UnifiedSpawnOptions = {
+          sessionId: instance.sessionId,
+          workingDirectory: config.workingDirectory,
+          systemPrompt: systemPrompt,
+          model: modelOverride,
+          yoloMode: instance.yoloMode,
+          allowedTools: defaultAllowedTools,
+          disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
+          resume: config.resume,
+          mcpConfig: this.getMcpConfig(),
+        };
+
+        const adapter = createCliAdapter(resolvedCliType, spawnOptions);
+
+        // Set up adapter events
+        this.deps.setupAdapterEvents(instance.id, adapter);
+
+        // Store adapter
+        this.deps.setAdapter(instance.id, adapter);
+
+        if (signal.aborted) {
+          // Clean up the adapter we just registered
+          await adapter.terminate(false).catch(() => { /* ignore */ });
+          this.deps.deleteAdapter(instance.id);
+          return;
+        }
+
+        // Spawn the CLI process
+        try {
+          logger.info('Spawning CLI process', { provider: resolvedCliType });
+          const pid = await adapter.spawn();
+
+          if (signal.aborted) {
+            await adapter.terminate(false).catch(() => { /* ignore */ });
+            this.deps.deleteAdapter(instance.id);
+            return;
+          }
+
+          instance.processId = pid;
+          instance.status = 'idle';
+          this.deps.queueUpdate(instance.id, 'idle', instance.contextUsage);
+          logger.info('CLI spawned successfully', { pid, instanceId: instance.id });
+
+          // Send initial prompt if provided
+          if (config.initialPrompt) {
+            const userMessage = {
+              id: generateId(),
+              timestamp: Date.now(),
+              type: 'user' as const,
+              content: config.initialPrompt,
+              attachments: config.attachments?.map((a) => ({
+                name: a.name,
+                type: a.type,
+                size: a.size,
+                data: a.data
+              }))
+            };
+            this.deps.addToOutputBuffer(instance, userMessage);
+            await adapter.sendInput(config.initialPrompt, config.attachments);
+          }
+        } catch (error) {
+          instance.status = 'failed';
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error('Failed to spawn/initialize CLI', error instanceof Error ? error : undefined, { errorMessage });
+
+          const errorOutput = {
+            id: generateId(),
+            timestamp: Date.now(),
+            type: 'error' as const,
+            content: `Failed to initialize ${getCliDisplayName(resolvedCliType)}: ${errorMessage}`
+          };
+          this.deps.addToOutputBuffer(instance, errorOutput);
+          this.deps.queueUpdate(instance.id, 'failed', instance.contextUsage);
+          throw error;
+        }
+
+        // Register with orchestration handler
+        this.deps.registerOrchestration(
+          instance.id,
+          instance.workingDirectory,
+          instance.parentId
+        );
+      } catch (error) {
+        if (!signal.aborted) {
+          if (instance.status !== 'failed') {
+            instance.status = 'failed';
+            this.deps.queueUpdate(instance.id, 'failed', instance.contextUsage);
+          }
+          logger.error('Instance background init failed', error instanceof Error ? error : undefined, { instanceId: instance.id });
+        }
+        throw error;
+      } finally {
+        instance.readyPromise = undefined;
+        instance.abortController = undefined;
       }
-    } catch (error) {
-      instance.status = 'error';
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('Failed to spawn/initialize CLI', error instanceof Error ? error : undefined, { errorMessage });
+    })();
 
-      const errorOutput = {
-        id: generateId(),
-        timestamp: Date.now(),
-        type: 'error' as const,
-        content: `Failed to initialize ${getCliDisplayName(resolvedCliType)}: ${errorMessage}`
-      };
-      this.deps.addToOutputBuffer(instance, errorOutput);
-    }
-
-    // Register with orchestration handler
-    this.deps.registerOrchestration(
-      instance.id,
-      instance.workingDirectory,
-      instance.parentId
-    );
-
-    // Emit creation event
-    logger.debug('Emitting instance:created event', { instanceId: instance.id });
-    this.emit('created', this.deps.serializeForIpc(instance));
+    // Store the promise so sendInput() can await it.
+    instance.readyPromise = backgroundInit;
+    // Attach a no-op catch on a separate chain so that if no one awaits
+    // readyPromise before it rejects, Node doesn't emit an unhandled rejection.
+    backgroundInit.catch(() => { /* rejection handled via sendInput() status check */ });
 
     return instance;
   }
