@@ -62,6 +62,9 @@ export interface ConversationHistoryEntry {
   /** Session ID from the original instance */
   sessionId: string;
 
+  /** When set, the archived native session handle is known to be non-resumable */
+  nativeResumeFailedAt?: number | null;
+
   /** CLI provider used by the original instance */
   provider?: InstanceProvider;
 

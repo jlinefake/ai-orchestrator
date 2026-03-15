@@ -20,6 +20,7 @@ import {
   UserActionRespondRawPayloadSchema,
   UserActionResponsePayloadSchema,
   InstanceCompactPayloadSchema,
+  InstanceLoadOlderMessagesPayloadSchema,
   validateIpcPayload
 } from '../../../shared/validation/ipc-schemas';
 import { InstanceManager } from '../../instance/instance-manager';
@@ -553,6 +554,72 @@ export function registerInstanceHandlers(deps: {
           success: false,
           error: {
             code: 'COMPACT_FAILED',
+            message: (error as Error).message,
+            timestamp: Date.now()
+          }
+        };
+      }
+    }
+  );
+
+  // ============================================
+  // Output History
+  // ============================================
+
+  // Load older messages from disk storage
+  ipcMain.handle(
+    IPC_CHANNELS.INSTANCE_LOAD_OLDER_MESSAGES,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<IpcResponse> => {
+      try {
+        const validated = validateIpcPayload(
+          InstanceLoadOlderMessagesPayloadSchema,
+          payload,
+          'INSTANCE_LOAD_OLDER_MESSAGES'
+        );
+
+        const { getOutputStorageManager } = await import('../../memory/output-storage');
+        const storage = getOutputStorageManager();
+        const stats = storage.getInstanceStats(validated.instanceId);
+
+        if (!stats || stats.chunkCount === 0) {
+          return { success: true, data: { messages: [], hasMore: false, totalStored: 0 } };
+        }
+
+        // If beforeChunk is specified, load chunks before it; otherwise load the latest chunks
+        const endChunk = validated.beforeChunk !== undefined
+          ? validated.beforeChunk - 1
+          : stats.chunkCount - 1;
+
+        if (endChunk < 0) {
+          return { success: true, data: { messages: [], hasMore: false, totalStored: stats.totalMessages } };
+        }
+
+        // Load from the end working backwards to get the most recent stored messages
+        const messages = await storage.loadMessages(validated.instanceId, {
+          startChunk: Math.max(0, endChunk - 2), // Load up to 3 chunks (~300 messages)
+          endChunk,
+          limit: validated.limit,
+        });
+
+        const oldestChunkLoaded = Math.max(0, endChunk - 2);
+
+        return {
+          success: true,
+          data: {
+            messages,
+            hasMore: oldestChunkLoaded > 0,
+            oldestChunkLoaded,
+            totalStored: stats.totalMessages,
+          }
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            code: 'LOAD_OLDER_MESSAGES_FAILED',
             message: (error as Error).message,
             timestamp: Date.now()
           }

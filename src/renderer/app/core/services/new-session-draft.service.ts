@@ -18,6 +18,7 @@ export class NewSessionDraftService {
   readonly provider = computed(() => this.activeDraft().provider);
   readonly model = computed(() => this.activeDraft().model);
   readonly pendingFolders = computed(() => this.activeDraft().pendingFolders);
+  readonly yoloMode = computed(() => this.activeDraft().yoloMode);
   readonly updatedAt = computed(() => this.activeDraft().updatedAt);
   readonly pendingFiles = computed(() => this.pendingFilesByKey()[this.state().activeKey] ?? []);
   readonly hasActiveContent = computed(() => this.draftHasContent(this.activeDraft()));
@@ -65,6 +66,7 @@ export class NewSessionDraftService {
           prompt: currentDraft.prompt,
           provider: currentDraft.provider,
           model: currentDraft.model,
+          yoloMode: currentDraft.yoloMode,
           pendingFolders: [...currentDraft.pendingFolders],
           updatedAt: Date.now(),
         };
@@ -73,6 +75,7 @@ export class NewSessionDraftService {
           prompt: '',
           provider: null,
           model: null,
+          yoloMode: null,
           pendingFolders: [],
         };
         this.pendingFilesByKey.update((filesByKey) => {
@@ -119,6 +122,14 @@ export class NewSessionDraftService {
     this.updateActiveDraft((draft) => ({
       ...draft,
       model,
+      updatedAt: Date.now(),
+    }));
+  }
+
+  setYoloMode(yoloMode: boolean | null): void {
+    this.updateActiveDraft((draft) => ({
+      ...draft,
+      yoloMode,
       updatedAt: Date.now(),
     }));
   }
@@ -316,6 +327,7 @@ export class NewSessionDraftService {
       prompt: typeof draft?.prompt === 'string' ? draft.prompt : '',
       provider: this.isProviderType(draft?.provider) ? draft.provider : null,
       model: typeof draft?.model === 'string' && draft.model.trim().length > 0 ? draft.model : null,
+      yoloMode: typeof draft?.yoloMode === 'boolean' ? draft.yoloMode : null,
       pendingFolders: Array.isArray(draft?.pendingFolders)
         ? draft.pendingFolders
             .map((entry) => this.normalizePath(entry))
@@ -386,6 +398,7 @@ export class NewSessionDraftService {
       prompt: '',
       provider: null,
       model: null,
+      yoloMode: null,
       pendingFolders: [],
       updatedAt: Date.now(),
     };
@@ -486,6 +499,7 @@ interface NewSessionDraftState {
   prompt: string;
   provider: ProviderType | null;
   model: string | null;
+  yoloMode: boolean | null; // null = use settings default
   pendingFolders: string[];
   updatedAt: number;
 }
@@ -501,6 +515,7 @@ interface PersistedNewSessionDraft {
   prompt: string;
   provider: ProviderType | null;
   model: string | null;
+  yoloMode?: boolean | null;
   pendingFolders: string[];
   updatedAt: number;
 }

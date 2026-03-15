@@ -98,9 +98,11 @@ export class InstanceManager extends EventEmitter {
       getAdapter: (id) => this.state.getAdapter(id),
       setAdapter: (id, adapter) => this.state.setAdapter(id, adapter),
       deleteAdapter: (id) => this.state.deleteAdapter(id),
-      queueUpdate: (id, status, ctx) => this.state.queueUpdate(id, status, ctx),
+      queueUpdate: (id, status, ctx, diffStats) => this.state.queueUpdate(id, status, ctx, diffStats),
+      getDiffTracker: (id) => this.state.getDiffTracker(id),
       processOrchestrationOutput: (id, content) => this.orchestrationMgr.processOrchestrationOutput(id, content),
       onInterruptedExit: (id) => this.lifecycle.respawnAfterInterrupt(id),
+      onUnexpectedExit: (id) => this.lifecycle.respawnAfterUnexpectedExit(id),
       ingestToRLM: (id, msg) => this.context.ingestToRLM(id, msg),
       ingestToUnifiedMemory: (inst, msg) => this.context.ingestToUnifiedMemory(inst, msg),
       compactContext: async (id) => {
@@ -132,6 +134,8 @@ export class InstanceManager extends EventEmitter {
       getAdapter: (id) => this.state.getAdapter(id),
       setAdapter: (id, adapter) => this.state.setAdapter(id, adapter),
       deleteAdapter: (id) => this.state.deleteAdapter(id),
+      setDiffTracker: (id, tracker) => this.state.setDiffTracker(id, tracker),
+      deleteDiffTracker: (id) => this.state.deleteDiffTracker(id),
       getInstanceCount: () => this.state.getInstanceCount(),
       forEachInstance: (cb) => this.state.forEachInstance(cb),
       queueUpdate: (id, status, ctx) => this.state.queueUpdate(id, status, ctx),
@@ -764,6 +768,10 @@ export class InstanceManager extends EventEmitter {
     // Clear any stored permission request mapping for this input if present.
     // (requestId is only available in IPC payload; best-effort cleanup is done in IPC handler too.)
     return this.communication.sendInputResponse(instanceId, response, permissionKey);
+  }
+
+  queueContinuityPreamble(instanceId: string, preamble: string): void {
+    this.communication.queueContinuityPreamble(instanceId, preamble);
   }
 
   // ============================================

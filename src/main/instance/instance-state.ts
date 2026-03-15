@@ -5,10 +5,12 @@
 import { EventEmitter } from 'events';
 import { getLogger } from '../logging/logger';
 import type { CliAdapter } from '../cli/adapters/adapter-factory';
+import type { SessionDiffTracker } from './session-diff-tracker';
 import type {
   Instance,
   InstanceStatus,
-  ContextUsage
+  ContextUsage,
+  SessionDiffStats
 } from '../../shared/types/instance.types';
 import type {
   InstanceStateUpdatePayload,
@@ -21,6 +23,7 @@ const logger = getLogger('InstanceState');
 export class InstanceStateManager extends EventEmitter {
   private instances: Map<string, Instance> = new Map();
   private adapters: Map<string, CliAdapter> = new Map();
+  private diffTrackers = new Map<string, SessionDiffTracker>();
   private pendingUpdates: Map<string, InstanceStateUpdatePayload> = new Map();
   private batchTimer: NodeJS.Timeout | null = null;
 
@@ -132,6 +135,31 @@ export class InstanceStateManager extends EventEmitter {
   }
 
   // ============================================
+  // Diff Tracker Accessors
+  // ============================================
+
+  /**
+   * Get the SessionDiffTracker for an instance
+   */
+  getDiffTracker(instanceId: string): SessionDiffTracker | undefined {
+    return this.diffTrackers.get(instanceId);
+  }
+
+  /**
+   * Store a SessionDiffTracker for an instance
+   */
+  setDiffTracker(instanceId: string, tracker: SessionDiffTracker): void {
+    this.diffTrackers.set(instanceId, tracker);
+  }
+
+  /**
+   * Remove the SessionDiffTracker for an instance
+   */
+  deleteDiffTracker(instanceId: string): void {
+    this.diffTrackers.delete(instanceId);
+  }
+
+  // ============================================
   // Batch Update System
   // ============================================
 
@@ -141,12 +169,15 @@ export class InstanceStateManager extends EventEmitter {
   queueUpdate(
     instanceId: string,
     status: InstanceStatus,
-    contextUsage?: ContextUsage
+    contextUsage?: ContextUsage,
+    diffStats?: SessionDiffStats
   ): void {
+    const existing = this.pendingUpdates.get(instanceId);
     this.pendingUpdates.set(instanceId, {
       instanceId,
       status,
-      contextUsage
+      contextUsage: contextUsage ?? existing?.contextUsage,
+      diffStats: diffStats ?? existing?.diffStats
     });
   }
 

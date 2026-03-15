@@ -12,6 +12,11 @@ export interface StateUpdate {
     total: number;
     percentage: number;
   };
+  diffStats?: {
+    totalAdded: number;
+    totalDeleted: number;
+    files: Record<string, { path: string; status: 'added' | 'modified' | 'deleted'; added: number; deleted: number }>;
+  };
 }
 
 type FlushCallback = (updates: StateUpdate[]) => void;
@@ -33,7 +38,12 @@ export class UpdateBatcherService {
   queueUpdate(update: StateUpdate): void {
     // Later updates for same instance override earlier ones
     const existing = this.queue.get(update.instanceId);
-    this.queue.set(update.instanceId, { ...existing, ...update });
+    this.queue.set(update.instanceId, {
+      ...existing,
+      ...update,
+      // Preserve diffStats if the new update doesn't carry them
+      diffStats: update.diffStats ?? existing?.diffStats,
+    });
   }
 
   /**

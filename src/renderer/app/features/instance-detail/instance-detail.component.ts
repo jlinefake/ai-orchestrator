@@ -112,6 +112,25 @@ interface WelcomeProjectContext {
             />
           }
 
+          <!-- Recovery banner for replay-fallback restores -->
+          @if (isReplayFallback() && !recoveryDismissed()) {
+            <div class="recovery-banner">
+              <svg class="recovery-banner-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <div class="recovery-banner-body">
+                <span class="recovery-banner-title">Session context not restored</span>
+                <span class="recovery-banner-desc">Your conversation history is shown above, but {{ getProviderDisplayName(inst.provider) }} doesn't have this context. Consider re-summarizing what you were working on.</span>
+              </div>
+              <div class="recovery-banner-actions">
+                <button class="recovery-action recovery-action-primary" (click)="onRecoverySummarize()">Summarize & Continue</button>
+                <button class="recovery-action" (click)="onRecoveryDismiss()">Dismiss</button>
+              </div>
+            </div>
+          }
+
           <!-- Output stream (primary content) -->
           <div class="output-section" [class.empty-transcript]="inst.outputBuffer.length === 0">
             <app-output-stream
@@ -216,6 +235,7 @@ interface WelcomeProjectContext {
             [instanceStatus]="inst.status"
             [provider]="inst.provider"
             [currentModel]="inst.currentModel"
+            [isReplayFallback]="isReplayFallback()"
             (sendMessage)="onSendMessage($event)"
             (removeFile)="onRemoveFile($event)"
             (removeFolder)="onRemoveFolder($event)"
@@ -281,6 +301,83 @@ interface WelcomeProjectContext {
         gap: 10px;
         position: relative;
         z-index: 1;
+      }
+
+      /* Recovery banner for replay-fallback restores */
+      .recovery-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        flex-shrink: 0;
+        padding: 10px 14px;
+        background: rgba(245, 158, 11, 0.06);
+        border: 1px solid rgba(245, 158, 11, 0.14);
+        border-radius: 14px;
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: rgba(245, 158, 11, 0.85);
+      }
+
+      .recovery-banner-icon {
+        flex-shrink: 0;
+        margin-top: 2px;
+        opacity: 0.7;
+      }
+
+      .recovery-banner-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .recovery-banner-title {
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .recovery-banner-desc {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+
+      .recovery-banner-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .recovery-action {
+        padding: 4px 10px;
+        background: transparent;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+        border-radius: 8px;
+        color: rgba(245, 158, 11, 0.85);
+        font-size: 11px;
+        font-family: var(--font-mono);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover {
+          background: rgba(245, 158, 11, 0.1);
+          border-color: rgba(245, 158, 11, 0.3);
+        }
+      }
+
+      .recovery-action-primary {
+        background: rgba(245, 158, 11, 0.12);
+        border-color: rgba(245, 158, 11, 0.3);
+        font-weight: 600;
+
+        &:hover {
+          background: rgba(245, 158, 11, 0.2);
+          border-color: rgba(245, 158, 11, 0.4);
+        }
       }
 
       .output-section {
@@ -533,7 +630,14 @@ export class InstanceDetailComponent {
   availableModels = signal<ModelDisplayInfo[]>([]);
   private manualCompacting = signal(false);
   contextWarningDismissed = signal(false);
+  recoveryDismissed = signal(false);
   private lastDismissedPercentage = 0;
+
+  // Replay-fallback detection: instance was restored but CLI context is lost
+  isReplayFallback = computed(() => {
+    const inst = this.instance();
+    return inst?.restoreMode === 'replay-fallback';
+  });
 
   // Merge manual-trigger state with store-tracked auto-compact state
   isCompacting = computed(() => {
@@ -607,6 +711,12 @@ export class InstanceDetailComponent {
     if (!inst) return '';
 
     const providerName = this.getProviderDisplayName(inst.provider);
+
+    // Recovery-aware placeholder for replay-fallback restores
+    if (inst.restoreMode === 'replay-fallback') {
+      return `Summarize what you were working on for ${providerName}...`;
+    }
+
     switch (inst.status) {
       case 'waiting_for_input':
         return `${providerName} is waiting for your response...`;
@@ -1156,6 +1266,23 @@ export class InstanceDetailComponent {
       this.store.compactInstance(inst.id).finally(() => {
         this.manualCompacting.set(false);
       });
+    }
+  }
+
+  onRecoverySummarize(): void {
+    const inst = this.instance();
+    if (inst) {
+      this.draftService.setDraft(inst.id, 'Summarize what we were working on and continue');
+      this.recoveryDismissed.set(true);
+      this.store.clearInstanceRestoreMode(inst.id);
+    }
+  }
+
+  onRecoveryDismiss(): void {
+    this.recoveryDismissed.set(true);
+    const inst = this.instance();
+    if (inst) {
+      this.store.clearInstanceRestoreMode(inst.id);
     }
   }
 

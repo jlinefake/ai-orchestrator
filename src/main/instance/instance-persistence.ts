@@ -71,14 +71,16 @@ export class InstancePersistenceManager {
       throw new Error(`Instance ${config.instanceId} not found`);
     }
 
+    const forkSourceMessages = await this.buildForkSourceMessages(config.instanceId, sourceInstance.outputBuffer);
+
     // Determine the message index to fork at
     const forkIndex =
       config.atMessageIndex !== undefined
-        ? Math.min(config.atMessageIndex, sourceInstance.outputBuffer.length)
-        : sourceInstance.outputBuffer.length;
+        ? Math.min(config.atMessageIndex, forkSourceMessages.length)
+        : forkSourceMessages.length;
 
     // Copy messages up to the fork point
-    const forkedMessages = sourceInstance.outputBuffer.slice(0, forkIndex);
+    const forkedMessages = forkSourceMessages.slice(0, forkIndex);
 
     // Create new instance with forked messages
     const forkedInstance = await this.deps.createInstance({
@@ -93,6 +95,31 @@ export class InstancePersistenceManager {
     logger.info('Instance forked', { sourceId: sourceInstance.id, forkIndex, forkedId: forkedInstance.id });
 
     return forkedInstance;
+  }
+
+  private async buildForkSourceMessages(
+    instanceId: string,
+    liveMessages: OutputMessage[],
+  ): Promise<OutputMessage[]> {
+    const historicalMessages = await this.outputStorage.loadMessages(instanceId);
+    if (historicalMessages.length === 0) {
+      return liveMessages;
+    }
+
+    const merged = [...historicalMessages, ...liveMessages];
+    const seenIds = new Set<string>();
+    const deduped: OutputMessage[] = [];
+
+    for (const message of merged) {
+      if (seenIds.has(message.id)) {
+        continue;
+      }
+
+      seenIds.add(message.id);
+      deduped.push(message);
+    }
+
+    return deduped;
   }
 
   // ============================================

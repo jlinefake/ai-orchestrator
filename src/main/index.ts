@@ -185,9 +185,24 @@ class AIOrchestratorApp {
       observer.publishInstanceOutput(output.instanceId, output.message);
       // Track output for session continuity
       try {
+        const continuity = getSessionContinuityManager();
+        const instance = this.instanceManager.getInstance(output.instanceId);
+        if (instance) {
+          const stateUpdate: Parameters<typeof continuity.updateState>[1] = {
+            sessionId: instance.sessionId,
+            historyThreadId: instance.historyThreadId,
+            provider: instance.provider,
+            displayName: instance.displayName,
+            workingDirectory: instance.workingDirectory,
+          };
+          if (instance.currentModel) {
+            stateUpdate.modelId = instance.currentModel;
+          }
+          continuity.updateState(output.instanceId, stateUpdate);
+        }
         const msg = output.message;
         if (msg && (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'tool_use' || msg.type === 'tool_result')) {
-          getSessionContinuityManager().addConversationEntry(output.instanceId, {
+          continuity.addConversationEntry(output.instanceId, {
             id: msg.id || `msg-${Date.now()}`,
             role: msg.type === 'user' ? 'user' : msg.type === 'assistant' ? 'assistant' : 'tool',
             content: msg.content || '',

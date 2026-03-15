@@ -45,7 +45,6 @@ interface EditorMenuItem {
               <input
                 type="text"
                 class="name-input"
-                [value]="instance().displayName"
                 (keydown.enter)="onSaveName($event)"
                 (keydown.escape)="cancelEditName.emit()"
                 (blur)="onSaveName($event)"
@@ -76,19 +75,6 @@ interface EditorMenuItem {
               (click)="interrupt.emit()"
             >
               ⏸ Interrupt
-            </button>
-          }
-          @if (canShowFileExplorer()) {
-            <button
-              class="btn-action btn-icon"
-              [class.active]="isFileExplorerOpen()"
-              [title]="isFileExplorerOpen() ? 'Hide file browser' : 'Show file browser'"
-              (click)="toggleFileExplorer.emit()"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"/>
-              </svg>
             </button>
           }
           <div class="open-menu-shell">
@@ -147,6 +133,19 @@ interface EditorMenuItem {
           >
             + Child
           </button>
+          @if (canShowFileExplorer()) {
+            <button
+              class="btn-action btn-icon"
+              [class.active]="isFileExplorerOpen()"
+              [title]="isFileExplorerOpen() ? 'Hide file browser' : 'Show file browser'"
+              (click)="toggleFileExplorer.emit()"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"/>
+              </svg>
+            </button>
+          }
         </div>
       </div>
 
@@ -796,11 +795,15 @@ export class InstanceHeaderComponent implements OnInit {
   });
 
   constructor() {
-    // Focus the name input whenever editing starts
+    // Seed + focus the name input whenever editing starts.
+    // We set the value imperatively (instead of [value] binding) so that
+    // background change-detection cycles (e.g. batch status updates) cannot
+    // overwrite the text the user is typing.
     effect(() => {
       if (this.isEditingName()) {
         const input = this.nameInput()?.nativeElement;
         if (input) {
+          input.value = this.instance().displayName;
           input.focus();
           input.select();
         }

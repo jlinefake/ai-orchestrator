@@ -25,6 +25,7 @@ import { InstanceMessagingStore } from './instance-messaging.store';
 
 // Types
 import type { InstanceStatus, OutputMessage, CreateInstanceConfig } from './instance.types';
+import type { HistoryRestoreMode } from '../../../../../shared/types/history.types';
 import type { OrchestrationActivityPayload } from '../../../../../shared/types/ipc.types';
 
 @Injectable({ providedIn: 'root' })
@@ -212,6 +213,10 @@ export class InstanceStore implements OnDestroy {
   private applyUpdate(update: StateUpdate): void {
     const newStatus = update.status as InstanceStatus;
 
+    // Read previous status BEFORE applying update
+    const instance = this.stateService.getInstance(update.instanceId);
+    const previousStatus = instance?.status;
+
     // Clear activity on idle/ready/terminated/hibernated
     if (newStatus === 'idle' || newStatus === 'ready' || newStatus === 'terminated' || newStatus === 'hibernated') {
       this.activityDebouncer.clearActivity(update.instanceId);
@@ -233,29 +238,45 @@ export class InstanceStore implements OnDestroy {
     // Update state FIRST so processMessageQueue sees the new status
     this.stateService.state.update((current) => {
       const newMap = new Map(current.instances);
-      const instance = newMap.get(update.instanceId);
+      const inst = newMap.get(update.instanceId);
 
-      if (instance) {
+      if (inst) {
         newMap.set(update.instanceId, {
-          ...instance,
-          status: newStatus || instance.status,
-          contextUsage: update.contextUsage || instance.contextUsage,
+          ...inst,
+          status: newStatus || inst.status,
+          contextUsage: update.contextUsage || inst.contextUsage,
           lastActivity: Date.now(),
+          diffStats: update.diffStats ?? inst.diffStats,
         });
       }
 
       return { ...current, instances: newMap };
     });
 
-    // Process queued messages AFTER state is updated, so the guard check
-    // inside processMessageQueue sees the new 'idle'/'ready'/'waiting_for_input' status
+    // Set unread completion flag on busy→idle/ready/waiting_for_input/error
+    if (previousStatus === 'busy' &&
+        (newStatus === 'idle' || newStatus === 'ready' ||
+         newStatus === 'waiting_for_input' || newStatus === 'error')) {
+      if (this.queries.selectedInstanceId() !== update.instanceId) {
+        this.stateService.updateInstance(update.instanceId, { hasUnreadCompletion: true });
+      }
+    }
+
+    // Process queued messages AFTER state is updated
     if (newStatus === 'idle' || newStatus === 'ready' || newStatus === 'waiting_for_input') {
       this.messagingStore.processMessageQueue(update.instanceId);
     }
   }
 
   private applyBatchUpdates(updates: StateUpdate[]): void {
-    // Handle activity clearing and busy-since tracking for idle/ready/terminated/hibernated statuses
+    // Capture previous statuses BEFORE applying updates
+    const previousStatuses = new Map<string, InstanceStatus | undefined>();
+    for (const update of updates) {
+      const inst = this.stateService.getInstance(update.instanceId);
+      previousStatuses.set(update.instanceId, inst?.status);
+    }
+
+    // Handle activity clearing and busy-since tracking
     for (const update of updates) {
       const newStatus = update.status as InstanceStatus;
       if (newStatus === 'idle' || newStatus === 'ready' || newStatus === 'terminated' || newStatus === 'hibernated') {
@@ -277,6 +298,7 @@ export class InstanceStore implements OnDestroy {
             status: (update.status as InstanceStatus) || instance.status,
             contextUsage: update.contextUsage || instance.contextUsage,
             lastActivity: Date.now(),
+            diffStats: update.diffStats ?? instance.diffStats,
           });
         }
       }
@@ -284,10 +306,22 @@ export class InstanceStore implements OnDestroy {
       return { ...current, instances: newMap };
     });
 
-    // Process queued messages AFTER state is updated, so the guard check
-    // inside processMessageQueue sees the new 'idle'/'ready'/'waiting_for_input' status
+    // Set unread completion flags and process message queues
+    const selectedId = this.queries.selectedInstanceId();
     for (const update of updates) {
       const newStatus = update.status as InstanceStatus;
+      const prevStatus = previousStatuses.get(update.instanceId);
+
+      // Set unread flag on busy→completion transitions
+      if (prevStatus === 'busy' &&
+          (newStatus === 'idle' || newStatus === 'ready' ||
+           newStatus === 'waiting_for_input' || newStatus === 'error')) {
+        if (selectedId !== update.instanceId) {
+          this.stateService.updateInstance(update.instanceId, { hasUnreadCompletion: true });
+        }
+      }
+
+      // Process queued messages
       if (newStatus === 'idle' || newStatus === 'ready' || newStatus === 'waiting_for_input') {
         this.messagingStore.processMessageQueue(update.instanceId);
       }
@@ -332,6 +366,12 @@ export class InstanceStore implements OnDestroy {
   /** Set selected instance */
   setSelectedInstance(id: string | null): void {
     this.selectionStore.setSelectedInstance(id);
+    if (id) {
+      const instance = this.stateService.getInstance(id);
+      if (instance?.hasUnreadCompletion) {
+        this.stateService.updateInstance(id, { hasUnreadCompletion: false });
+      }
+    }
   }
 
   /** Create a new instance */
@@ -424,6 +464,16 @@ export class InstanceStore implements OnDestroy {
   /** Set output messages for an instance (used for restoring history) */
   setInstanceMessages(instanceId: string, messages: OutputMessage[]): void {
     this.listStore.setInstanceMessages(instanceId, messages);
+  }
+
+  /** Set the restore mode for an instance (called after history restore) */
+  setInstanceRestoreMode(instanceId: string, restoreMode: HistoryRestoreMode): void {
+    this.listStore.setInstanceRestoreMode(instanceId, restoreMode);
+  }
+
+  /** Clear the restore mode for an instance */
+  clearInstanceRestoreMode(instanceId: string): void {
+    this.listStore.clearInstanceRestoreMode(instanceId);
   }
 
   /** Force flush output for an instance (call on completion) */

@@ -49,7 +49,9 @@ import { getPolicyAdapter } from '../observation/policy-adapter';
 import { resolveInstructionStack } from '../core/config/instruction-resolver';
 import { getHibernationManager } from '../process/hibernation-manager';
 import { getSessionContinuityManager } from '../session/session-continuity';
+import { buildReplayContinuityMessage as buildSharedReplayContinuityMessage } from '../session/replay-continuity';
 import { WarmStartManager } from './warm-start-manager';
+import { SessionDiffTracker } from './session-diff-tracker';
 
 const logger = getLogger('InstanceLifecycle');
 
@@ -85,6 +87,10 @@ export interface LifecycleDependencies {
   markFirstMessageReceived: (instanceId: string) => void;
   /** Optional warm-start manager for pre-spawned adapter reuse. */
   warmStartManager?: WarmStartManager;
+  /** Optional: store a SessionDiffTracker for the given instance. */
+  setDiffTracker?: (id: string, tracker: SessionDiffTracker) => void;
+  /** Optional: remove the SessionDiffTracker for the given instance. */
+  deleteDiffTracker?: (id: string) => void;
 }
 
 // MCP config file for spawned CLI instances (LSP server, etc.)
@@ -144,67 +150,14 @@ export class InstanceLifecycleManager extends EventEmitter {
     return resolveCliType(instance.provider, settingsAll.defaultCli);
   }
 
-  private extractUnresolvedItems(messages: OutputMessage[]): string[] {
-    const unresolved = new Set<string>();
-
-    for (const message of messages.slice(-30)) {
-      const todoMatches = message.content.match(/- \[ \]\s+(.+)/gi);
-      if (todoMatches) {
-        for (const match of todoMatches) {
-          unresolved.add(match.replace(/^- \[ \]\s+/i, '').trim());
-        }
-      }
-
-      const todoLineMatches = message.content.match(/(?:^|\n)\s*(?:todo|next|follow-up)\s*[:-]\s*(.+)/gi);
-      if (todoLineMatches) {
-        for (const match of todoLineMatches) {
-          unresolved.add(match.replace(/(?:^|\n)\s*(?:todo|next|follow-up)\s*[:-]\s*/i, '').trim());
-        }
-      }
-    }
-
-    return Array.from(unresolved).filter(Boolean).slice(0, 5);
-  }
-
   private buildReplayContinuityMessage(instance: Instance, reason: string): string {
-    const userAndAssistant = instance.outputBuffer
-      .filter((message) => message.type === 'user' || message.type === 'assistant')
-      .slice(-8);
-
-    const recentTurns = userAndAssistant.map((message) => {
-      const role = message.type === 'user' ? 'User' : 'Assistant';
-      const content = message.content.length > 400
-        ? `${message.content.slice(0, 400)}...[truncated]`
-        : message.content;
-      return `- ${role}: ${content}`;
-    });
-
-    const latestUserMessage = [...instance.outputBuffer]
-      .reverse()
-      .find((message) => message.type === 'user');
-    const currentObjective = latestUserMessage?.content || 'Continue the previous task.';
-    const unresolvedItems = this.extractUnresolvedItems(instance.outputBuffer);
-
-    const unresolvedSection = unresolvedItems.length > 0
-      ? unresolvedItems.map(item => `- ${item}`).join('\n')
-      : '- None explicitly captured.';
-
-    return [
-      '[SYSTEM CONTINUITY NOTICE]',
-      `Native resume is unavailable for this provider. Continuity mode is replay-based (${reason}).`,
-      '',
-      'Current objective:',
-      currentObjective,
-      '',
-      'Unresolved items:',
-      unresolvedSection,
-      '',
-      'Recent conversation:',
-      recentTurns.length > 0 ? recentTurns.join('\n') : '- No recent turns available.',
-      '',
-      'Continue from this state and ask for clarification only if essential context is missing.',
-      '[END CONTINUITY NOTICE]',
-    ].join('\n');
+    return buildSharedReplayContinuityMessage(instance.outputBuffer, { reason })
+      || [
+        '[SYSTEM CONTINUITY NOTICE]',
+        `Native resume is unavailable for this provider. Continuity mode is replay-based (${reason}).`,
+        'Continue the previous task and ask for clarification only if essential context is missing.',
+        '[END CONTINUITY NOTICE]',
+      ].join('\n');
   }
 
   // ============================================
@@ -276,7 +229,7 @@ export class InstanceLifecycleManager extends EventEmitter {
     // Calculate depth based on parent
     let depth = 0;
     let resolvedWorkingDir = config.workingDirectory;
-    let resolvedYoloMode = config.yoloMode ?? false;
+    let resolvedYoloMode = config.yoloMode ?? this.settings.getAll().defaultYoloMode;
     let resolvedAgentId = resolvedAgent.id;
 
     if (config.parentId) {
@@ -351,6 +304,7 @@ export class InstanceLifecycleManager extends EventEmitter {
       workingDirectory: resolvedWorkingDir,
       yoloMode: resolvedYoloMode,
       provider: config.provider || 'auto',
+      diffStats: undefined,
 
       outputBuffer: config.initialOutputBuffer || [],
       outputBufferMaxSize: LIMITS.OUTPUT_BUFFER_MAX_SIZE,
@@ -460,6 +414,14 @@ export class InstanceLifecycleManager extends EventEmitter {
           logger.warn('Failed to inject observation context', { error: err instanceof Error ? err.message : String(err) });
         }
 
+        // Append tool permission clarification to prevent models from hallucinating
+        // permission issues when commands fail for unrelated reasons (test failures, etc.)
+        systemPrompt += '\n\n---\n\n' +
+          '[Tool Permissions] All tool calls in this environment are auto-approved. ' +
+          'You do NOT need user permission to run any tool, including Bash, Write, or Edit. ' +
+          'If a command fails, it failed for a real reason (syntax error, test failure, missing dependency, etc.) — not because of permissions. ' +
+          'Never ask the user to approve or deny tool calls. Just use tools directly.';
+
         if (signal.aborted) return;
 
         // Resolve CLI provider type
@@ -554,7 +516,12 @@ export class InstanceLifecycleManager extends EventEmitter {
         };
 
         // Check for a pre-warmed adapter before spawning fresh.
-        const warmAdapter = this.deps.warmStartManager?.consume(resolvedCliType) as CliAdapter | null ?? null;
+        // NEVER use warm-start for resume operations — warm adapters have fresh sessions
+        // with no conversation context. Resume requires --resume <sessionId> on a freshly
+        // spawned CLI process.
+        const warmAdapter = config.resume
+          ? null
+          : (this.deps.warmStartManager?.consume(resolvedCliType) as CliAdapter | null ?? null);
 
         let adapter: CliAdapter;
         if (warmAdapter) {
@@ -564,6 +531,9 @@ export class InstanceLifecycleManager extends EventEmitter {
           // Set up adapter events and store the adapter.
           this.deps.setupAdapterEvents(instance.id, adapter);
           this.deps.setAdapter(instance.id, adapter);
+          if (this.deps.setDiffTracker) {
+            this.deps.setDiffTracker(instance.id, new SessionDiffTracker(instance.workingDirectory));
+          }
 
           if (signal.aborted) {
             await adapter.terminate(false).catch(() => { /* ignore */ });
@@ -591,6 +561,7 @@ export class InstanceLifecycleManager extends EventEmitter {
               }))
             };
             this.deps.addToOutputBuffer(instance, userMessage);
+            this.emit('output', { instanceId: instance.id, message: userMessage });
             try {
               await adapter.sendInput(config.initialPrompt, config.attachments);
             } catch (error) {
@@ -616,6 +587,9 @@ export class InstanceLifecycleManager extends EventEmitter {
 
           // Store adapter
           this.deps.setAdapter(instance.id, adapter);
+          if (this.deps.setDiffTracker) {
+            this.deps.setDiffTracker(instance.id, new SessionDiffTracker(instance.workingDirectory));
+          }
 
           if (signal.aborted) {
             // Clean up the adapter we just registered
@@ -655,6 +629,7 @@ export class InstanceLifecycleManager extends EventEmitter {
                 }))
               };
               this.deps.addToOutputBuffer(instance, userMessage);
+              this.emit('output', { instanceId: instance.id, message: userMessage });
               await adapter.sendInput(config.initialPrompt, config.attachments);
             }
           } catch (error) {
@@ -727,6 +702,9 @@ export class InstanceLifecycleManager extends EventEmitter {
   ): Promise<void> {
     const adapter = this.deps.getAdapter(instanceId);
     const instance = this.deps.getInstance(instanceId);
+
+    // Always clean up diff tracker, even if adapter is null (e.g., spawn failed)
+    this.deps.deleteDiffTracker?.(instanceId);
 
     if (adapter) {
       await adapter.terminate(graceful);
@@ -871,6 +849,7 @@ export class InstanceLifecycleManager extends EventEmitter {
         await adapter.terminate(true);
         this.deps.deleteAdapter(instanceId);
       }
+      this.deps.deleteDiffTracker?.(instanceId);
 
       instance.processId = null;
 
@@ -961,10 +940,14 @@ export class InstanceLifecycleManager extends EventEmitter {
         const adapter = createCliAdapter(cliType, spawnOptions);
         this.deps.setupAdapterEvents(instanceId, adapter);
         this.deps.setAdapter(instanceId, adapter);
+        if (this.deps.setDiffTracker) {
+          this.deps.setDiffTracker(instanceId, new SessionDiffTracker(instance.workingDirectory));
+        }
 
         if (signal.aborted) {
           await adapter.terminate(false).catch(() => { /* ignore */ });
           this.deps.deleteAdapter(instanceId);
+          this.deps.deleteDiffTracker?.(instanceId);
           return;
         }
 
@@ -1024,6 +1007,7 @@ export class InstanceLifecycleManager extends EventEmitter {
       total: getProviderModelContextWindow(cliType, instance.currentModel),
       percentage: 0
     };
+    instance.diffStats = undefined;
     instance.totalTokensUsed = 0;
 
     // Reset first message tracking
@@ -1041,6 +1025,10 @@ export class InstanceLifecycleManager extends EventEmitter {
 
     this.deps.setupAdapterEvents(instanceId, adapter);
     this.deps.setAdapter(instanceId, adapter);
+    this.deps.deleteDiffTracker?.(instanceId);
+    if (this.deps.setDiffTracker) {
+      this.deps.setDiffTracker(instanceId, new SessionDiffTracker(instance.workingDirectory));
+    }
 
     // Spawn new process
     instance.status = 'initializing';
@@ -1126,9 +1114,15 @@ export class InstanceLifecycleManager extends EventEmitter {
 
     const cliType = await this.resolveCliTypeForInstance(instance);
     const shouldResume = hasConversation && oldAdapterCapabilities.supportsResume;
+    const shouldForkSession = shouldResume && oldAdapterCapabilities.supportsForkSession;
+
+    const newSessionId = shouldResume && shouldForkSession 
+      ? generateId() 
+      : (shouldResume ? instance.sessionId : generateId());
+    instance.sessionId = newSessionId;
 
     const spawnOptions: UnifiedSpawnOptions = {
-      sessionId: instance.sessionId,
+      sessionId: newSessionId,
       workingDirectory: instance.workingDirectory,
       systemPrompt: newAgent.systemPrompt,
       yoloMode: instance.yoloMode,
@@ -1136,16 +1130,40 @@ export class InstanceLifecycleManager extends EventEmitter {
       allowedTools: defaultAllowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       resume: shouldResume,
+      forkSession: shouldForkSession,
       mcpConfig: this.getMcpConfig(),
     };
 
-    const adapter = createCliAdapter(cliType, spawnOptions);
+    let adapter = createCliAdapter(cliType, spawnOptions);
 
     this.deps.setupAdapterEvents(instanceId, adapter);
     this.deps.setAdapter(instanceId, adapter);
 
     try {
-      const pid = await adapter.spawn();
+      let pid: number;
+      try {
+        pid = await adapter.spawn();
+      } catch (spawnError) {
+        if (shouldResume) {
+          logger.warn('Failed to spawn with resume, falling back to fresh session', { error: spawnError instanceof Error ? spawnError.message : String(spawnError), instanceId });
+          await adapter.terminate(true);
+          
+          const fallbackOptions = { ...spawnOptions, resume: false, forkSession: false, sessionId: generateId() };
+          instance.sessionId = fallbackOptions.sessionId;
+          adapter = createCliAdapter(cliType, fallbackOptions);
+          this.deps.setupAdapterEvents(instanceId, adapter);
+          this.deps.setAdapter(instanceId, adapter);
+          
+          pid = await adapter.spawn();
+          
+          if (hasConversation) {
+            await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'resume-failed-fallback'));
+          }
+        } else {
+          throw spawnError;
+        }
+      }
+
       instance.processId = pid;
       instance.status = 'idle';
       logger.info('Agent mode changed successfully', { instanceId, newAgentId, pid, resumed: shouldResume });
@@ -1255,25 +1273,32 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
 
     const cliType = await this.resolveCliTypeForInstance(instance);
     const shouldResume = hasConversation && oldAdapterCapabilities.supportsResume;
+    const shouldForkSession = shouldResume && oldAdapterCapabilities.supportsForkSession;
+
+    const newSessionId = shouldResume && shouldForkSession 
+      ? generateId() 
+      : (shouldResume ? instance.sessionId : generateId());
+    instance.sessionId = newSessionId;
 
     const spawnOptions: UnifiedSpawnOptions = {
-      sessionId: instance.sessionId,
+      sessionId: newSessionId,
       workingDirectory: instance.workingDirectory,
       systemPrompt: agent.systemPrompt,
       yoloMode: newYoloMode,
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
-      // Only resume if there's actually a conversation to continue
       resume: shouldResume,
+      forkSession: shouldForkSession,
       mcpConfig: this.getMcpConfig(),
     };
     logger.debug('Spawn options configured', {
       instanceId,
       resume: spawnOptions.resume,
+      forkSession: spawnOptions.forkSession,
       sessionId: spawnOptions.sessionId
     });
 
-    const adapter = createCliAdapter(cliType, spawnOptions);
+    let adapter = createCliAdapter(cliType, spawnOptions);
 
     logger.debug('Setting up adapter events', { instanceId });
     this.deps.setupAdapterEvents(instanceId, adapter);
@@ -1286,7 +1311,31 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
 
     try {
       logger.debug('Spawning new adapter', { instanceId });
-      const pid = await adapter.spawn();
+      let pid: number;
+      try {
+        pid = await adapter.spawn();
+      } catch (spawnError) {
+        if (shouldResume) {
+          logger.warn('Failed to spawn with resume, falling back to fresh session', { error: spawnError instanceof Error ? spawnError.message : String(spawnError), instanceId });
+          await adapter.terminate(true);
+          
+          // Retry without resume
+          const fallbackOptions = { ...spawnOptions, resume: false, forkSession: false, sessionId: generateId() };
+          instance.sessionId = fallbackOptions.sessionId;
+          adapter = createCliAdapter(cliType, fallbackOptions);
+          this.deps.setupAdapterEvents(instanceId, adapter);
+          this.deps.setAdapter(instanceId, adapter);
+          
+          pid = await adapter.spawn();
+          
+          if (hasConversation) {
+            await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'resume-failed-fallback'));
+          }
+        } else {
+          throw spawnError;
+        }
+      }
+
       instance.processId = pid;
       instance.status = 'idle';
       logger.info('YOLO mode toggled successfully', { instanceId, pid, newYoloMode, resumed: shouldResume });
@@ -1374,6 +1423,7 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
 
     const cliType = await this.resolveCliTypeForInstance(instance);
     const shouldResume = hasConversation && oldAdapterCapabilities.supportsResume;
+    const shouldForkSession = shouldResume && oldAdapterCapabilities.supportsForkSession;
 
     // Validate model against provider before passing it
     let validatedModel: string | undefined = newModel;
@@ -1403,6 +1453,11 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       }
     }
 
+    const newSessionId = shouldResume && shouldForkSession 
+      ? generateId() 
+      : (shouldResume ? instance.sessionId : generateId());
+    instance.sessionId = newSessionId;
+
     instance.currentModel = validatedModel;
     const contextTotal = getProviderModelContextWindow(cliType, validatedModel);
     instance.contextUsage = {
@@ -1414,7 +1469,7 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
     };
 
     const spawnOptions: UnifiedSpawnOptions = {
-      sessionId: instance.sessionId,
+      sessionId: newSessionId,
       workingDirectory: instance.workingDirectory,
       systemPrompt: agent.systemPrompt,
       model: validatedModel,
@@ -1422,15 +1477,39 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       allowedTools,
       disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
       resume: shouldResume,
+      forkSession: shouldForkSession,
       mcpConfig: this.getMcpConfig(),
     };
 
-    const adapter = createCliAdapter(cliType, spawnOptions);
+    let adapter = createCliAdapter(cliType, spawnOptions);
     this.deps.setupAdapterEvents(instanceId, adapter);
     this.deps.setAdapter(instanceId, adapter);
 
     try {
-      const pid = await adapter.spawn();
+      let pid: number;
+      try {
+        pid = await adapter.spawn();
+      } catch (spawnError) {
+        if (shouldResume) {
+          logger.warn('Failed to spawn with resume, falling back to fresh session', { error: spawnError instanceof Error ? spawnError.message : String(spawnError), instanceId });
+          await adapter.terminate(true);
+          
+          const fallbackOptions = { ...spawnOptions, resume: false, forkSession: false, sessionId: generateId() };
+          instance.sessionId = fallbackOptions.sessionId;
+          adapter = createCliAdapter(cliType, fallbackOptions);
+          this.deps.setupAdapterEvents(instanceId, adapter);
+          this.deps.setAdapter(instanceId, adapter);
+          
+          pid = await adapter.spawn();
+          
+          if (hasConversation) {
+            await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'resume-failed-fallback'));
+          }
+        } else {
+          throw spawnError;
+        }
+      }
+
       instance.processId = pid;
       instance.status = 'idle';
       logger.info('Model changed successfully', {
@@ -1548,21 +1627,61 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
 
     try {
       logger.debug('Spawning new process after interrupt', { instanceId });
-      const pid = await adapter.spawn();
-      logger.info('Process respawned successfully', { instanceId, pid });
+      let pid: number;
+      let actuallyResumed = shouldResume;
+      try {
+        pid = await adapter.spawn();
+      } catch (spawnError) {
+        // Resume failed (e.g., corrupted session with empty messages).
+        // Fall back to a fresh session with replay continuity message.
+        if (shouldResume) {
+          logger.warn('Resume failed after interrupt, falling back to fresh session', {
+            instanceId,
+            error: spawnError instanceof Error ? spawnError.message : String(spawnError),
+          });
+          // eslint-disable-next-line @typescript-eslint/no-empty-function
+          await adapter.terminate(true).catch(() => {});
+
+          const fallbackSessionId = generateId();
+          instance.sessionId = fallbackSessionId;
+          const fallbackOptions: UnifiedSpawnOptions = {
+            ...spawnOptions,
+            resume: false,
+            forkSession: false,
+            sessionId: fallbackSessionId,
+          };
+          const fallbackAdapter = createCliAdapter(cliType, fallbackOptions);
+          this.deps.setupAdapterEvents(instanceId, fallbackAdapter);
+          this.deps.setAdapter(instanceId, fallbackAdapter);
+
+          pid = await fallbackAdapter.spawn();
+          actuallyResumed = false;
+
+          if (hasConversation) {
+            await fallbackAdapter.sendInput(
+              this.buildReplayContinuityMessage(instance, 'resume-failed-fallback')
+            );
+          }
+        } else {
+          throw spawnError;
+        }
+      }
+      logger.info('Process respawned successfully', { instanceId, pid, resumed: actuallyResumed });
 
       instance.processId = pid;
       instance.status = 'idle';
       instance.lastActivity = Date.now();
 
-      if (!shouldResume && hasConversation) {
+      if (!actuallyResumed && shouldResume) {
+        // Already sent continuity message in fallback path above
+      } else if (!shouldResume && hasConversation) {
         await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'interrupt-respawn'));
       }
 
       const message = {
         id: generateId(),
         type: 'system' as const,
-        content: 'Interrupted — waiting for input',
+        content: actuallyResumed ? 'Interrupted — waiting for input' : 'Interrupted — session restarted (resume failed)',
         timestamp: Date.now()
       };
       this.deps.addToOutputBuffer(instance, message);
@@ -1572,6 +1691,119 @@ Proceed with implementation. Do NOT request to switch modes - you are already in
       logger.info('Respawn after interrupt complete', { instanceId });
     } catch (error) {
       logger.error('Failed to spawn after interrupt', error instanceof Error ? error : undefined, { instanceId });
+      instance.status = 'error';
+      instance.processId = null;
+      this.deps.queueUpdate(instanceId, 'error');
+      throw error;
+    }
+  }
+
+  /**
+   * Respawn an instance after its CLI process exited unexpectedly.
+   * Uses --resume to reconnect to the existing CLI session.
+   * Falls back to a fresh session with replay continuity if resume fails.
+   */
+  async respawnAfterUnexpectedExit(instanceId: string): Promise<void> {
+    logger.info('Auto-respawning after unexpected exit', { instanceId });
+
+    const instance = this.deps.getInstance(instanceId);
+    if (!instance) {
+      throw new Error(`Instance ${instanceId} not found`);
+    }
+
+    const previousAdapter = this.deps.getAdapter(instanceId);
+    const capabilities = this.getAdapterRuntimeCapabilities(previousAdapter);
+    const sessionId = instance.sessionId;
+    const hasConversation = instance.outputBuffer.some(
+      (msg) => msg.type === 'user' || msg.type === 'assistant'
+    );
+    const shouldResume = capabilities.supportsResume && Boolean(sessionId);
+    const shouldForkSession = shouldResume && capabilities.supportsForkSession;
+
+    const newSessionId = shouldResume && shouldForkSession
+      ? generateId()
+      : shouldResume
+        ? sessionId
+        : generateId();
+    instance.sessionId = newSessionId;
+
+    const cliType = await this.resolveCliTypeForInstance(instance);
+
+    const spawnOptions: UnifiedSpawnOptions = {
+      sessionId: shouldResume ? sessionId : newSessionId,
+      workingDirectory: instance.workingDirectory,
+      yoloMode: instance.yoloMode,
+      model: instance.currentModel,
+      resume: shouldResume,
+      forkSession: shouldForkSession,
+      mcpConfig: this.getMcpConfig(),
+    };
+    let adapter = createCliAdapter(cliType, spawnOptions);
+    this.deps.setupAdapterEvents(instanceId, adapter);
+    this.deps.setAdapter(instanceId, adapter);
+
+    try {
+      let pid: number;
+      let actuallyResumed = shouldResume;
+      try {
+        pid = await adapter.spawn();
+      } catch (spawnError) {
+        if (shouldResume) {
+          logger.warn('Resume failed during auto-respawn, falling back to fresh session', {
+            instanceId,
+            error: spawnError instanceof Error ? spawnError.message : String(spawnError),
+          });
+          await adapter.terminate(true).catch(() => { /* ignore */ });
+
+          const fallbackSessionId = generateId();
+          instance.sessionId = fallbackSessionId;
+          const fallbackOptions: UnifiedSpawnOptions = {
+            ...spawnOptions,
+            resume: false,
+            forkSession: false,
+            sessionId: fallbackSessionId,
+          };
+          adapter = createCliAdapter(cliType, fallbackOptions);
+          this.deps.setupAdapterEvents(instanceId, adapter);
+          this.deps.setAdapter(instanceId, adapter);
+
+          pid = await adapter.spawn();
+          actuallyResumed = false;
+
+          if (hasConversation) {
+            await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'auto-respawn-fallback'));
+          }
+        } else {
+          throw spawnError;
+        }
+      }
+      logger.info('Auto-respawn successful', { instanceId, pid, resumed: actuallyResumed });
+
+      instance.processId = pid;
+      instance.status = 'idle';
+      instance.lastActivity = Date.now();
+
+      if (!actuallyResumed && shouldResume) {
+        // Already sent continuity message in fallback path
+      } else if (!shouldResume && hasConversation) {
+        await adapter.sendInput(this.buildReplayContinuityMessage(instance, 'auto-respawn'));
+      }
+
+      const message = {
+        id: generateId(),
+        type: 'system' as const,
+        content: actuallyResumed
+          ? 'Session reconnected automatically'
+          : 'Session restarted automatically (resume failed)',
+        timestamp: Date.now(),
+        metadata: { autoRespawn: true }
+      };
+      this.deps.addToOutputBuffer(instance, message);
+      this.emit('output', { instanceId, message });
+
+      this.deps.queueUpdate(instanceId, 'idle', instance.contextUsage);
+    } catch (error) {
+      logger.error('Auto-respawn failed', error instanceof Error ? error : undefined, { instanceId });
       instance.status = 'error';
       instance.processId = null;
       this.deps.queueUpdate(instanceId, 'error');

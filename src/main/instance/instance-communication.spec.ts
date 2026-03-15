@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliAdapter } from '../cli/adapters/adapter-factory';
 import type { Instance } from '../../shared/types/instance.types';
+import type { SessionDiffTracker } from './session-diff-tracker';
 
 vi.mock('../core/config/settings-manager', () => ({
   getSettingsManager: () => ({
@@ -100,6 +101,10 @@ describe('InstanceCommunicationManager', () => {
   let queueUpdate: ReturnType<typeof vi.fn>;
   let manager: InstanceCommunicationManager;
 
+  async function flushOutputHandlers(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   beforeEach(() => {
     instance = createInstance();
     adapters = new Map();
@@ -142,5 +147,91 @@ describe('InstanceCommunicationManager', () => {
     expect(instance.status).toBe('terminated');
     expect(instance.processId).toBeNull();
     expect(queueUpdate).toHaveBeenCalledWith(instance.id, 'terminated');
+  });
+
+  it('captures baselines from tool_result messages', async () => {
+    const captureBaseline = vi.fn();
+    const tracker = {
+      captureBaseline,
+      computeDiff: vi.fn(),
+    } as unknown as SessionDiffTracker;
+    const adapter = new FakeAdapter('claude-cli') as unknown as CliAdapter;
+    adapters.set(instance.id, adapter);
+
+    manager = new InstanceCommunicationManager({
+      getInstance: (id) => (id === instance.id ? instance : undefined),
+      getAdapter: (id) => adapters.get(id),
+      setAdapter: (id, currentAdapter) => {
+        adapters.set(id, currentAdapter);
+      },
+      deleteAdapter: (id) => adapters.delete(id),
+      queueUpdate,
+      getDiffTracker: () => tracker,
+      processOrchestrationOutput: vi.fn(),
+      onInterruptedExit: vi.fn().mockResolvedValue(undefined),
+      ingestToRLM: vi.fn(),
+      ingestToUnifiedMemory: vi.fn(),
+    });
+
+    manager.setupAdapterEvents(instance.id, adapter);
+    (adapter as unknown as EventEmitter).emit('output', {
+      id: 'tool-result-1',
+      timestamp: Date.now(),
+      type: 'tool_result',
+      content: '',
+      metadata: {
+        name: 'Write',
+        input: {
+          file_path: '/tmp/project/src/main.ts',
+          content: 'updated',
+        },
+      },
+    });
+    await flushOutputHandlers();
+
+    expect(captureBaseline).toHaveBeenCalledWith('/tmp/project/src/main.ts');
+  });
+
+  it('stores diffStats on busy to idle transitions', () => {
+    const diffStats = {
+      totalAdded: 8,
+      totalDeleted: 3,
+      files: {
+        'src/main.ts': {
+          path: 'src/main.ts',
+          status: 'modified' as const,
+          added: 8,
+          deleted: 3,
+        },
+      },
+    };
+    const tracker = {
+      captureBaseline: vi.fn(),
+      computeDiff: vi.fn(() => diffStats),
+    } as unknown as SessionDiffTracker;
+    const adapter = new FakeAdapter('claude-cli') as unknown as CliAdapter;
+    adapters.set(instance.id, adapter);
+    instance.status = 'busy';
+
+    manager = new InstanceCommunicationManager({
+      getInstance: (id) => (id === instance.id ? instance : undefined),
+      getAdapter: (id) => adapters.get(id),
+      setAdapter: (id, currentAdapter) => {
+        adapters.set(id, currentAdapter);
+      },
+      deleteAdapter: (id) => adapters.delete(id),
+      queueUpdate,
+      getDiffTracker: () => tracker,
+      processOrchestrationOutput: vi.fn(),
+      onInterruptedExit: vi.fn().mockResolvedValue(undefined),
+      ingestToRLM: vi.fn(),
+      ingestToUnifiedMemory: vi.fn(),
+    });
+
+    manager.setupAdapterEvents(instance.id, adapter);
+    (adapter as unknown as EventEmitter).emit('status', 'idle');
+
+    expect(instance.diffStats).toEqual(diffStats);
+    expect(queueUpdate).toHaveBeenCalledWith(instance.id, 'idle', instance.contextUsage, diffStats);
   });
 });

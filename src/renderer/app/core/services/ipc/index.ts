@@ -159,6 +159,7 @@ export class IpcFacadeService {
   listUserActionRequestsForInstance = this.instance.listUserActionRequestsForInstance.bind(this.instance);
   onInputRequired = this.instance.onInputRequired.bind(this.instance);
   respondToInputRequired = this.instance.respondToInputRequired.bind(this.instance);
+  loadOlderMessages = this.instance.loadOlderMessages.bind(this.instance);
   compactInstance = this.instance.compactInstance.bind(this.instance);
   onCompactStatus = this.instance.onCompactStatus.bind(this.instance);
   onContextWarning = this.instance.onContextWarning.bind(this.instance);

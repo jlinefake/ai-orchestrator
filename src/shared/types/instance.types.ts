@@ -88,6 +88,26 @@ export interface ContextUsage {
 }
 
 /**
+ * Per-file diff entry for session change tracking
+ */
+export interface FileDiffEntry {
+  path: string;
+  status: 'added' | 'modified' | 'deleted';
+  added: number;
+  deleted: number;
+}
+
+/**
+ * Aggregate diff stats for an instance session.
+ * Uses Record (not Map) so it survives JSON serialization without special handling.
+ */
+export interface SessionDiffStats {
+  totalAdded: number;
+  totalDeleted: number;
+  files: Record<string, FileDiffEntry>;
+}
+
+/**
  * Individual thinking/reasoning block from LLM response
  */
 export interface ThinkingContent {
@@ -166,6 +186,9 @@ export interface Instance {
   yoloMode: boolean; // Auto-approve all permissions
   provider: InstanceProvider; // Which CLI provider is being used
   currentModel?: string; // Current model override (e.g., 'gpt-5.3-codex')
+
+  /** Accumulated diff stats for the session (file content snapshots) */
+  diffStats?: SessionDiffStats;
 
   // Output
   outputBuffer: OutputMessage[];
@@ -276,6 +299,7 @@ export function createInstance(config: InstanceCreateConfig): Instance {
     workingDirectory: config.workingDirectory,
     yoloMode: config.yoloMode ?? false, // Default to YOLO mode disabled
     provider, // Default to auto (resolved by instance manager)
+    diffStats: undefined,
 
     outputBuffer: config.initialOutputBuffer || [],
     outputBufferMaxSize: 1000,

@@ -157,6 +157,39 @@ export class RLMDatabase extends EventEmitter {
     this.emit('store:created', { id: store.id, instanceId: store.instanceId });
   }
 
+  /**
+   * Idempotent store creation — INSERT OR IGNORE to avoid PK/UNIQUE collisions.
+   * Used by VectorStore.ensureStoreExists for FK satisfaction.
+   */
+  ensureStore(store: { id: string; instanceId: string }): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO context_stores
+        (id, instance_id, created_at, last_accessed, config_json)
+      VALUES (?, ?, ?, ?, NULL)
+    `).run(store.id, store.instanceId, Date.now(), Date.now());
+  }
+
+  /**
+   * Idempotent section creation — INSERT OR IGNORE for FK satisfaction.
+   * Used by VectorStore.ensureSectionExists.
+   */
+  ensureSection(section: { id: string; storeId: string; type: string; name: string; content: string }): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO context_sections
+        (id, store_id, type, name, start_offset, end_offset, tokens, created_at, content_inline)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
+    `).run(
+      section.id,
+      section.storeId,
+      section.type,
+      section.name,
+      section.content.length,
+      Math.ceil(section.content.length / 4),
+      Date.now(),
+      section.content
+    );
+  }
+
   getStore(storeId: string): ContextStoreRow | null {
     return stores.getStore(this.db, storeId);
   }

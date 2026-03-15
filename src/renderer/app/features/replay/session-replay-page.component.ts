@@ -787,6 +787,10 @@ export class SessionReplayPageComponent {
           result.restoredMessages as OutputMessage[],
         );
       }
+      // Preserve how the session was restored so the UI can adapt
+      if (result.restoreMode) {
+        this.instanceStore.setInstanceRestoreMode(result.instanceId, result.restoreMode);
+      }
       this.instanceStore.setSelectedInstance(result.instanceId);
       await this.router.navigate(['/']);
     } catch (error) {

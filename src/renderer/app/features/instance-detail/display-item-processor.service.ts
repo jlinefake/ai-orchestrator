@@ -22,6 +22,7 @@ export interface DisplayItem {
   timestamp?: number;
   repeatCount?: number;
   showHeader?: boolean;
+  bufferIndex?: number;
 }
 
 const TIME_GAP_THRESHOLD = 2 * 60 * 1000; // 2 minutes
@@ -30,23 +31,39 @@ export class DisplayItemProcessor {
   private lastProcessedCount = 0;
   private items: DisplayItem[] = [];
   private lastInstanceId: string | null = null;
+  private lastHistoryOffset = 0;
+  private firstMessageId: string | null = null;
   private seenStreamingIds = new Set<string>();
   private _newItemCount = 0;
 
-  process(messages: readonly OutputMessage[], instanceId?: string): DisplayItem[] {
-    if (instanceId !== this.lastInstanceId || messages.length < this.lastProcessedCount) {
+  process(
+    messages: readonly OutputMessage[],
+    instanceId?: string,
+    historyOffset = 0,
+  ): DisplayItem[] {
+    // Detect instance switch, buffer shrink, or prepend (first message ID changed)
+    const currentFirstId = messages.length > 0 ? messages[0].id : null;
+    if (
+      instanceId !== this.lastInstanceId ||
+      historyOffset !== this.lastHistoryOffset ||
+      messages.length < this.lastProcessedCount ||
+      (currentFirstId !== null && currentFirstId !== this.firstMessageId)
+    ) {
       this.reset();
       this.lastInstanceId = instanceId ?? null;
     }
+    this.lastHistoryOffset = historyOffset;
+    this.firstMessageId = currentFirstId;
 
     if (messages.length === this.lastProcessedCount) {
       return this.items;
     }
 
     const newMessages = messages.slice(this.lastProcessedCount);
+    const bufferOffset = historyOffset + this.lastProcessedCount;
     this.lastProcessedCount = messages.length;
 
-    const rawItems = this.convertToItems(newMessages);
+    const rawItems = this.convertToItems(newMessages, bufferOffset);
 
     const prevLength = this.items.length;
     this.mergeNewItems(rawItems);
@@ -60,6 +77,7 @@ export class DisplayItemProcessor {
   reset(): void {
     this.items = [];
     this.lastProcessedCount = 0;
+    this.lastHistoryOffset = 0;
     this.seenStreamingIds.clear();
   }
 
@@ -67,10 +85,12 @@ export class DisplayItemProcessor {
     return this._newItemCount;
   }
 
-  private convertToItems(messages: readonly OutputMessage[]): DisplayItem[] {
+  private convertToItems(messages: readonly OutputMessage[], bufferOffset: number): DisplayItem[] {
     const items: DisplayItem[] = [];
 
-    for (const msg of messages) {
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const bufferIndex = bufferOffset + i;
       const isStreaming =
         msg.metadata != null &&
         'streaming' in msg.metadata &&
@@ -109,6 +129,7 @@ export class DisplayItemProcessor {
           id: `stream-${msg.id}`,
           type: 'message',
           message: { ...msg, content: displayContent },
+          bufferIndex,
         });
       } else if (msg.thinking && msg.thinking.length > 0 && msg.type === 'assistant') {
         items.push({
@@ -118,9 +139,10 @@ export class DisplayItemProcessor {
           thoughts: msg.thinking.map(t => t.content),
           response: msg,
           timestamp: msg.timestamp,
+          bufferIndex,
         });
       } else {
-        items.push({ id: `msg-${msg.id}`, type: 'message', message: msg });
+        items.push({ id: `msg-${msg.id}`, type: 'message', message: msg, bufferIndex });
       }
     }
 
@@ -154,17 +176,30 @@ export class DisplayItemProcessor {
           this.items[this.items.length - 1] = group;
           continue;
         }
+        // Single tool message — wrap in a collapsible tool-group
+        this.items.push({
+          id: `tools-${item.message.id}`,
+          type: 'tool-group',
+          toolMessages: [item.message],
+          timestamp: item.message.timestamp,
+        });
+        continue;
       }
 
+      // Collapse consecutive identical messages — but never system messages.
+      // System notices (restore warnings, compaction boundaries, etc.) should
+      // always appear individually so they aren't mistaken for duplicated noise.
       if (
         item.type === 'message' &&
         last?.type === 'message' &&
         item.message &&
         last.message &&
+        item.message.type !== 'system' &&
         item.message.type === last.message.type &&
         item.message.content === last.message.content
       ) {
         last.repeatCount = (last.repeatCount ?? 1) + 1;
+        last.bufferIndex = item.bufferIndex;
         continue;
       }
 

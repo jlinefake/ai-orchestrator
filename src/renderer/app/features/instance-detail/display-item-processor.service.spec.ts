@@ -40,13 +40,25 @@ describe('DisplayItemProcessor', () => {
 
   it('should collapse repeated identical messages', () => {
     const msgs = [
-      makeMsg({ content: 'Error', type: 'system', id: 'e1' }),
-      makeMsg({ content: 'Error', type: 'system', id: 'e2' }),
-      makeMsg({ content: 'Error', type: 'system', id: 'e3' }),
+      makeMsg({ content: 'Same response', type: 'assistant', id: 'e1' }),
+      makeMsg({ content: 'Same response', type: 'assistant', id: 'e2' }),
+      makeMsg({ content: 'Same response', type: 'assistant', id: 'e3' }),
     ];
     const items = processor.process(msgs);
     expect(items.length).toBe(1);
     expect(items[0].repeatCount).toBe(3);
+    expect(items[0].bufferIndex).toBe(2);
+  });
+
+  it('should NOT collapse repeated system messages', () => {
+    const msgs = [
+      makeMsg({ content: 'System notice', type: 'system', id: 's1' }),
+      makeMsg({ content: 'System notice', type: 'system', id: 's2' }),
+      makeMsg({ content: 'System notice', type: 'system', id: 's3' }),
+    ];
+    const items = processor.process(msgs);
+    expect(items.length).toBe(3);
+    expect(items[0].repeatCount).toBeUndefined();
   });
 
   it('should create thought-group for messages with thinking', () => {
@@ -139,5 +151,32 @@ describe('DisplayItemProcessor', () => {
     expect(items.length).toBe(1);
     expect(items[0].type).toBe('tool-group');
     expect(items[0].toolMessages?.length).toBe(2);
+  });
+
+  it('should set bufferIndex on each message item', () => {
+    const messages: OutputMessage[] = [
+      { id: '1', timestamp: 1000, type: 'user', content: 'hello' },
+      { id: '2', timestamp: 2000, type: 'assistant', content: 'hi' },
+      { id: '3', timestamp: 3000, type: 'user', content: 'how are you' },
+    ];
+    const items = processor.process(messages);
+    const messageItems = items.filter(i => i.type === 'message');
+    for (const item of messageItems) {
+      expect(item.bufferIndex).toBeDefined();
+      expect(typeof item.bufferIndex).toBe('number');
+    }
+    expect(messageItems[0].bufferIndex).toBe(0);
+  });
+
+  it('should offset bufferIndex by the hidden-history count', () => {
+    const messages: OutputMessage[] = [
+      { id: '1', timestamp: 1000, type: 'user', content: 'hello' },
+      { id: '2', timestamp: 2000, type: 'assistant', content: 'hi' },
+    ];
+    const items = processor.process(messages, 'instance-1', 250);
+    const messageItems = items.filter(i => i.type === 'message');
+
+    expect(messageItems[0].bufferIndex).toBe(250);
+    expect(messageItems[1].bufferIndex).toBe(251);
   });
 });

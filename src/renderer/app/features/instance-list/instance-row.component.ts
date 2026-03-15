@@ -19,6 +19,7 @@ import { Instance } from '../../core/state/instance.store';
       class="instance-row"
       [class.selected]="isSelected()"
       [class.error]="instance().status === 'error'"
+      [class.needs-attention]="needsAttention()"
       [class.yolo]="instance().yoloMode"
       [class.is-child]="depth() > 0"
       [class.draggable]="isDraggable()"
@@ -35,8 +36,10 @@ import { Instance } from '../../core/state/instance.store';
         <span class="child-connector">└</span>
       }
 
-      <span class="leading-indicator" [title]="showActivitySpinner() ? activityLabel() : isHibernated() ? 'Hibernated — click to wake' : providerVisual().label">
-        @if (showActivitySpinner()) {
+      <span class="leading-indicator" [title]="needsAttention() ? activityLabel() : showActivitySpinner() ? activityLabel() : isHibernated() ? 'Hibernated — click to wake' : providerVisual().label">
+        @if (needsAttention()) {
+          <span class="attention-dot" [title]="activityLabel()"></span>
+        } @else if (showActivitySpinner()) {
           <span class="activity-spinner"></span>
         } @else if (isHibernated()) {
           <span class="hibernated-indicator" title="Hibernated — click to wake">
@@ -96,12 +99,26 @@ import { Instance } from '../../core/state/instance.store';
 
       <div class="instance-info">
         <div class="instance-name-row">
+          @if (hasUnreadCompletion()) {
+            <span class="unread-dot" title="Completed — click to view"></span>
+          }
           <span class="instance-name">{{ resolvedDisplayTitle() }}</span>
           @if (hasChildren() && !isExpanded()) {
             <span class="collapsed-badge" title="Child instances (click arrow to expand)">+{{ instance().childrenIds.length }}</span>
           }
         </div>
       </div>
+
+      @if (hasDiffStats()) {
+        <div class="diff-stats" [title]="diffTooltip()">
+          @if (diffStatsLabel().added) {
+            <span class="diff-added">{{ diffStatsLabel().added }}</span>
+          }
+          @if (diffStatsLabel().deleted) {
+            <span class="diff-deleted">{{ diffStatsLabel().deleted }}</span>
+          }
+        </div>
+      }
 
       @if (lastActivityLabel()) {
         <div class="instance-meta">
@@ -234,6 +251,43 @@ import { Instance } from '../../core/state/instance.store';
       animation: spin 0.7s linear infinite;
     }
 
+    .attention-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f59e0b;
+      box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+      animation: attention-pulse 2s ease-in-out infinite;
+    }
+
+    .instance-row.needs-attention {
+      background: rgba(245, 158, 11, 0.06);
+    }
+
+    .instance-row.needs-attention:hover {
+      background: rgba(245, 158, 11, 0.1);
+    }
+
+    .instance-row.selected.needs-attention {
+      background:
+        linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.06)),
+        rgba(245, 158, 11, 0.06);
+      box-shadow:
+        inset 0 0 0 1px rgba(245, 158, 11, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    @keyframes attention-pulse {
+      0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+      }
+      50% {
+        opacity: 0.6;
+        box-shadow: 0 0 12px rgba(245, 158, 11, 0.9);
+      }
+    }
+
     /* Child connector - Refined tree line */
     .child-connector {
       color: var(--border-color);
@@ -297,6 +351,41 @@ import { Instance } from '../../core/state/instance.store';
       align-items: center;
       gap: 8px;
       min-width: 0;
+    }
+
+    .unread-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #60A5FA;
+      box-shadow: 0 0 6px rgba(96, 165, 250, 0.5);
+      flex-shrink: 0;
+      animation: unread-fade-in 200ms ease-out;
+    }
+
+    @keyframes unread-fade-in {
+      from { opacity: 0; transform: scale(0.5); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .diff-stats {
+      display: flex;
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+      white-space: nowrap;
+      padding: 0 4px;
+    }
+
+    .diff-added {
+      color: #4ade80;
+    }
+
+    .diff-deleted {
+      color: #f87171;
     }
 
     .provider-badge {
@@ -467,6 +556,36 @@ export class InstanceRowComponent {
   restart = output<string>();
   toggleExpand = output<string>();
   readonly resolvedDisplayTitle = computed(() => this.displayTitle()?.trim() || this.instance().displayName);
+
+  readonly hasDiffStats = computed(() => {
+    const stats = this.instance().diffStats;
+    return stats && (stats.totalAdded > 0 || stats.totalDeleted > 0)
+      && this.instance().status !== 'error';
+  });
+
+  readonly diffStatsLabel = computed(() => {
+    const stats = this.instance().diffStats;
+    if (!stats) return { added: '', deleted: '' };
+    return {
+      added: stats.totalAdded > 0 ? `+${stats.totalAdded}` : '',
+      deleted: stats.totalDeleted > 0 ? `-${stats.totalDeleted}` : '',
+    };
+  });
+
+  readonly hasUnreadCompletion = computed(() => !!this.instance().hasUnreadCompletion);
+
+  readonly diffTooltip = computed(() => {
+    const stats = this.instance().diffStats;
+    if (!stats || Object.keys(stats.files).length === 0) return '';
+    const lines: string[] = [];
+    for (const entry of Object.values(stats.files)) {
+      const a = entry.added > 0 ? `+${entry.added}` : '';
+      const d = entry.deleted > 0 ? `-${entry.deleted}` : '';
+      lines.push(`${entry.path}  ${a} ${d}`.trim());
+    }
+    return lines.join('\n');
+  });
+
   readonly providerVisual = computed(() => {
     switch (this.instance().provider) {
       case 'claude':
@@ -481,10 +600,12 @@ export class InstanceRowComponent {
         return { icon: 'ollama', color: '#7dd3fc', label: 'Ollama' } as const;
     }
   });
+  readonly needsAttention = computed(() =>
+    this.instance().status === 'waiting_for_input'
+  );
   readonly showActivitySpinner = computed(() =>
     this.instance().status === 'busy' ||
     this.instance().status === 'initializing' ||
-    this.instance().status === 'waiting_for_input' ||
     this.instance().status === 'respawning' ||
     this.instance().status === 'waking' ||
     this.instance().status === 'hibernating'

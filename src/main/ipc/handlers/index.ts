@@ -32,3 +32,4 @@ export { registerRoutingHandlers } from './routing-handlers';
 export { registerCommunicationHandlers } from './communication-handlers';
 export { registerParallelWorktreeHandlers } from './parallel-worktree-handlers';
 export { registerRemoteObserverHandlers } from './remote-observer-handlers';
+export { registerImageHandlers } from './image-handlers';

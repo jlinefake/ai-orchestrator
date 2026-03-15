@@ -16,8 +16,11 @@ import type {
   Instance,
   InstanceStatus,
   ContextUsage,
-  OutputMessage
+  OutputMessage,
+  SessionDiffStats
 } from '../../shared/types/instance.types';
+import type { SessionDiffTracker } from './session-diff-tracker';
+import { ToolOutputParser } from './tool-output-parser';
 import { generateId } from '../../shared/utils/id-generator';
 
 /**
@@ -28,9 +31,11 @@ export interface CommunicationDependencies {
   getAdapter: (id: string) => CliAdapter | undefined;
   setAdapter: (id: string, adapter: CliAdapter) => void;
   deleteAdapter: (id: string) => boolean;
-  queueUpdate: (instanceId: string, status: InstanceStatus, contextUsage?: ContextUsage) => void;
+  queueUpdate: (instanceId: string, status: InstanceStatus, contextUsage?: ContextUsage, diffStats?: SessionDiffStats) => void;
+  getDiffTracker?: (id: string) => SessionDiffTracker | undefined;
   processOrchestrationOutput: (instanceId: string, content: string) => void;
   onInterruptedExit: (instanceId: string) => Promise<void>;
+  onUnexpectedExit?: (instanceId: string) => Promise<void>;
   onChildExit?: (childId: string, instance: Instance, exitCode: number | null) => void | Promise<void>;
   ingestToRLM: (instanceId: string, message: OutputMessage) => void;
   ingestToUnifiedMemory: (instance: Instance, message: OutputMessage) => void;
@@ -60,6 +65,7 @@ export class InstanceCommunicationManager extends EventEmitter {
   private outputStorage = getOutputStorageManager();
   private hookManager = getHookManager();
   private deps: CommunicationDependencies;
+  private toolOutputParser = new ToolOutputParser();
   private interruptedInstances = new Set<string>();
 
   // Circuit breaker state per instance
@@ -71,6 +77,8 @@ export class InstanceCommunicationManager extends EventEmitter {
   private contextWarningIssued = new Set<string>();
   private contextOverflowRetried = new Set<string>();
   private contextOverflowSeen = new Set<string>(); // Tracks instances that hit context overflow via output path
+  private pendingContinuityPreambles = new Map<string, string>(); // Continuity queued for next input
+  private pendingContextWarnings = new Map<string, string>(); // Warnings queued for next input
 
   // Repeated error suppression
   private lastErrorContent = new Map<string, { content: string; count: number }>();
@@ -194,7 +202,18 @@ export class InstanceCommunicationManager extends EventEmitter {
     this.contextWarningIssued.delete(instanceId);
     this.contextOverflowRetried.delete(instanceId);
     this.contextOverflowSeen.delete(instanceId);
+    this.pendingContinuityPreambles.delete(instanceId);
+    this.pendingContextWarnings.delete(instanceId);
     this.lastErrorContent.delete(instanceId);
+  }
+
+  queueContinuityPreamble(instanceId: string, preamble: string): void {
+    if (!preamble.trim()) {
+      return;
+    }
+
+    this.pendingContinuityPreambles.set(instanceId, preamble);
+    logger.info('Queued continuity preamble for next user input', { instanceId });
   }
 
   // ============================================
@@ -245,10 +264,40 @@ export class InstanceCommunicationManager extends EventEmitter {
       throw new Error(`Instance ${instanceId} is in an inconsistent state (no adapter). Please restart the instance.`);
     }
 
+    // Validate that the final message will be non-empty.
+    // Empty user messages get stored in CLI session history and cause
+    // API 400 "user messages must have non-empty content" on --resume.
+    const hasAttachments = attachments && attachments.length > 0;
+    if (!message.trim() && !contextBlock?.trim() && !hasAttachments) {
+      throw new Error('Cannot send empty message: no text content and no attachments');
+    }
+
     // Track last sent message for retry-after-compaction
     this.lastSentMessages.set(instanceId, { message, attachments, contextBlock });
 
-    const finalMessage = contextBlock ? `${contextBlock}\n\n${message}` : message;
+    const pendingPreambles: string[] = [];
+    const pendingContinuity = this.pendingContinuityPreambles.get(instanceId);
+    if (pendingContinuity) {
+      pendingPreambles.push(pendingContinuity);
+      this.pendingContinuityPreambles.delete(instanceId);
+      logger.info('Prepended pending continuity preamble to user input', { instanceId });
+    }
+
+    let finalContextBlock = contextBlock;
+    const pendingWarning = this.pendingContextWarnings.get(instanceId);
+    if (pendingWarning) {
+      pendingPreambles.push(pendingWarning);
+      this.pendingContextWarnings.delete(instanceId);
+      logger.info('Prepended pending context warning to user input', { instanceId });
+    }
+
+    if (pendingPreambles.length > 0) {
+      finalContextBlock = finalContextBlock
+        ? `${pendingPreambles.join('\n\n')}\n\n${finalContextBlock}`
+        : pendingPreambles.join('\n\n');
+    }
+
+    const finalMessage = finalContextBlock ? `${finalContextBlock}\n\n${message}` : message;
 
     logger.info('Sending message to adapter');
     await adapter.sendInput(finalMessage, attachments);
@@ -417,6 +466,24 @@ export class InstanceCommunicationManager extends EventEmitter {
           }
         }
 
+        // Capture file baselines for diff tracking on file-modifying tool events
+        if (
+          (message.type === 'tool_use' || message.type === 'tool_result') &&
+          this.deps.getDiffTracker
+        ) {
+          const tracker = this.deps.getDiffTracker(instanceId);
+          if (tracker) {
+            const filePaths = this.toolOutputParser.extractFilePaths(message, instance.workingDirectory, instance.provider);
+            for (const fp of filePaths) {
+              try {
+                tracker.captureBaseline(fp);
+              } catch (err) {
+                logger.debug('Baseline capture failed', { instanceId, filePath: fp, error: String(err) });
+              }
+            }
+          }
+        }
+
         // Trigger hooks for tool_result events (PostToolUse)
         if (message.type === 'tool_result' && message.metadata) {
           const metadata = message.metadata as Record<string, unknown>;
@@ -435,6 +502,34 @@ export class InstanceCommunicationManager extends EventEmitter {
           } catch (err) {
             logger.error('PostToolUse hook error', err instanceof Error ? err : undefined, { instanceId });
           }
+        }
+
+        // Detect corrupted session errors (empty user messages stored in CLI history).
+        // These surface as API 400 "user messages must have non-empty content" on --resume.
+        // Show a clear recovery message instead of a cryptic API error.
+        if (message.type === 'error' && this.isCorruptedSessionMessage(message.content)) {
+          logger.warn('Corrupted session detected via output path', { instanceId, content: message.content });
+
+          const recoveryMessage: OutputMessage = {
+            id: generateId(),
+            timestamp: Date.now(),
+            type: 'system',
+            content: 'Session history contains invalid messages and cannot be resumed. Please restart this instance to start a fresh session.',
+            metadata: { corruptedSession: true, fatal: true }
+          };
+          this.addToOutputBuffer(instance, message);
+          this.addToOutputBuffer(instance, recoveryMessage);
+          this.emit('output', { instanceId, message });
+          this.emit('output', { instanceId, message: recoveryMessage });
+
+          if (instance.status !== 'error' && instance.status !== 'terminated') {
+            instance.status = 'error';
+            this.deps.queueUpdate(instanceId, 'error');
+            this.forceCleanupAdapter(instanceId).catch((err) => {
+              logger.error('Failed to cleanup adapter after corrupted session', err instanceof Error ? err : undefined, { instanceId });
+            });
+          }
+          return;
         }
 
         // Detect context-overflow errors arriving via NDJSON stdout path
@@ -491,8 +586,30 @@ export class InstanceCommunicationManager extends EventEmitter {
 
       const instance = this.deps.getInstance(instanceId);
       if (instance && instance.status !== status) {
+        const previousStatus = instance.status;
         instance.status = status;
         instance.lastActivity = Date.now();
+
+        // On busy→idle/ready transition, compute diff stats and include them in the update
+        if (
+          previousStatus === 'busy' &&
+          (status === 'idle' || status === 'ready') &&
+          this.deps.getDiffTracker
+        ) {
+          const tracker = this.deps.getDiffTracker(instanceId);
+          if (tracker) {
+            try {
+              const diffStats = tracker.computeDiff();
+              instance.diffStats = diffStats;
+              this.deps.queueUpdate(instanceId, status, instance.contextUsage, diffStats);
+            } catch (err) {
+              logger.debug('computeDiff failed', { instanceId, error: String(err) });
+              this.deps.queueUpdate(instanceId, status, instance.contextUsage);
+            }
+            return;
+          }
+        }
+
         this.deps.queueUpdate(instanceId, status, instance.contextUsage);
       }
     });
@@ -510,7 +627,7 @@ export class InstanceCommunicationManager extends EventEmitter {
         instance.totalTokensUsed = usage.used;
         this.deps.queueUpdate(instanceId, instance.status, usage);
         if (!this.isStatelessExecAdapter(adapter)) {
-          this.checkContextWarningThreshold(instanceId, instance, usage, adapter);
+          this.checkContextWarningThreshold(instanceId, instance, usage);
         }
       }
     });
@@ -753,8 +870,41 @@ export class InstanceCommunicationManager extends EventEmitter {
       }
 
       if (instance.status !== 'terminated') {
+        // Auto-respawn root instances that exit unexpectedly while idle/ready.
+        // This handles CLI processes dying from sleep/wake, pipe errors, or
+        // idle timeouts — keeping sessions alive like standalone CLI tools do.
+        const canAutoRespawn =
+          this.deps.onUnexpectedExit &&
+          !instance.parentId &&                        // Only root instances
+          instance.restartCount < 5 &&                 // Don't loop forever
+          (instance.status === 'idle' || instance.status === 'ready' || instance.status === 'busy') &&
+          instance.outputBuffer.some(m => m.type === 'user'); // Has conversation worth preserving
+
+        if (canAutoRespawn) {
+          logger.info('Auto-respawning instance after unexpected exit', {
+            instanceId,
+            code,
+            signal,
+            restartCount: instance.restartCount,
+            previousStatus: instance.status,
+          });
+          instance.status = 'respawning';
+          instance.processId = null;
+          instance.restartCount++;
+          this.deps.queueUpdate(instanceId, 'respawning');
+          this.deps.deleteAdapter(instanceId);
+
+          this.deps.onUnexpectedExit!(instanceId).catch((err) => {
+            logger.error('Auto-respawn failed', err instanceof Error ? err : undefined, { instanceId });
+            instance.status = 'error';
+            instance.processId = null;
+            this.deps.queueUpdate(instanceId, 'error');
+          });
+          return;
+        }
+
         const newStatus = code === 0 ? 'terminated' : 'error';
-        logger.info('Instance exited unexpectedly', { instanceId, newStatus });
+        logger.info('Instance exited unexpectedly', { instanceId, newStatus, code, signal });
         instance.status = newStatus;
         instance.processId = null;
         this.deps.queueUpdate(instanceId, instance.status);
@@ -894,13 +1044,27 @@ export class InstanceCommunicationManager extends EventEmitter {
   }
 
   /**
+   * Check if a message indicates a corrupted session (e.g., empty user messages
+   * stored in CLI history that cause API 400 on --resume)
+   */
+  private isCorruptedSessionMessage(content: string): boolean {
+    if (!content) return false;
+    const lower = content.toLowerCase();
+    return (
+      lower.includes('user messages must have non-empty content') ||
+      lower.includes('must have non-empty content') ||
+      lower.includes('messages must have non-empty') ||
+      lower.includes('invalid_request_error') && lower.includes('non-empty')
+    );
+  }
+
+  /**
    * Check if context usage has crossed the warning threshold and send delegation guidance
    */
   private checkContextWarningThreshold(
     instanceId: string,
     instance: Instance,
     usage: ContextUsage,
-    adapter: CliAdapter
   ): void {
     // Skip if already warned
     if (this.contextWarningIssued.has(instanceId)) return;
@@ -933,9 +1097,8 @@ export class InstanceCommunicationManager extends EventEmitter {
       '[END SYSTEM WARNING]'
     ].join('\n');
 
-    adapter.sendInput(guidance).catch(err => {
-      logger.error('Failed to send context warning', err instanceof Error ? err : undefined, { instanceId });
-    });
+    this.pendingContextWarnings.set(instanceId, guidance);
+    logger.info('Queued context warning for next user input', { instanceId });
   }
 
   // ============================================

@@ -5,7 +5,8 @@
  * Supports clicking to view/open files.
  */
 
-import { Component, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, signal, inject, ChangeDetectionStrategy } from '@angular/core';
+import { ElectronIpcService } from '../../../core/services/ipc/electron-ipc.service';
 
 export interface AttachmentDisplay {
   name: string;
@@ -27,6 +28,7 @@ export interface AttachmentDisplay {
               (click)="openPreview(attachment)"
               (keydown.enter)="openPreview(attachment)"
               (keydown.space)="openPreview(attachment)"
+              (contextmenu)="onThumbnailContextMenu($event, attachment)"
               tabindex="0"
               role="button"
               [style.background-image]="'url(' + attachment.data + ')'"
@@ -375,6 +377,7 @@ export interface AttachmentDisplay {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MessageAttachmentsComponent {
+  private ipc = inject(ElectronIpcService);
   attachments = input.required<AttachmentDisplay[]>();
   previewAttachment = signal<AttachmentDisplay | null>(null);
 
@@ -445,45 +448,47 @@ export class MessageAttachmentsComponent {
   }
 
   /**
-   * Handle right-click on image to show native context menu with copy option
+   * Handle right-click on preview image to show native context menu
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onImageContextMenu(_event?: MouseEvent): void {
-    // Allow default context menu which includes "Copy Image" option in Electron
-    // No need to prevent default - we want the native menu
+  onImageContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const attachment = this.previewAttachment();
+    if (!attachment?.data) return;
+
+    this.ipc.invoke('image:context-menu', {
+      dataUrl: attachment.data,
+      filename: attachment.name,
+    });
   }
 
   /**
-   * Copy image to clipboard
+   * Handle right-click on thumbnail to show native context menu
+   */
+  onThumbnailContextMenu(event: MouseEvent, attachment: AttachmentDisplay): void {
+    event.preventDefault();
+    if (!attachment.data) return;
+
+    this.ipc.invoke('image:context-menu', {
+      dataUrl: attachment.data,
+      filename: attachment.name,
+    });
+  }
+
+  /**
+   * Copy image to clipboard using Electron's native clipboard
    */
   async copyImageToClipboard(): Promise<void> {
     const attachment = this.previewAttachment();
     if (!attachment?.data) return;
 
-    try {
-      // Convert base64 data URL to blob
-      const response = await fetch(attachment.data);
-      const blob = await response.blob();
+    const result = await this.ipc.invoke('image:copy-to-clipboard', {
+      dataUrl: attachment.data,
+    });
 
-      // Use Clipboard API to write the image
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          [blob.type]: blob
-        })
-      ]);
-
-      // Show a brief visual feedback (could be enhanced with a toast notification)
+    if (result.success) {
       console.log('Image copied to clipboard');
-    } catch (error) {
-      console.error('Failed to copy image to clipboard:', error);
-
-      // Fallback: try to copy as data URL text
-      try {
-        await navigator.clipboard.writeText(attachment.data);
-        console.log('Image data URL copied to clipboard');
-      } catch (fallbackError) {
-        console.error('Fallback copy also failed:', fallbackError);
-      }
+    } else {
+      console.error('Failed to copy image to clipboard:', result.error?.message);
     }
   }
 }

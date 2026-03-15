@@ -122,6 +122,11 @@ export class InstanceMessagingStore {
     const instance = this.stateService.getInstance(instanceId);
     if (!instance) return;
 
+    // Clear recovery state on first user message — the user is re-establishing context
+    if (instance.restoreMode) {
+      this.stateService.updateInstance(instanceId, { restoreMode: undefined });
+    }
+
     // If instance is busy, respawning, or in a transitional state, queue the message instead of sending immediately
     if (
       instance.status === 'busy' ||

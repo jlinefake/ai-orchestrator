@@ -14,6 +14,7 @@ import type {
   OutputMessage,
   CreateInstanceConfig,
 } from './instance.types';
+import type { HistoryRestoreMode } from '../../../../../shared/types/history.types';
 
 @Injectable({ providedIn: 'root' })
 export class InstanceListStore {
@@ -202,6 +203,8 @@ export class InstanceListStore {
       // Clear the output buffer and reset status
       this.stateService.updateInstance(instanceId, {
         outputBuffer: [],
+        diffStats: undefined,
+        hasUnreadCompletion: false,
         status: 'idle' as InstanceStatus,
       });
     }
@@ -339,6 +342,20 @@ export class InstanceListStore {
     });
   }
 
+  /**
+   * Set the restore mode for an instance (called after history restore)
+   */
+  setInstanceRestoreMode(instanceId: string, restoreMode: HistoryRestoreMode): void {
+    this.stateService.updateInstance(instanceId, { restoreMode });
+  }
+
+  /**
+   * Clear the restore mode for an instance
+   */
+  clearInstanceRestoreMode(instanceId: string): void {
+    this.stateService.updateInstance(instanceId, { restoreMode: undefined });
+  }
+
   // ============================================
   // Helpers
   // ============================================
@@ -382,6 +399,9 @@ export class InstanceListStore {
       yoloMode: (d['yoloMode'] as boolean) ?? false,
       currentModel,
       outputBuffer: (d['outputBuffer'] as OutputMessage[]) || [],
+      restoreMode: d['restoreMode'] as HistoryRestoreMode | undefined,
+      diffStats: d['diffStats'] as Instance['diffStats'] | undefined,
+      hasUnreadCompletion: false,
     };
   }
 

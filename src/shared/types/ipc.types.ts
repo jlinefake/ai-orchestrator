@@ -7,7 +7,8 @@ import type {
   FileAttachment,
   InstanceStatus,
   OutputMessage,
-  InstanceProvider
+  InstanceProvider,
+  SessionDiffStats
 } from './instance.types';
 import type { RepoJobStatus, RepoJobType } from './repo-job.types';
 
@@ -33,6 +34,9 @@ export const IPC_CHANNELS = {
   INSTANCE_CREATED: 'instance:created',
   INSTANCE_REMOVED: 'instance:removed',
   INSTANCE_LIST: 'instance:list',
+
+  // Output history (load older messages from disk)
+  INSTANCE_LOAD_OLDER_MESSAGES: 'instance:load-older-messages',
 
   // Hibernation lifecycle
   INSTANCE_HIBERNATE: 'instance:hibernate',
@@ -66,6 +70,8 @@ export const IPC_CHANNELS = {
   // File operations
   FILE_DROP: 'file:drop',
   IMAGE_PASTE: 'image:paste',
+  IMAGE_COPY_TO_CLIPBOARD: 'image:copy-to-clipboard',
+  IMAGE_CONTEXT_MENU: 'image:context-menu',
   FILE_READ_DIR: 'file:read-dir',
   FILE_GET_STATS: 'file:get-stats',
   FILE_READ_TEXT: 'file:read-text',
@@ -844,6 +850,7 @@ export interface InstanceStateUpdatePayload {
   status: InstanceStatus;
   contextUsage?: ContextUsage;
   error?: ErrorInfo;
+  diffStats?: SessionDiffStats;
 }
 
 export interface InstanceOutputPayload {

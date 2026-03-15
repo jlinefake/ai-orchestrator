@@ -14,6 +14,8 @@ export interface SuggestionContext {
   status: InstanceStatus;
   hasFiles: boolean;
   currentText: string;
+  /** Whether this instance was restored via replay fallback (no CLI context) */
+  isReplayFallback?: boolean;
 }
 
 interface SuggestionRule {
@@ -49,6 +51,12 @@ function lastMsgLastLine(ctx: SuggestionContext): string {
 @Injectable({ providedIn: 'root' })
 export class PromptSuggestionService {
   private readonly rules: SuggestionRule[] = [
+    // Rule 0: Recovery — replay-fallback restore, CLI context is lost
+    {
+      match: (ctx) => !!ctx.isReplayFallback,
+      suggest: () => 'Here\'s a summary of what I was working on...',
+    },
+
     // Rule 1: New/empty instance — starter prompt
     {
       match: (ctx) => ctx.messages.length === 0 && ctx.status === 'idle',
@@ -147,8 +155,8 @@ export class PromptSuggestionService {
    * Returns null if no suggestion is appropriate.
    */
   getSuggestion(context: SuggestionContext): string | null {
-    // Don't suggest while busy or when user has typed something
-    if (context.status === 'busy' || context.status === 'initializing') {
+    // Don't suggest while busy, initializing, or waking
+    if (context.status === 'busy' || context.status === 'initializing' || context.status === 'waking') {
       return null;
     }
 

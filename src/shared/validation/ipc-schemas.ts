@@ -56,16 +56,29 @@ export const InstanceCreateWithMessagePayloadSchema = z.object({
 
 export const InstanceSendInputPayloadSchema = z.object({
   instanceId: InstanceIdSchema,
-  message: z.string().min(0).max(500000), // Allow empty string when attachments carry the content
+  message: z.string().max(500000),
   attachments: z.array(z.object({
     name: z.string().max(500),
     type: z.string().max(100),
     size: z.number().int().min(0).max(50 * 1024 * 1024),
     data: z.string().optional(),
   })).max(10).optional(),
-});
+}).refine(
+  (data) => data.message.trim().length > 0 || (data.attachments && data.attachments.length > 0),
+  { message: 'Either message must be non-empty or attachments must be provided' }
+);
 
 export type InstanceSendInputPayload = z.infer<typeof InstanceSendInputPayloadSchema>;
+
+// ============ Output History ============
+
+export const InstanceLoadOlderMessagesPayloadSchema = z.object({
+  instanceId: InstanceIdSchema,
+  beforeChunk: z.number().int().min(0).optional(), // Load chunks before this index
+  limit: z.number().int().min(1).max(500).optional().default(200),
+});
+
+export type InstanceLoadOlderMessagesPayload = z.infer<typeof InstanceLoadOlderMessagesPayloadSchema>;
 
 // ============ Instance Operations ============
 

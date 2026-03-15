@@ -438,50 +438,26 @@ export class VectorStore extends EventEmitter {
   private ensureStoreExists(storeId: string): void {
     if (this.ensuredStores.has(storeId)) return;
     try {
-      const existing = this.db.getStore(storeId);
-      if (!existing) {
-        this.db.createStore({ id: storeId, instanceId: storeId });
-        logger.info('Auto-created context store for vector FK', { storeId });
-      }
+      this.db.ensureStore({ id: storeId, instanceId: storeId });
       this.ensuredStores.add(storeId);
     } catch (error) {
-      // UNIQUE constraint → store already exists (race condition), safe to ignore
-      if (error instanceof Error && error.message.includes('UNIQUE')) {
-        this.ensuredStores.add(storeId);
-      } else {
-        logger.warn('Failed to ensure store exists', { storeId, error: error instanceof Error ? error.message : String(error) });
-      }
+      logger.warn('Failed to ensure store exists', { storeId, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  /**
-   * Ensure a context_sections row exists for the given sectionId.
-   * Creates a minimal placeholder so the FK constraint on vectors is satisfied.
-   */
   private ensureSectionExists(storeId: string, sectionId: string, content: string): void {
     if (this.ensuredSections.has(sectionId)) return;
     try {
-      const existing = this.db.getSection(sectionId);
-      if (!existing) {
-        this.db.addSection({
-          id: sectionId,
-          storeId,
-          type: 'vector-placeholder',
-          name: sectionId,
-          startOffset: 0,
-          endOffset: content.length,
-          tokens: Math.ceil(content.length / 4), // rough estimate
-          content,
-        });
-        logger.info('Auto-created context section for vector FK', { sectionId, storeId });
-      }
+      this.db.ensureSection({
+        id: sectionId,
+        storeId,
+        type: 'vector-placeholder',
+        name: sectionId,
+        content,
+      });
       this.ensuredSections.add(sectionId);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('UNIQUE')) {
-        this.ensuredSections.add(sectionId);
-      } else {
-        logger.warn('Failed to ensure section exists', { sectionId, error: error instanceof Error ? error.message : String(error) });
-      }
+      logger.warn('Failed to ensure section exists', { sectionId, error: error instanceof Error ? error.message : String(error) });
     }
   }
 }

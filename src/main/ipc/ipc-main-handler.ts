@@ -60,6 +60,7 @@ import {
   registerCommunicationHandlers,
   registerParallelWorktreeHandlers,
   registerRemoteObserverHandlers,
+  registerImageHandlers,
 } from './handlers';
 
 const logger = getLogger('IpcMainHandler');
@@ -197,6 +198,9 @@ export class IpcMainHandler {
 
     // File handlers (editor, watcher, multi-edit)
     registerFileHandlers({ windowManager: this.windowManager });
+
+    // Image handlers (clipboard copy, context menu)
+    registerImageHandlers();
 
     // Task management handlers (subagent spawning)
     registerTaskHandlers();

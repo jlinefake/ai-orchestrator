@@ -13,11 +13,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app, safeStorage } from 'electron';
 import { EventEmitter } from 'events';
-import type { Instance } from '../../shared/types/instance.types';
+import type { Instance, InstanceProvider } from '../../shared/types/instance.types';
 import { CLAUDE_MODELS } from '../../shared/types/provider.types';
 import { getSettingsManager } from '../core/config/settings-manager';
 import { getLogger } from '../logging/logger';
 import { SnapshotIndex } from './snapshot-index';
+import { cleanupOrphanedTmpFiles, repairFile, validateTranscript } from './session-repair';
 
 const logger = getLogger('SessionContinuity');
 
@@ -47,9 +48,12 @@ export interface SessionSnapshot {
  */
 export interface SessionState {
   instanceId: string;
+  sessionId?: string;
+  historyThreadId?: string;
   displayName: string;
   agentId: string;
   modelId: string;
+  provider?: InstanceProvider;
   workingDirectory: string;
   systemPrompt?: string;
   temperature?: number;
@@ -135,7 +139,7 @@ const DEFAULT_CONFIG: ContinuityConfig = {
   resumeOnStartup: true,
   preserveToolResults: true,
   maxConversationEntries: 1000,
-  encryptOnDisk: true,
+  encryptOnDisk: false,
   persistSessionContent: true,
   redactToolOutputs: true
 };
@@ -175,6 +179,17 @@ export class SessionContinuityManager extends EventEmitter {
    */
   private async initAsync(): Promise<void> {
     await this.ensureDirectories();
+
+    // Layer 3: Clean up orphaned tmp files before loading states
+    const stateTmp = await cleanupOrphanedTmpFiles(this.stateDir);
+    const snapTmp = await cleanupOrphanedTmpFiles(this.snapshotDir);
+    if (stateTmp.recovered.length || snapTmp.recovered.length) {
+      logger.info('Recovered orphaned tmp files on startup', {
+        states: stateTmp.recovered.length,
+        snapshots: snapTmp.recovered.length,
+      });
+    }
+
     await this.loadActiveStates();
     await this.buildSnapshotIndex();
     this.startGlobalAutoSave();
@@ -193,19 +208,33 @@ export class SessionContinuityManager extends EventEmitter {
    * Load active session states from disk
    */
   private async loadActiveStates(): Promise<void> {
+    let files: string[];
     try {
-      const files = await fs.promises.readdir(this.stateDir);
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const filePath = path.join(this.stateDir, file);
-          const data = await this.readPayload<SessionState>(filePath);
-          if (data) {
-            this.sessionStates.set(data.instanceId, data);
-          }
-        }
-      }
+      files = await fs.promises.readdir(this.stateDir);
     } catch (error) {
-      logger.error('Failed to load session states', error instanceof Error ? error : undefined);
+      logger.error('Failed to read session state directory', error instanceof Error ? error : undefined, {
+        stateDir: this.stateDir,
+      });
+      return;
+    }
+
+    let loaded = 0;
+    let failed = 0;
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const filePath = path.join(this.stateDir, file);
+      const data = await this.readPayload<SessionState>(filePath);
+      if (data) {
+        this.sessionStates.set(data.instanceId, data);
+        loaded++;
+      } else {
+        failed++;
+        logger.warn('Skipped unloadable session state file', { file, filePath });
+      }
+    }
+
+    if (loaded > 0 || failed > 0) {
+      logger.info('Session states loaded', { loaded, failed, total: loaded + failed });
     }
   }
 
@@ -483,6 +512,18 @@ export class SessionContinuityManager extends EventEmitter {
 
     if (!state) return null;
 
+    // Layer 2: Validate transcript integrity
+    if (state.conversationHistory.length > 0) {
+      const repairResult = validateTranscript(state.conversationHistory);
+      if (repairResult.status === 'repaired') {
+        state.conversationHistory = repairResult.entries;
+        logger.info('Transcript repaired during resume', {
+          instanceId,
+          repairs: repairResult.repairs,
+        });
+      }
+    }
+
     // Apply resume options
     const resumedState: SessionState = { ...state };
 
@@ -630,9 +671,12 @@ export class SessionContinuityManager extends EventEmitter {
 
     return {
       instanceId: instance.id,
+      sessionId: instance.sessionId,
+      historyThreadId: instance.historyThreadId,
       displayName: instance.displayName,
       agentId: instance.agentId,
-      modelId: CLAUDE_MODELS.SONNET, // Default model
+      modelId: instance.currentModel || CLAUDE_MODELS.SONNET,
+      provider: instance.provider,
       workingDirectory: instance.workingDirectory,
       systemPrompt: undefined,
       temperature: undefined,
@@ -745,13 +789,43 @@ export class SessionContinuityManager extends EventEmitter {
    * Async read payload
    */
   private async readPayload<T>(filePath: string): Promise<T | null> {
+    let raw: string;
     try {
-      const raw = await fs.promises.readFile(filePath, 'utf-8');
-      return this.deserializePayload<T>(raw);
+      raw = await fs.promises.readFile(filePath, 'utf-8');
     } catch (error) {
-      logger.error('Failed to read continuity payload', error instanceof Error ? error : undefined);
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        logger.debug('Continuity file not found', { path: filePath });
+      } else {
+        logger.error('Failed to read continuity file', error instanceof Error ? error : undefined, {
+          path: filePath,
+          errorCode: code,
+        });
+      }
       return null;
     }
+
+    const result = this.deserializePayload<T>(raw, filePath);
+    if (result) return result;
+
+    // Deserialization failed — attempt repair (Layer 1).
+    // If the repair rewrites the file, re-read it once; otherwise treat it as unrecoverable.
+    try {
+      const repair = repairFile(filePath, this.quarantineDir);
+      if (repair.status === 'repaired') {
+        logger.info('File repaired during load', { path: filePath, repairs: repair.repairs });
+        const reRaw = await fs.promises.readFile(filePath, 'utf-8');
+        return this.deserializePayload<T>(reRaw, filePath);
+      }
+
+      logger.warn('Session file unrecoverable', { path: filePath, status: repair.status });
+    } catch (repairError) {
+      logger.error('File repair itself failed', repairError instanceof Error ? repairError : undefined, {
+        path: filePath,
+      });
+    }
+
+    return null;
   }
 
   private serializePayload(data: unknown): string {
@@ -763,9 +837,20 @@ export class SessionContinuityManager extends EventEmitter {
     return JSON.stringify({ encrypted: false, data: json });
   }
 
-  private deserializePayload<T>(raw: string): T | null {
+  private deserializePayload<T>(raw: string, filePath?: string): T | null {
+    let parsed: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch (error) {
+      logger.error('Session file contains invalid JSON', error instanceof Error ? error : undefined, {
+        filePath,
+        rawLength: raw.length,
+        rawPreview: raw.substring(0, 100),
+      });
+      return null;
+    }
+
+    try {
       if (
         parsed &&
         typeof parsed === 'object' &&
@@ -792,7 +877,11 @@ export class SessionContinuityManager extends EventEmitter {
       // Fallback to legacy plain JSON
       return parsed as unknown as T;
     } catch (error) {
-      logger.error('Failed to decrypt continuity payload', error instanceof Error ? error : undefined);
+      logger.error('Failed to decrypt/parse session payload', error instanceof Error ? error : undefined, {
+        filePath,
+        encrypted: parsed['encrypted'],
+        dataType: typeof parsed['data'],
+      });
       return null;
     }
   }

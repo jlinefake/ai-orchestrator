@@ -3,6 +3,7 @@
  */
 
 import type { AgentMode } from '../../../../../shared/types/agent.types';
+import type { HistoryRestoreMode } from '../../../../../shared/types/history.types';
 import type { FileAttachment, ThinkingContent } from '../../../../../shared/types/instance.types';
 
 // ============================================
@@ -66,6 +67,16 @@ export interface Instance {
   yoloMode: boolean;
   currentModel?: string; // Current model being used
   outputBuffer: OutputMessage[];
+  /** How this instance was restored from history, if applicable */
+  restoreMode?: HistoryRestoreMode;
+  /** Accumulated diff stats from file content snapshots */
+  diffStats?: {
+    totalAdded: number;
+    totalDeleted: number;
+    files: Record<string, { path: string; status: 'added' | 'modified' | 'deleted'; added: number; deleted: number }>;
+  };
+  /** True when instance completed work (busy→idle) and user hasn't viewed it yet */
+  hasUnreadCompletion?: boolean;
 }
 
 // ============================================

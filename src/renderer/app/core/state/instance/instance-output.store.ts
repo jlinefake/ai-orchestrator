@@ -131,6 +131,34 @@ export class InstanceOutputStore {
   }
 
   /**
+   * Prepend older messages loaded from disk storage to the front of the buffer.
+   * Used by scroll-to-load-more to show conversation history.
+   */
+  prependOlderMessages(instanceId: string, olderMessages: OutputMessage[]): void {
+    if (olderMessages.length === 0) return;
+
+    this.stateService.state.update((current) => {
+      const newMap = new Map(current.instances);
+      const instance = newMap.get(instanceId);
+
+      if (instance) {
+        // Deduplicate: filter out any messages that already exist in the current buffer
+        const existingIds = new Set(instance.outputBuffer.map(m => m.id));
+        const uniqueOlder = olderMessages.filter(m => !existingIds.has(m.id));
+
+        if (uniqueOlder.length > 0) {
+          newMap.set(instanceId, {
+            ...instance,
+            outputBuffer: [...uniqueOlder, ...instance.outputBuffer],
+          });
+        }
+      }
+
+      return { ...current, instances: newMap };
+    });
+  }
+
+  /**
    * Clean up timers for an instance (call on remove/destroy)
    */
   cleanupInstance(instanceId: string): void {

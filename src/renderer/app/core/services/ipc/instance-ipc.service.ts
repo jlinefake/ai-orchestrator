@@ -235,6 +235,21 @@ export class InstanceIpcService {
   }
 
   // ============================================
+  // Output History
+  // ============================================
+
+  /**
+   * Load older messages from disk storage for an instance
+   */
+  async loadOlderMessages(
+    instanceId: string,
+    options?: { beforeChunk?: number; limit?: number }
+  ): Promise<IpcResponse> {
+    if (!this.api) return { success: false, error: { message: 'Not in Electron' } };
+    return this.api.loadOlderMessages({ instanceId, ...options });
+  }
+
+  // ============================================
   // Context Compaction
   // ============================================
 

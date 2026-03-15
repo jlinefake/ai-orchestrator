@@ -27,6 +27,7 @@ import {
 import { CopilotModelSelectorComponent } from '../providers/copilot-model-selector.component';
 import { ProviderStateService } from '../../core/services/provider-state.service';
 import { NewSessionDraftService } from '../../core/services/new-session-draft.service';
+import { SettingsStore } from '../../core/state/settings.store';
 import type { CommandTemplate } from '../../../../shared/types/command.types';
 import type {
   InstanceProvider,
@@ -95,7 +96,6 @@ import type {
       @if (isDraftComposer()) {
         <div class="composer-toolbar draft-mode">
           <div class="composer-defaults">
-            <span class="toolbar-label">Session defaults</span>
             <div class="default-controls">
               <app-provider-selector
                 [provider]="selectedProvider()"
@@ -107,6 +107,15 @@ import type {
                   (modelSelected)="onModelSelected($event)"
                 />
               }
+              <button
+                class="yolo-toggle"
+                [class.active]="effectiveYoloMode()"
+                (click)="onToggleYoloMode()"
+                [title]="effectiveYoloMode() ? 'YOLO mode ON — auto-approve all actions' : 'YOLO mode OFF — will prompt for approvals'"
+              >
+                <span class="yolo-icon">{{ effectiveYoloMode() ? '⚡' : '🛡️' }}</span>
+                <span class="yolo-label">YOLO {{ effectiveYoloMode() ? 'ON' : 'OFF' }}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -176,6 +185,8 @@ import type {
               <span class="hint hint-respawning">Resuming session...</span>
             } @else if (isBusy()) {
               <span class="hint hint-interrupt">Press Esc to interrupt</span>
+            } @else if (isReplayFallback()) {
+              <span class="hint hint-recovery">Context not restored — re-summarize to continue</span>
             } @else {
               <span class="hint">Type / for commands, Cmd+K for palette</span>
             }
@@ -253,7 +264,7 @@ import type {
     }
 
     .composer-toolbar.draft-mode {
-      justify-content: flex-end;
+      justify-content: flex-start;
     }
 
     .composer-defaults {
@@ -262,33 +273,53 @@ import type {
       gap: 6px;
     }
 
-    .composer-defaults {
-      align-items: flex-end;
-      margin-left: auto;
-    }
-
-    .composer-toolbar.draft-mode .composer-defaults {
-      margin-left: 0;
-    }
-
-    .toolbar-label {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
     .default-controls {
       display: flex;
       align-items: flex-start;
-      justify-content: flex-end;
       gap: var(--spacing-sm);
       flex-wrap: wrap;
     }
 
     app-copilot-model-selector {
       width: min(320px, 100%);
+    }
+
+    .yolo-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      text-transform: uppercase;
+
+      &:hover {
+        border-color: rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      &.active {
+        border-color: rgba(var(--primary-rgb), 0.4);
+        background: rgba(var(--primary-rgb), 0.1);
+        color: var(--primary-color);
+      }
+    }
+
+    .yolo-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .yolo-label {
+      line-height: 1;
     }
 
     /* Pending Files - Attachment preview area */
@@ -650,6 +681,11 @@ import type {
       animation: pulse 2s ease-in-out infinite;
     }
 
+    .hint-recovery {
+      color: rgba(245, 158, 11, 0.7);
+      font-weight: 600;
+    }
+
     /* Queue Section - Message queue display */
     .queue-section {
       margin-top: var(--spacing-sm);
@@ -829,6 +865,7 @@ export class InputPanelComponent implements OnDestroy {
   private perf = inject(PerfInstrumentationService);
   private providerState = inject(ProviderStateService);
   private newSessionDraft = inject(NewSessionDraftService);
+  private settingsStore = inject(SettingsStore);
   private filePreviewUrls = new Map<File, string>();
   private textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('textareaRef');
 
@@ -845,6 +882,7 @@ export class InputPanelComponent implements OnDestroy {
   instanceStatus = input<InstanceStatus>('idle');
   provider = input<InstanceProvider>('claude');
   currentModel = input<string | undefined>(undefined);
+  isReplayFallback = input<boolean>(false);
 
   // Computed preview data for pending files
   pendingFilePreviews = computed(() => {
@@ -908,6 +946,12 @@ export class InputPanelComponent implements OnDestroy {
       ? (this.newSessionDraft.model() ?? this.providerState.selectedModel())
       : this.providerState.selectedModel()
   );
+
+  /** Effective YOLO mode: draft override ?? settings default */
+  effectiveYoloMode = computed(() => {
+    const draftValue = this.newSessionDraft.yoloMode();
+    return draftValue ?? this.settingsStore.defaultYoloMode();
+  });
 
   // Ghost text suggestion state
   ghostSuggestion = signal<string | null>(null);
@@ -981,6 +1025,7 @@ export class InputPanelComponent implements OnDestroy {
     effect(() => {
       // Track these signals to re-run when they change
       this.outputMessages();
+      this.isReplayFallback();
       const status = this.instanceStatus();
       const currentText = this.message();
 
@@ -1165,10 +1210,7 @@ export class InputPanelComponent implements OnDestroy {
     this.sendMessage.emit(text);
     this.message.set('');
     this.showCommandSuggestions.set(false);
-
-    if (!this.isDraftComposer()) {
-      this.clearComposerDraft();
-    }
+    this.clearComposerDraft();
 
     // Reset textarea height
     const textarea = this.textareaRef()?.nativeElement;
@@ -1195,6 +1237,7 @@ export class InputPanelComponent implements OnDestroy {
       status: this.instanceStatus(),
       hasFiles: this.pendingFiles().length > 0,
       currentText: this.message(),
+      isReplayFallback: this.isReplayFallback(),
     });
     this.ghostSuggestion.set(suggestion);
   }
@@ -1284,6 +1327,10 @@ export class InputPanelComponent implements OnDestroy {
 
   onCancelQueuedMessage(index: number): void {
     this.cancelQueuedMessage.emit(index);
+  }
+
+  onToggleYoloMode(): void {
+    this.newSessionDraft.setYoloMode(!this.effectiveYoloMode());
   }
 
   onProviderSelected(provider: ProviderType): void {

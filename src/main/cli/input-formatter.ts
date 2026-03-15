@@ -40,13 +40,20 @@ export class InputFormatter {
     // Build content blocks array (Anthropic API multimodal format)
     const contentBlocks: ContentBlock[] = [];
 
-    // Add text content
-    if (message) {
+    // Add text content — must be non-empty to avoid API 400 on session --resume.
+    // An empty user message stored in CLI session history will cause
+    // "user messages must have non-empty content" when the session is replayed.
+    const hasAttachments = attachments && attachments.length > 0;
+    if (message && message.trim()) {
       contentBlocks.push({ type: 'text', text: message });
+    } else if (!hasAttachments) {
+      logger.warn('Blocked attempt to send empty message to CLI — no text and no attachments');
+      throw new Error('Cannot send empty message to CLI: message and attachments are both empty');
     }
+    // When message is empty but attachments exist, the image blocks carry the content
 
     // Add image attachments as inline base64 content blocks
-    if (attachments && attachments.length > 0) {
+    if (hasAttachments) {
       for (const att of attachments) {
         if (att.type.startsWith('image/')) {
           contentBlocks.push(this.formatImageBlock(att));
@@ -55,14 +62,17 @@ export class InputFormatter {
       }
     }
 
-    // Claude CLI stream-json input format
+    // Claude CLI stream-json input format.
+    // Use simple string content for text-only messages; array for multimodal.
+    const textContent = contentBlocks.length === 1 && contentBlocks[0].type === 'text'
+      ? (contentBlocks[0] as TextBlock).text  // Use the block's text, not the raw message arg
+      : contentBlocks;
+
     const inputMessage = {
       type: 'user',
       message: {
         role: 'user',
-        content: contentBlocks.length === 1 && contentBlocks[0].type === 'text'
-          ? message  // Simple string for text-only messages
-          : contentBlocks,  // Array of content blocks for multimodal
+        content: textContent,
       },
     };
 

@@ -31,6 +31,9 @@ const IPC_CHANNELS = {
   INSTANCE_OUTPUT: 'instance:output',
   INSTANCE_BATCH_UPDATE: 'instance:batch-update',
 
+  // Output history
+  INSTANCE_LOAD_OLDER_MESSAGES: 'instance:load-older-messages',
+
   // Context compaction
   INSTANCE_COMPACT: 'instance:compact',
   INSTANCE_COMPACT_STATUS: 'instance:compact-status',
@@ -81,6 +84,10 @@ const IPC_CHANNELS = {
   FILE_READ_DIR: 'file:read-dir',
   FILE_GET_STATS: 'file:get-stats',
   FILE_OPEN_PATH: 'file:open-path',
+
+  // Image operations
+  IMAGE_COPY_TO_CLIPBOARD: 'image:copy-to-clipboard',
+  IMAGE_CONTEXT_MENU: 'image:context-menu',
 
   // App operations
   APP_OPEN_DOCS: 'app:open-docs',
@@ -758,6 +765,10 @@ const electronAPI = {
   /**
    * Compact context for an instance (manual trigger)
    */
+  loadOlderMessages: (payload: { instanceId: string; beforeChunk?: number; limit?: number }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_LOAD_OLDER_MESSAGES, payload);
+  },
+
   compactInstance: (payload: { instanceId: string }): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.INSTANCE_COMPACT, payload);
   },
@@ -1188,6 +1199,29 @@ const electronAPI = {
    */
   openPath: (path: string): Promise<IpcResponse> => {
     return ipcRenderer.invoke(IPC_CHANNELS.FILE_OPEN_PATH, { path });
+  },
+
+  // ============================================
+  // Image Operations
+  // ============================================
+
+  /**
+   * Copy an image (base64 data URL) to the system clipboard as a native image
+   */
+  imageCopyToClipboard: (payload: {
+    dataUrl: string;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.IMAGE_COPY_TO_CLIPBOARD, payload);
+  },
+
+  /**
+   * Show a native context menu for an image (Copy Image, Save Image As...)
+   */
+  imageContextMenu: (payload: {
+    dataUrl: string;
+    filename: string;
+  }): Promise<IpcResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.IMAGE_CONTEXT_MENU, payload);
   },
 
   /**

@@ -276,6 +276,31 @@ export class HistoryManager {
   }
 
   /**
+   * Mark an archived native session handle as failed so future restores skip
+   * doomed native resume attempts and go straight to transcript-backed fallback.
+   */
+  async markNativeResumeFailed(entryId: string, failedAt = Date.now()): Promise<boolean> {
+    const entry = this.index.entries.find((item) => item.id === entryId);
+    if (!entry) {
+      return false;
+    }
+
+    entry.nativeResumeFailedAt = failedAt;
+    this.index.lastUpdated = Date.now();
+
+    const conversation = await this.loadConversation(entryId);
+    if (conversation) {
+      conversation.entry.nativeResumeFailedAt = failedAt;
+      await this.saveConversation(entryId, conversation);
+    }
+
+    await this.saveIndex();
+
+    logger.info('Marked history entry native resume as failed', { entryId, failedAt });
+    return true;
+  }
+
+  /**
    * Clear all history
    */
   async clearAll(): Promise<void> {

@@ -928,7 +928,7 @@ interface RailChangeSummary {
     }
 
     .project-items {
-      padding: 0 0 6px;
+      padding: 6px 0 6px;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -944,7 +944,6 @@ interface RailChangeSummary {
       display: flex;
       flex-direction: column;
       gap: 1px;
-      padding: 0 0 0 28px;
     }
 
     .project-history-items.with-divider {
@@ -1803,6 +1802,10 @@ export class InstanceListComponent {
             result.restoredMessages as OutputMessage[]
           );
         }
+        // Preserve how the session was restored so the UI can adapt
+        if (result.restoreMode) {
+          this.store.setInstanceRestoreMode(result.instanceId, result.restoreMode);
+        }
         this.store.setSelectedInstance(result.instanceId);
       } else if (result.error) {
         console.error('Failed to restore history entry:', result.error);
@@ -2421,7 +2424,12 @@ export class InstanceListComponent {
     matchingHistoryEntry?: ConversationHistoryEntry
   ): string {
     if (matchingHistoryEntry) {
-      return getConversationHistoryTitle(matchingHistoryEntry);
+      // If the user has explicitly renamed the instance, prefer their name.
+      const historyTitle = getConversationHistoryTitle(matchingHistoryEntry);
+      if (instance.displayName !== historyTitle) {
+        return instance.displayName;
+      }
+      return historyTitle;
     }
 
     return instance.displayName;

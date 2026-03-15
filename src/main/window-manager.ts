@@ -2,7 +2,7 @@
  * Window Manager - Creates and manages Electron windows
  */
 
-import { app, BrowserWindow, screen, Menu, Notification, shell } from 'electron';
+import { app, BrowserWindow, screen, Menu, Notification, shell, clipboard, nativeImage } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '../shared/types/ipc.types';
 
@@ -84,6 +84,41 @@ export class WindowManager {
     // Handle window closed
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
+    });
+
+    // Show context menu on right-click (Electron doesn't show one by default)
+    this.mainWindow.webContents.on('context-menu', (_event, params) => {
+      const menuItems: Electron.MenuItemConstructorOptions[] = [];
+
+      if (params.mediaType === 'image' && params.srcURL) {
+        menuItems.push({
+          label: 'Copy Image',
+          click: () => {
+            const image = nativeImage.createFromDataURL(params.srcURL);
+            clipboard.writeImage(image);
+          }
+        });
+      }
+
+      if (params.selectionText) {
+        menuItems.push(
+          { role: 'copy' },
+        );
+      }
+
+      if (params.isEditable) {
+        menuItems.push(
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        );
+      }
+
+      if (menuItems.length > 0) {
+        const contextMenu = Menu.buildFromTemplate(menuItems);
+        contextMenu.popup();
+      }
     });
 
     // Prevent navigation to external URLs
