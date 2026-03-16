@@ -80,6 +80,9 @@ export class InstanceCommunicationManager extends EventEmitter {
   private pendingContinuityPreambles = new Map<string, string>(); // Continuity queued for next input
   private pendingContextWarnings = new Map<string, string>(); // Warnings queued for next input
 
+  // Tool result deduplication — tracks seen tool_use_ids per instance
+  private seenToolResultIds = new Map<string, Set<string>>();
+
   // Repeated error suppression
   private lastErrorContent = new Map<string, { content: string; count: number }>();
 
@@ -205,6 +208,11 @@ export class InstanceCommunicationManager extends EventEmitter {
     this.pendingContinuityPreambles.delete(instanceId);
     this.pendingContextWarnings.delete(instanceId);
     this.lastErrorContent.delete(instanceId);
+    this.seenToolResultIds.delete(instanceId);
+  }
+
+  cleanupToolResultDedup(instanceId: string): void {
+    this.seenToolResultIds.delete(instanceId);
   }
 
   queueContinuityPreamble(instanceId: string, preamble: string): void {
@@ -974,6 +982,23 @@ export class InstanceCommunicationManager extends EventEmitter {
     } else {
       // Non-error message resets the repeated error tracker
       this.lastErrorContent.delete(instance.id);
+    }
+
+    // Tool result deduplication — skip duplicate tool_results by tool_use_id
+    if (message.type === 'tool_result' && message.metadata) {
+      const toolUseId = message.metadata['tool_use_id'] as string | undefined;
+      if (toolUseId) {
+        let seen = this.seenToolResultIds.get(instance.id);
+        if (!seen) {
+          seen = new Set();
+          this.seenToolResultIds.set(instance.id, seen);
+        }
+        if (seen.has(toolUseId)) {
+          logger.debug('Skipped duplicate tool_result', { instanceId: instance.id, toolUseId });
+          return;
+        }
+        seen.add(toolUseId);
+      }
     }
 
     const isStreaming = message.metadata && 'streaming' in message.metadata && message.metadata['streaming'] === true;

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliAdapter } from '../cli/adapters/adapter-factory';
-import type { Instance } from '../../shared/types/instance.types';
+import type { Instance, OutputMessage } from '../../shared/types/instance.types';
 import type { SessionDiffTracker } from './session-diff-tracker';
 
 vi.mock('../core/config/settings-manager', () => ({
@@ -92,6 +92,21 @@ function createInstance(status: Instance['status'] = 'idle'): Instance {
     requestCount: 0,
     errorCount: 0,
     restartCount: 0,
+  };
+}
+
+let msgCounter = 0;
+function createMessage(
+  type: OutputMessage['type'],
+  content: string,
+  options: { metadata?: Record<string, unknown> } = {}
+): OutputMessage {
+  return {
+    id: `msg-${++msgCounter}`,
+    timestamp: Date.now(),
+    type,
+    content,
+    metadata: options.metadata,
   };
 }
 
@@ -233,5 +248,72 @@ describe('InstanceCommunicationManager', () => {
 
     expect(instance.diffStats).toEqual(diffStats);
     expect(queueUpdate).toHaveBeenCalledWith(instance.id, 'idle', instance.contextUsage, diffStats);
+  });
+});
+
+describe('tool result deduplication', () => {
+  let comm: InstanceCommunicationManager;
+
+  beforeEach(() => {
+    comm = new InstanceCommunicationManager({
+      getInstance: (id) => (id === 'instance-1' ? createInstance() : undefined),
+      getAdapter: () => undefined,
+      setAdapter: vi.fn(),
+      deleteAdapter: vi.fn(),
+      queueUpdate: vi.fn(),
+      processOrchestrationOutput: vi.fn(),
+      onInterruptedExit: vi.fn().mockResolvedValue(undefined),
+      ingestToRLM: vi.fn(),
+      ingestToUnifiedMemory: vi.fn(),
+    });
+  });
+
+  it('skips duplicate tool_result with same tool_use_id', () => {
+    const instance = createInstance();
+    const toolUseId = 'tool-use-123';
+
+    const first = createMessage('tool_result', 'result content', {
+      metadata: { tool_use_id: toolUseId, is_error: false },
+    });
+    const duplicate = createMessage('tool_result', 'result content', {
+      metadata: { tool_use_id: toolUseId, is_error: false },
+    });
+
+    comm.addToOutputBuffer(instance, first);
+    comm.addToOutputBuffer(instance, duplicate);
+
+    const toolResults = instance.outputBuffer.filter(m => m.type === 'tool_result');
+    expect(toolResults).toHaveLength(1);
+  });
+
+  it('allows tool_result without tool_use_id', () => {
+    const instance = createInstance();
+
+    const msg = createMessage('tool_result', 'system result', {
+      metadata: {},
+    });
+
+    comm.addToOutputBuffer(instance, msg);
+    comm.addToOutputBuffer(instance, { ...msg, id: 'different-id' });
+
+    const toolResults = instance.outputBuffer.filter(m => m.type === 'tool_result');
+    expect(toolResults).toHaveLength(2);
+  });
+
+  it('allows different tool_use_ids', () => {
+    const instance = createInstance();
+
+    const msg1 = createMessage('tool_result', 'result 1', {
+      metadata: { tool_use_id: 'id-1', is_error: false },
+    });
+    const msg2 = createMessage('tool_result', 'result 2', {
+      metadata: { tool_use_id: 'id-2', is_error: false },
+    });
+
+    comm.addToOutputBuffer(instance, msg1);
+    comm.addToOutputBuffer(instance, msg2);
+
+    const toolResults = instance.outputBuffer.filter(m => m.type === 'tool_result');
+    expect(toolResults).toHaveLength(2);
   });
 });
