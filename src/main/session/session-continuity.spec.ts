@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ContinuityConfig,
   SessionState,
+  SessionSnapshot,
   SessionContinuityManager,
 } from './session-continuity';
 
@@ -42,11 +43,20 @@ vi.mock('../core/config/settings-manager', () => ({
 
 import { SessionContinuityManager as ImportedSessionContinuityManager } from './session-continuity';
 
-type TestableSessionContinuityManager = SessionContinuityManager & {
+/** Cast-target for accessing private/protected members in tests. */
+interface TestableSessionContinuityManager {
   readyPromise: Promise<void>;
   readPayload<T>(filePath: string): Promise<T | null>;
   deserializePayload<T>(raw: string, filePath?: string): T | null;
-};
+  getResumableSessions(): Promise<SessionState[]>;
+  resumeSession(instanceId: string): Promise<SessionState | null>;
+  importSession(data: { state: SessionState; snapshots?: unknown[] }, newInstanceId?: string): Promise<string>;
+  createSnapshot(instanceId: string, name?: string, description?: string, trigger?: string): Promise<SessionSnapshot | null>;
+  listSnapshots(instanceId?: string): SessionSnapshot[];
+  updateState(instanceId: string, updates: Partial<SessionState>): Promise<void>;
+  markNativeResumeFailed(instanceId: string, errorCode?: number): Promise<void>;
+  shutdown(): void;
+}
 
 function makeState(instanceId: string): SessionState {
   return {
@@ -231,5 +241,80 @@ describe('SessionContinuityManager logging', () => {
         dataType: 'string',
       })
     );
+  });
+
+  it('resumes a saved state by history thread id and native session id', async () => {
+    const stateDir = path.join(mockState.userDataDir, 'session-continuity', 'states');
+    await fs.promises.mkdir(stateDir, { recursive: true });
+
+    const state = makeState('instance-thread-aware');
+    state.historyThreadId = 'thread-123';
+    state.sessionId = 'native-session-123';
+
+    await fs.promises.writeFile(
+      path.join(stateDir, 'instance-thread-aware.json'),
+      createEnvelope(state)
+    );
+
+    const manager = createManager();
+    await manager.readyPromise;
+
+    const byThread = await manager.resumeSession('thread-123');
+    const byNativeSession = await manager.resumeSession('native-session-123');
+
+    expect(byThread?.instanceId).toBe('instance-thread-aware');
+    expect(byThread?.historyThreadId).toBe('thread-123');
+    expect(byNativeSession?.instanceId).toBe('instance-thread-aware');
+    expect(byNativeSession?.sessionId).toBe('native-session-123');
+  });
+
+  it('stores native session metadata on snapshots while keeping lookups thread-aware', async () => {
+    const manager = createManager();
+    await manager.readyPromise;
+
+    const state = makeState('instance-snapshot');
+    state.historyThreadId = 'thread-snapshot';
+    state.sessionId = 'native-session-snapshot';
+
+    await manager.importSession({ state });
+    const snapshot = await manager.createSnapshot('instance-snapshot', 'checkpoint');
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.instanceId).toBe('instance-snapshot');
+    expect(snapshot?.historyThreadId).toBe('thread-snapshot');
+    expect(snapshot?.sessionId).toBe('native-session-snapshot');
+
+    const byInstance = manager.listSnapshots('instance-snapshot');
+    const byThread = manager.listSnapshots('thread-snapshot');
+    const byNativeSession = manager.listSnapshots('native-session-snapshot');
+
+    expect(byInstance).toHaveLength(1);
+    expect(byThread).toHaveLength(1);
+    expect(byNativeSession).toHaveLength(1);
+    expect(byThread[0]?.instanceId).toBe('instance-snapshot');
+    expect(byNativeSession[0]?.sessionId).toBe('native-session-snapshot');
+  });
+
+  it('marks native resume failures on thread-aware session state and clears them on new native session ids', async () => {
+    const manager = createManager();
+    await manager.readyPromise;
+
+    const state = makeState('instance-failure');
+    state.historyThreadId = 'thread-failure';
+    state.sessionId = 'native-session-old';
+
+    await manager.importSession({ state });
+    await manager.markNativeResumeFailed('thread-failure', 4242);
+
+    const failedState = await manager.resumeSession('thread-failure');
+    expect(failedState?.nativeResumeFailedAt).toBe(4242);
+
+    await manager.updateState('instance-failure', {
+      sessionId: 'native-session-new',
+    });
+
+    const recoveredState = await manager.resumeSession('thread-failure');
+    expect(recoveredState?.sessionId).toBe('native-session-new');
+    expect(recoveredState?.nativeResumeFailedAt).toBeNull();
   });
 });

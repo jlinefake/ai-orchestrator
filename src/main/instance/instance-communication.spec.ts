@@ -119,7 +119,11 @@ describe('InstanceCommunicationManager', () => {
   let manager: InstanceCommunicationManager;
 
   async function flushOutputHandlers(): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Async output handlers may need multiple event-loop ticks to complete,
+    // especially under parallel test load where hooks and other async ops yield.
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
   }
 
   beforeEach(() => {

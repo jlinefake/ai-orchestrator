@@ -3,6 +3,7 @@ import { SnapshotIndex, SnapshotMeta } from './snapshot-index';
 
 function makeMeta(overrides: Partial<SnapshotMeta> & { id: string; sessionId: string }): SnapshotMeta {
   return {
+    instanceId: overrides.sessionId,
     timestamp: Date.now(),
     messageCount: 10,
     schemaVersion: 1,
