@@ -42,6 +42,7 @@ export interface CommunicationDependencies {
   compactContext?: (instanceId: string) => Promise<void>;
   onOutput?: (instanceId: string) => void;
   onToolStateChange?: (instanceId: string, state: 'generating' | 'tool_executing' | 'idle') => void;
+  createSnapshot?: (instanceId: string, name: string, description: string | undefined, trigger: 'checkpoint' | 'auto') => void;
 }
 
 /**
@@ -84,6 +85,10 @@ export class InstanceCommunicationManager extends EventEmitter {
 
   // Tool result deduplication — tracks seen tool_use_ids per instance
   private seenToolResultIds = new Map<string, Set<string>>();
+
+  // Rewind point tracking — counts autonomous tool completions between user inputs
+  private autonomousToolCounts = new Map<string, number>();
+  private softCheckpointCounts = new Map<string, number>();
 
   // Repeated error suppression
   private lastErrorContent = new Map<string, { content: string; count: number }>();
@@ -211,6 +216,8 @@ export class InstanceCommunicationManager extends EventEmitter {
     this.pendingContextWarnings.delete(instanceId);
     this.lastErrorContent.delete(instanceId);
     this.seenToolResultIds.delete(instanceId);
+    this.autonomousToolCounts.delete(instanceId);
+    this.softCheckpointCounts.delete(instanceId);
   }
 
   cleanupToolResultDedup(instanceId: string): void {
@@ -308,6 +315,18 @@ export class InstanceCommunicationManager extends EventEmitter {
     }
 
     const finalMessage = finalContextBlock ? `${finalContextBlock}\n\n${message}` : message;
+
+    // Hard checkpoint: snapshot before user message
+    if (this.deps.createSnapshot) {
+      const name = `Before: ${message.slice(0, 50)}`;
+      try {
+        this.deps.createSnapshot(instanceId, name, undefined, 'checkpoint');
+      } catch (err) {
+        logger.debug('Failed to create checkpoint snapshot', { instanceId, error: String(err) });
+      }
+    }
+    // Reset autonomous tool counter on user input
+    this.autonomousToolCounts.set(instanceId, 0);
 
     logger.info('Sending message to adapter');
     await adapter.sendInput(finalMessage, attachments);
@@ -1006,6 +1025,32 @@ export class InstanceCommunicationManager extends EventEmitter {
           return;
         }
         seen.add(toolUseId);
+      }
+    }
+
+    // Soft checkpoint: track autonomous tool completions
+    if (message.type === 'tool_result' && this.deps.createSnapshot) {
+      const count = (this.autonomousToolCounts.get(instance.id) ?? 0) + 1;
+      this.autonomousToolCounts.set(instance.id, count);
+
+      if (count > 5) {
+        const softCount = this.softCheckpointCounts.get(instance.id) ?? 0;
+        if (softCount < 10) {
+          const toolName = (message.metadata?.['name'] as string) || 'unknown';
+          try {
+            this.deps.createSnapshot(
+              instance.id,
+              `Auto: after ${toolName} (autonomous run, tool #${count})`,
+              undefined,
+              'auto'
+            );
+            this.softCheckpointCounts.set(instance.id, softCount + 1);
+          } catch (err) {
+            logger.debug('Failed to create soft checkpoint', { instanceId: instance.id, error: String(err) });
+          }
+          // Reset counter after creating checkpoint (per spec)
+          this.autonomousToolCounts.set(instance.id, 0);
+        }
       }
     }
 

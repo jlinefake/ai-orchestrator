@@ -43,6 +43,7 @@ import { InstanceOrchestrationManager } from './instance-orchestration';
 import { InstancePersistenceManager } from './instance-persistence';
 import { WarmStartManager } from './warm-start-manager';
 import { StuckProcessDetector } from './stuck-process-detector';
+import { getSessionContinuityManager } from '../session/session-continuity';
 import { getPermissionManager, type PermissionRequest, type PermissionScope } from '../security/permission-manager';
 import * as path from 'path';
 import type { UserActionRequest } from '../orchestration/orchestration-handler';
@@ -119,6 +120,13 @@ export class InstanceManager extends EventEmitter {
       },
       onOutput: (id) => this.stuckDetector.recordOutput(id),
       onToolStateChange: (id, state) => this.stuckDetector.updateState(id, state),
+      createSnapshot: (id, name, desc, trigger) => {
+        try {
+          getSessionContinuityManager().createSnapshot(id, name, desc, trigger);
+        } catch {
+          // Non-critical — don't fail the operation
+        }
+      },
     });
 
     // Orchestration manager needs dependencies

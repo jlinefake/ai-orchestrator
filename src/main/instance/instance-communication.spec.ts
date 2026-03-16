@@ -35,6 +35,8 @@ vi.mock('../core/error-recovery', () => ({
 import { InstanceCommunicationManager } from './instance-communication';
 
 class FakeAdapter extends EventEmitter {
+  sendInput = vi.fn().mockResolvedValue(undefined);
+
   constructor(private readonly adapterName: string) {
     super();
   }
@@ -315,5 +317,85 @@ describe('tool result deduplication', () => {
 
     const toolResults = instance.outputBuffer.filter(m => m.type === 'tool_result');
     expect(toolResults).toHaveLength(2);
+  });
+});
+
+describe('conversation-aware rewind points', () => {
+  let instance: Instance;
+  let adapters: Map<string, CliAdapter>;
+  let snapshotSpy: ReturnType<typeof vi.fn>;
+  let comm: InstanceCommunicationManager;
+
+  beforeEach(() => {
+    instance = createInstance();
+    adapters = new Map();
+    snapshotSpy = vi.fn();
+
+    comm = new InstanceCommunicationManager({
+      getInstance: (id) => (id === instance.id ? instance : undefined),
+      getAdapter: (id) => adapters.get(id),
+      setAdapter: (id, adapter) => { adapters.set(id, adapter); },
+      deleteAdapter: (id) => adapters.delete(id),
+      queueUpdate: vi.fn(),
+      processOrchestrationOutput: vi.fn(),
+      onInterruptedExit: vi.fn().mockResolvedValue(undefined),
+      ingestToRLM: vi.fn(),
+      ingestToUnifiedMemory: vi.fn(),
+      createSnapshot: snapshotSpy,
+    });
+  });
+
+  it('hard checkpoint on sendInput', async () => {
+    const adapter = new FakeAdapter('claude-cli') as unknown as CliAdapter;
+    adapters.set(instance.id, adapter);
+
+    await comm.sendInput(instance.id, 'fix the bug');
+
+    expect(snapshotSpy).toHaveBeenCalledTimes(1);
+    const [calledId, calledName, calledDesc, calledTrigger] = snapshotSpy.mock.calls[0];
+    expect(calledId).toBe(instance.id);
+    expect(calledName).toMatch(/^Before:/);
+    expect(calledDesc).toBeUndefined();
+    expect(calledTrigger).toBe('checkpoint');
+  });
+
+  it('soft checkpoint after 6+ autonomous tool results', () => {
+    // Add 7 tool_result messages without any user input
+    for (let i = 0; i < 7; i++) {
+      comm.addToOutputBuffer(instance, createMessage('tool_result', `result ${i}`, {
+        metadata: { tool_use_id: `id-${i}`, name: 'Read' },
+      }));
+    }
+
+    // Checkpoint fires at count 6 (count > 5), counter resets, count 7 won't re-trigger
+    expect(snapshotSpy).toHaveBeenCalledTimes(1);
+    const [, , , calledTrigger] = snapshotSpy.mock.calls[0];
+    expect(calledTrigger).toBe('auto');
+  });
+
+  it('counter resets on user input', async () => {
+    const adapter = new FakeAdapter('claude-cli') as unknown as CliAdapter;
+    adapters.set(instance.id, adapter);
+
+    // Add 4 tool results (below threshold of 5)
+    for (let i = 0; i < 4; i++) {
+      comm.addToOutputBuffer(instance, createMessage('tool_result', `result ${i}`, {
+        metadata: { tool_use_id: `pre-${i}`, name: 'Read' },
+      }));
+    }
+
+    // User input resets the counter
+    await comm.sendInput(instance.id, 'continue please');
+    snapshotSpy.mockClear(); // Clear the hard checkpoint call
+
+    // Add 4 more tool results — counter starts fresh, never exceeds 5
+    for (let i = 0; i < 4; i++) {
+      comm.addToOutputBuffer(instance, createMessage('tool_result', `result ${i}`, {
+        metadata: { tool_use_id: `post-${i}`, name: 'Write' },
+      }));
+    }
+
+    // No soft checkpoint should have been created
+    expect(snapshotSpy).not.toHaveBeenCalled();
   });
 });
